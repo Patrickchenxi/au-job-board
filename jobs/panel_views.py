@@ -70,6 +70,9 @@ ICON_GLOBE = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" strok
 ICON_INFO = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>')
+ICON_REFRESH = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-.7 7"/></svg>')
 # 主题按钮同时放太阳和月亮，CSS 按当前生效的主题只显示一个（见 panel.css）
 ICON_THEME = ('<svg class="i-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" '
               'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
@@ -115,7 +118,9 @@ def _update_widget(lang: str, *, compact: bool = False) -> str:
         f'aria-label="{_e(T("js.update_title"))}">',
         '<div class="update-controls">',
         f'<button type="button" class="btn" id="update-start" title="{_e(T("set.update_hint"))}" disabled>{_e(T("js.update_title"))}</button>',
-        f'<a id="update-refresh" href="/" hidden>{_e(T("js.update_refresh"))}</a>',
+        f'<a id="update-refresh" class="iconbtn" href="/" '
+        f'title="{_e(T("js.update_refresh"))}" aria-label="{_e(T("js.update_refresh"))}" hidden>'
+        f'{ICON_REFRESH}</a>',
         '</div><div class="update-feedback">',
         f'<p id="update-status" role="status" aria-live="polite" aria-atomic="true">{_e(T("js.update_checking"))}</p>',
         '<p id="update-meta" class="muted"></p>',
