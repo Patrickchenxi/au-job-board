@@ -197,6 +197,7 @@ Not verified, and the documentation does not imply otherwise:
 | [Installation](docs/install.md) | Source install for a new machine |
 | [Agent-assisted installation](docs/agent-install.md) | The same steps for an AI agent |
 | [Usage guide](docs/usage.md) | Workflow, commands, local data, notes, languages |
+| [Fetch settings and updates](docs/manual-updates.md) | Read-only configuration and background updates from the panel |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |
 | [Rule profiles](docs/legacy-rule-profiles.md) | The five profiles, per-rule switches, applying a change |
 | [Eligibility snapshot](docs/eligibility-profiles.md) | The separate, read-only `eligibility` section |

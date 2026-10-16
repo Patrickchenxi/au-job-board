@@ -153,6 +153,7 @@ AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-jo
 | [安装指南](docs/install.md) | 全新机器的源码安装 |
 | [Agent 辅助安装](docs/agent-install.md) | 供 AI Agent 使用的同一套步骤 |
 | [使用指南](docs/usage.md) | 流程、命令、本地数据、备注、语言 |
+| [抓取设置与更新](docs/manual-updates.md) | 只读配置、面板后台更新、失败与并发限制（英文） |
 | [配置说明](docs/public-configuration.md) | 配置文件、路径、来源、面板设置 |
 | [规则 profile](docs/legacy-rule-profiles.md) | 五个 profile、逐条规则开关、如何让改动生效 |
 | [资格快照](docs/eligibility-profiles.md) | 独立的只读 `eligibility` 配置段 |

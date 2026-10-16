@@ -910,3 +910,160 @@ function toggleSkillEdit(btn){
 }
 
 fitLayout();   // 脚本在 body 末尾，元素已就绪，先跑一次减少首帧跳动
+
+/* Manual updates never reload the page: unsaved notes stay in the editor.
+   Only enum codes and numeric counts are displayed from runtime status. */
+let UPDATE_TIMER=null, UPDATE_REQUESTING=false, UPDATE_POLLING=false, UPDATE_STOPPED=false, UPDATE_REVISION=0;
+let UPDATE_REJECTION=null, UPDATE_LAST_STARTED=null;
+const UPDATE_TEXT_PREFIX='js.update_', UPDATE_STAGE_PREFIX='js.update_stage_', FETCH_TEXT_PREFIX='set.fetch_';
+const UPDATE_STATES=['idle','running','success','partial','error','busy','timeout','interrupted','disabled'];
+const UPDATE_CONFIG_ERRORS=['config_invalid','config_unavailable','reload_required','no_sources','demo_disabled','storage_unavailable'];
+function updateNode(tag, cls, text){
+  const node=document.createElement(tag);
+  if(cls) node.className=cls;
+  if(text!==undefined) node.textContent=text;
+  return node;
+}
+async function updateJson(url, options){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const response=await fetch(url,{...options,signal:controller.signal,cache:'no-store',credentials:'same-origin'});
+    const data=await response.json();
+    if(!data || typeof data!=='object' || Array.isArray(data)) throw new Error('invalid response');
+    // A conflicting start still returns the authoritative running/busy state.
+    if(!response.ok && !data.state) throw new Error('unavailable');
+    return data;
+  }finally{clearTimeout(timer);}
+}
+function updateTime(value){
+  if(!value) return '';
+  const date=new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(document.documentElement.lang||undefined);
+}
+function renderUpdateState(data, fromPoll=false){
+  const started=data.started_at||null;
+  if(fromPoll && UPDATE_REJECTION){
+    if(data.state!=='running' && started===UPDATE_REJECTION.priorStarted) data=UPDATE_REJECTION.data;
+    else UPDATE_REJECTION=null;
+  }
+  if(fromPoll) UPDATE_LAST_STARTED=started;
+  const button=document.getElementById('update-start');
+  const status=document.getElementById('update-status');
+  if(!button || !status) return;
+  const state=UPDATE_STATES.includes(data.state)?data.state:'disabled';
+  const stage=['fetch','details','analyze','report'].includes(data.stage)?data.stage:'wait';
+  let message=T(UPDATE_TEXT_PREFIX+state,{stage:T(UPDATE_STAGE_PREFIX+stage)});
+  if(UPDATE_CONFIG_ERRORS.includes(data.error)) message=T(UPDATE_TEXT_PREFIX+data.error);
+  status.textContent=message;
+  button.disabled=state==='running'||state==='disabled'||UPDATE_REQUESTING;
+  button.textContent=T('js.update_title');
+  button.setAttribute('aria-busy',state==='running'?'true':'false');
+  const meta=[];
+  const startedTime=updateTime(data.started_at),finished=updateTime(data.finished_at);
+  if(startedTime) meta.push(T('js.update_started',{time:startedTime}));
+  if(finished) meta.push(T('js.update_finished',{time:finished}));
+  if(data.counts && (startedTime || finished)){
+    const counts={};
+    for(const k of ['seen','inserted','updated','details_fetched']) counts[k]=Number.isSafeInteger(data.counts[k])&&data.counts[k]>=0?data.counts[k]:0;
+    meta.push(T('js.update_counts',counts));
+  }
+  const sourceNames={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
+  const failed=Array.isArray(data.failed_sources)?data.failed_sources.filter(s=>Object.hasOwn(sourceNames,s)):[];
+  if(failed.length) meta.push(T('js.update_failed_sources',{sources:failed.map(s=>sourceNames[s]).join(', ')}));
+  document.getElementById('update-meta').textContent=meta.join(' · ');
+  const refresh=document.getElementById('update-refresh');
+  refresh.hidden=!data.refresh_available;
+  // Preserve the current view, filters and open detail when the user opts in.
+  if(!document.body.classList.contains('settings')) refresh.href=location.pathname+location.search+location.hash;
+}
+function updateConnectionLost(){
+  const button=document.getElementById('update-start');
+  if(!button) return;
+  button.disabled=true;button.setAttribute('aria-busy','false');
+  document.getElementById('update-status').textContent=T('js.update_unavailable');
+}
+function scheduleUpdatePoll(delay){
+  clearTimeout(UPDATE_TIMER);
+  if(!UPDATE_STOPPED) UPDATE_TIMER=setTimeout(pollUpdateState,delay);
+}
+async function pollUpdateState(){
+  if(!document.getElementById('update-start') || UPDATE_STOPPED) return;
+  if(document.hidden){scheduleUpdatePoll(5000);return;}
+  if(UPDATE_POLLING || UPDATE_REQUESTING){scheduleUpdatePoll(1000);return;}
+  UPDATE_POLLING=true;
+  const revision=UPDATE_REVISION;
+  let delay=10000;
+  try{
+    const data=await updateJson('/api/update-state');
+    if(UPDATE_REQUESTING || revision!==UPDATE_REVISION) return;
+    renderUpdateState(data,true);
+    delay=data.state==='running'?1500:10000;
+  }catch(e){if(!UPDATE_REQUESTING && revision===UPDATE_REVISION) updateConnectionLost();}
+  finally{UPDATE_POLLING=false;scheduleUpdatePoll(delay);}
+}
+async function startJobUpdate(){
+  if(UPDATE_REQUESTING) return;
+  UPDATE_REQUESTING=true;UPDATE_REVISION++;UPDATE_REJECTION=null;clearTimeout(UPDATE_TIMER);
+  const button=document.getElementById('update-start');
+  button.disabled=true;button.setAttribute('aria-busy','true');
+  document.getElementById('update-status').textContent=T('js.update_starting');
+  try{
+    const data=await updateJson('/api/update',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(data.accepted===false && data.state!=='running'){
+      UPDATE_REJECTION={data,priorStarted:UPDATE_LAST_STARTED};
+    }
+    UPDATE_REQUESTING=false;renderUpdateState(data);
+  }catch(e){updateConnectionLost();}
+  finally{UPDATE_REQUESTING=false;scheduleUpdatePoll(1500);}
+}
+function fetchConfigRow(list,key,value){
+  const row=updateNode('div','fetch-config-row');
+  row.append(updateNode('dt','',T(FETCH_TEXT_PREFIX+key)),updateNode('dd','',value));
+  list.append(row);
+}
+async function loadUpdateConfig(){
+  const root=document.getElementById('update-config');if(!root)return;
+  try{
+    const data=await updateJson('/api/update-config');root.textContent='';
+    if(!data.ok){
+      const key=UPDATE_CONFIG_ERRORS.includes(data.error)?'js.update_'+data.error:'js.update_config_failed';
+      root.append(updateNode('p','set-hint',T(key)));
+      if(!Array.isArray(data.sources)) return;
+    }
+    if(data.changed_since_start)root.append(updateNode('p','fetch-config-notice',T('set.fetch_changed')));
+    const queries=Array.isArray(data.queries)?data.queries.filter(v=>typeof v==='string'):[];
+    const terms=updateNode('dl','fetch-config-list');
+    fetchConfigRow(terms,'queries',queries.join(' · ')||T('set.fetch_none'));root.append(terms);
+    root.append(updateNode('h3','',T('set.fetch_sources')));
+    const names={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
+    for(const source of (Array.isArray(data.sources)?data.sources:[])){
+      if(!source || !Object.hasOwn(names,source.name)) continue;
+      const card=updateNode('section','fetch-source');
+      const title=updateNode('h4','',names[source.name]);
+      title.append(updateNode('span','fetch-source-state',T(source.enabled?'set.fetch_enabled':'set.fetch_disabled')));card.append(title);
+      const fields=updateNode('dl','fetch-config-list');
+      const locations=Array.isArray(source.locations)?source.locations.filter(v=>typeof v==='string'):[];
+      fetchConfigRow(fields,'locations',locations.join(' · ')||T('set.fetch_none'));
+      for(const key of ['pages_per_query','daterange','results_wanted']){
+        if(!Object.hasOwn(source,key))continue;
+        const value=source[key];
+        fetchConfigRow(fields,key,key==='daterange'&&(value===null||value===0)?T('set.fetch_anytime'):
+          Number.isSafeInteger(value)&&value>=0?String(value):T('set.fetch_none'));
+      }
+      if(typeof source.fetch_description==='boolean')fetchConfigRow(fields,'fetch_description',T(source.fetch_description?'set.fetch_yes':'set.fetch_no'));
+      if(typeof source.country_indeed==='string')fetchConfigRow(fields,'country_indeed',source.country_indeed);
+      card.append(fields);root.append(card);
+    }
+  }catch(e){root.textContent=T('js.update_config_failed');}
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const button=document.getElementById('update-start');
+  if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
+  loadUpdateConfig();
+});
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden && document.getElementById('update-start'))pollUpdateState();
+});
+window.addEventListener('pagehide',()=>{UPDATE_STOPPED=true;clearTimeout(UPDATE_TIMER);});
+window.addEventListener('pageshow',()=>{if(UPDATE_STOPPED){UPDATE_STOPPED=false;pollUpdateState();}});

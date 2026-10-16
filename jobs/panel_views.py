@@ -107,6 +107,24 @@ def _js(value) -> str:
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
 
+def _update_widget(lang: str, *, compact: bool = False) -> str:
+    """One update controller per page; state is fetched without refreshing edits."""
+    T = lambda k: i18n.t(lang, k)  # noqa: E731
+    return "".join([
+        f'<section class="update-widget{" update-compact" if compact else ""}" '
+        f'aria-label="{_e(T("js.update_title"))}">',
+        '<div class="update-controls">',
+        f'<button type="button" class="btn" id="update-start" title="{_e(T("set.update_hint"))}" disabled>{_e(T("js.update_title"))}</button>',
+        f'<a id="update-refresh" href="/" hidden>{_e(T("js.update_refresh"))}</a>',
+        '</div><div class="update-feedback">',
+        f'<p id="update-status" role="status" aria-live="polite" aria-atomic="true">{_e(T("js.update_checking"))}</p>',
+        '<p id="update-meta" class="muted"></p>',
+        '</div>',
+        f'<noscript><p>{_e(T("js.update_nojs"))}</p></noscript>',
+        '</section>',
+    ])
+
+
 def _tag_html(kind: str, text: str, title: str | None = None) -> str:
     """kind 决定配色。薪资两种刻意拉开：
     `salary` 是我们折算出来的数字，`raw` 是雇主的原话（虚线框 + 斜体）。
@@ -772,6 +790,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span>'
         f'{run_note}</div>',
         "</div>",
+        _update_widget(lang, compact=True),
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
@@ -817,7 +836,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # 设置页
 # ---------------------------------------------------------------------------
 
-SETTINGS_SECTIONS = ("skills", "display")
+SETTINGS_SECTIONS = ("skills", "fetch", "display")
 
 _PROFILE_NAMES = ("citizen", "permanent_resident", "485", "student_visa", "custom")
 
@@ -873,6 +892,21 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<p class="set-foot">{_e(T("set.footnote"))}</p>',
         ])
         extra = {"__SKILL_TREE__": tree}
+    elif section == "fetch":
+        pane = "".join([
+            f'<h2>{_e(T("set.fetch_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.fetch_hint"))}</p>',
+            '<div id="update-config" class="fetch-config" aria-live="polite">'
+            f'<p class="muted">{_e(T("js.loading"))}</p></div>',
+            f'<p class="set-foot">{_e(T("set.fetch_readonly"))}</p>',
+            f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
+            _update_widget(lang),
+            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
+            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
+            f'<br>{_e(T("set.profile_used"))}</p>',
+        ])
+        extra = {}
     else:
         def radios(name: str, current: str, options: list[tuple[str, str, str]], fn: str) -> str:
             return '<div class="opts">' + "".join(

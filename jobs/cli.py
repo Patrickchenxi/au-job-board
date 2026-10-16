@@ -61,6 +61,8 @@ def cmd_fetch(args) -> int:
 
     config, conn = _open(args)
     queries = config.get("queries") or []
+    if getattr(args, "result_file", None):
+        config["_run_source_failures"] = {}
     if not queries:
         print("config.yaml 里没有 queries", file=sys.stderr)
         return 1
@@ -79,6 +81,8 @@ def cmd_fetch(args) -> int:
         except Exception as exc:                       # noqa: BLE001
             print(f"  [{name}] 失败: {type(exc).__name__}: {exc}")
             stats[name] = {"error": str(exc)}
+            if hasattr(args, "_run_failed_sources"):
+                args._run_failed_sources.add(name)
             continue
         inserted = updated = 0
         for job in jobs:
@@ -87,8 +91,13 @@ def cmd_fetch(args) -> int:
             updated += result == "updated"
         conn.commit()
         stats[name] = {"seen": len(jobs), "inserted": inserted, "updated": updated}
+        if hasattr(args, "_run_counts"):
+            for field in ("seen", "inserted", "updated"):
+                args._run_counts[field] += stats[name][field]
         print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
 
+    if hasattr(args, "_run_counts"):
+        args._run_failed_sources.update(config.get("_run_source_failures", {}))
     database.log_run(conn, "fetch", started, stats)
     conn.commit()
     print(f"[fetch] 完成 -> {database.counts(conn)}")
@@ -121,6 +130,9 @@ def cmd_details(args) -> int:
                 print(f"  ... 已补 {ok}/{len(pending)}", flush=True)
         conn.commit()
         stats[source] = {"queued": len(pending), "fetched": ok}
+        if hasattr(args, "_run_counts"):
+            args._run_counts["details_fetched"] += ok
+            args._run_details_incomplete |= ok < len(pending)
         print(f"  {source}: 成功 {ok}/{len(pending)}")
 
     # jobspy 来源没有独立详情步骤，提示一下未落正文的数量
@@ -678,7 +690,9 @@ def cmd_panel(args) -> int:
     if args.port:
         panel["port"] = args.port
     config["panel"] = panel
-    serve(config)
+    if args.skills:
+        config["skills_path"] = str(Path(args.skills).resolve())
+    serve(config, config_path=args.config, rules_path=args.rules, skills_path=args.skills)
     return 0
 
 
@@ -708,48 +722,82 @@ def _acquire_run_lock():
     return handle
 
 
-def cmd_run(args) -> int:
-    """全流程：fetch -> details -> analyze -> report。
+def _write_run_result(args, state, stage=None, error=None):
+    """Optional private, machine-readable progress; never contains logs or paths."""
+    target = getattr(args, "result_file", None)
+    if not target:
+        return
+    result = {
+        "state": state, "stage": stage,
+        "started_at": getattr(args, "_run_started", None),
+        "finished_at": None if state == "running" else database.utcnow(),
+        "counts": dict(getattr(args, "_run_counts", {})),
+        "failed_sources": sorted(getattr(args, "_run_failed_sources", set())),
+        "error": error,
+        "refresh_available": state in ("success", "partial") or
+                             bool(getattr(args, "_run_counts", {}).get("seen")),
+    }
+    target = Path(target)
+    temporary = target.with_name(target.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        os.chmod(temporary, 0o600)
+        json.dump(result, handle)
+    temporary.replace(target)
 
-    带并发锁和全局超时。无人值守时最怕的不是失败（失败下次会重试），而是
-    卡住或重复 —— launchd 不会并发重入同一个 job，但手动 kickstart、
-    开机残留等情况仍可能撞上，所以自己也要防一层。
-    """
+
+def cmd_run(args) -> int:
+    """Full pipeline with the shared scheduler lock and optional safe progress."""
+    args._run_started = getattr(args, "result_started_at", None) or database.utcnow()
+    args._run_counts = {"seen": 0, "inserted": 0, "updated": 0, "details_fetched": 0}
+    args._run_failed_sources = set()
+    args._run_details_incomplete = False
     lock = _acquire_run_lock()
     if lock is None:
+        _write_run_result(args, "busy", error="run_busy")
         print("[run] 已有一个 run 在执行，跳过本次（不并发）", file=sys.stderr)
         return 4
 
     limit = int(getattr(args, "timeout", None) or 0)
     if limit:
         signal.signal(signal.SIGALRM, _on_alarm)
-        # 用 setitimer 而不是 alarm：alarm 是一次性的，万一某个 except 把它
-        # 吞掉一次，之后就再也不会触发了（这正是第一版踩的坑）。
-        # 这里首次 limit 秒，之后每隔 limit 秒再来一次。
         signal.setitimer(signal.ITIMER_REAL, limit, limit)
 
-    started = database.utcnow()
+    stage = None
+    state, error = "error", "run_failed"
     try:
         for step in (cmd_fetch, cmd_details, cmd_analyze, cmd_report):
+            stage = step.__name__.removeprefix("cmd_")
+            _write_run_result(args, "running", stage)
             code = step(args)
             if code:
                 return code
+        if args._run_failed_sources:
+            state, error = "partial", "source_failed"
+        elif args._run_details_incomplete:
+            state, error = "partial", "details_incomplete"
+        else:
+            state, error = "success", None
         return 0
     except RunTimeout:
+        state, error = "timeout", "run_timeout"
         print(f"[run] 超过 {limit} 秒仍未跑完，已强制中断。"
               f"已完成的步骤均已入库，下次定时会接着跑。", file=sys.stderr)
         return 3
     finally:
         if limit:
             signal.setitimer(signal.ITIMER_REAL, 0)
-        # 记一条 run 流水，面板据此显示「上次抓取」
         try:
+            _write_run_result(args, state, stage, error)
+            # Historical run rows remain informational, not proof of success.
             _, conn = _open(args)
-            database.log_run(conn, "run", started, {"timeout": limit})
+            database.log_run(conn, "run", args._run_started,
+                             {"timeout": limit, "state": state})
             conn.commit()
             conn.close()
-        except Exception:            # noqa: BLE001
+        except Exception:  # Logging must not change historical CLI exit semantics.
             pass
+        finally:
+            lock.close()
 
 
 def main(argv=None) -> int:
@@ -823,6 +871,8 @@ def main(argv=None) -> int:
     p_run.add_argument("--timeout", type=int, default=1800,
                        help="全局超时秒数，默认 1800（0 = 不限）。"
                             "无人值守时防卡死：launchd 不会重入，卡一次就永远不再抓")
+    p_run.add_argument("--result-file", help=argparse.SUPPRESS)
+    p_run.add_argument("--result-started-at", help=argparse.SUPPRESS)
     p_run.set_defaults(func=cmd_run)
 
     p_panel = sub.add_parser("panel", help="启动本地网页面板（不联网）")
