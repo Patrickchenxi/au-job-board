@@ -4,6 +4,41 @@ This records dated verifications of AU Job Board's source installation, and what
 each does and does not show. Each entry is a historical fact about the named run
 and commit; it is not re-run when later changes are made.
 
+## v1.2 local source and Docker mock verification (2026-10-17)
+
+The development candidate was based on public `dev` / v1.1 commit `6c4a0ed`.
+A separate source environment with Python 3.12 ran the full public offline entry:
+**20 passed, 0 failed, 0 not applicable**. This includes YAML/CLI roundtrip
+semantics, conflict protection, shared execution locks, orphan-worker recovery,
+manual data preservation and the existing synthetic regressions.
+
+Docker Engine 28.3.2 on an Apple Silicon host built the Python 3.12 image as
+**linux/arm64**. `tools/test_docker.py` passed after rebuilding the final product
+layer; an independent `--no-build` run passed against that image. Every test
+runtime container used `--network none`, with source adapters replaced through a
+read-only test mount excluded from the image. Actual checks included:
+
+- Non-root runtime and absence of personal configuration, DBs and test fixtures
+  in the image.
+- Real CLI and panel subprocess pipelines using fictional jobs.
+- Settings YAML save/readback and editable mounted configuration.
+- Manual note, skill overlay, DB/WAL and task-state persistence across recreation.
+- Cross-container shared-lock rejection and stop-signal lock release.
+
+Browser verification used the normal panel with synthetic data and mock sources.
+It covered configuration preview/cancel/save, stale-form conflicts, saved versus
+analyzed WHV, A→B navigation and closing details with pending results, automatic
+list refresh, note drafts and complete settings target URLs. The empty update
+state was measured at 1280px English/light and 390px Chinese/dark: button and
+status text vertical centers differed by less than 1 CSS pixel, with no horizontal
+overflow. Display settings no longer duplicated the analysis profile.
+
+Limits: this verifies one Linux container architecture and local synthetic flows.
+It does not establish Linux/amd64 or Windows support, real source availability,
+cloud deployment, image publication, or a production update. Source installation
+remains available and is the recommended macOS deployment. The older entries
+below retain their original source-installation and CI evidence.
+
 ## Local fresh clone and new environment (2026-10-08)
 
 The subject was the public candidate tree: 296 files under the MIT license,

@@ -65,10 +65,12 @@ description, salary present, freshness, skills, tier and your own label values.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
-**Settings → Fetching & updates** shows the current read-only fetch configuration
+**Settings → Fetching & updates** shows and edits the saved next-run fetch configuration
 separately from the Profile used by the last successful analysis. **Update jobs**
-starts the full pipeline in the background, shows its outcome and leaves you in
-control of refreshing results. This button uses the network; opening the panel
+starts the full pipeline in the background and shows its outcome. The homepage
+icon beside the last-fetch time starts the same pipeline. New results load when
+no job is open; open details and unsaved notes stay protected. Updating uses the
+network; opening the panel
 does not. See [fetch settings and manual updates](manual-updates.md) for config
 timing, partial failures and concurrency limits.
 
@@ -162,14 +164,14 @@ The optional LaunchAgent templates that run these on a schedule are described in
 ## Changing the rule profile
 
 The profile is set in the `legacy_rule_profile` section of your configuration and
-only selects which existing rules run. The Settings page shows the profile used
-by the **last successful analysis** and offers no switch. Editing the
-configuration changes nothing that is already stored and does not reload a
-running panel.
+only selects which existing rules run. Settings → Fetching & updates can save
+this profile for the next run, and separately shows the profile used
+by the **last successful analysis**. Saving edits changes the next-run
+configuration without reprocessing existing results.
 
 To apply a change you run `analyze` yourself. That command does not fetch new
 jobs and keeps your labels and notes. A scheduled `run` also analyses, so later
-scheduled runs read the new profile. The details, the five presets and their
+scheduled runs read the new profile. The details, the six presets and their
 limits are in [legacy-rule-profiles.md](legacy-rule-profiles.md).
 
 ## Local state and data

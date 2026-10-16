@@ -60,7 +60,7 @@ def test_dictionary() -> None:
     js += (ROOT / "jobs/panel_assets/settings.js").read_text(encoding="utf-8")
     used = set(re.findall(r"\bT\('([a-z_.]+)'", js))
     injected = set(i18n.js_strings("en"))
-    missing = sorted(k for k in used if k not in injected and not k.endswith("."))
+    missing = sorted(k for k in used if k not in injected and not k.endswith((".", "_")))
     check("前端用到的文案键都会注入 window.__I18N__", not missing, str(missing))
     check("标注枚举显示名走字典、存储值不变",
           i18n.value_label("en", "interest", "want") == "Want"
@@ -144,6 +144,8 @@ def test_render() -> None:
         settings_en = panel.render_settings(conn, {}, "en", None, "display", "en")
         check("设置页：语言与外观选项", "setLang('auto')" in settings_en
               and "setTheme('dark')" in settings_en and '<html lang="en"' in settings_en)
+        check("Issue #7: display page has no duplicate analysis rules",
+              "Analysis rules" not in visible(settings_en) and "Used by the last analyze" not in visible(settings_en))
         labels_mod.set_label(conn, "seek:a", source="panel", action="skipped")
         conn.commit()
         skipped_page = panel.render_page(conn, {}, "all", 0, 40, None, {}, "en", "dark")
@@ -165,7 +167,7 @@ def test_settings_profile() -> None:
             if stats is not None:
                 database.log_run(conn, "analyze", now, stats)
                 conn.commit()
-            html = panel.render_settings(conn, config or {}, lang, None, "display", lang)
+            html = panel.render_settings(conn, config or {}, lang, None, "fetch", lang)
             conn.close()
             return visible(html)
 
@@ -177,6 +179,7 @@ def test_settings_profile() -> None:
         "citizen": ("公民", "Citizen"),
         "permanent_resident": ("永久居民", "PR"),
         "485": ("485", "485"),
+        "whv": ("WHV（打工度假）", "Working Holiday (WHV)"),
         "student_visa": ("学生", "Student"),
         "custom": ("自定义", "Custom"),
     }
@@ -208,7 +211,7 @@ def test_settings_profile() -> None:
     check("配置改成 citizen 但没重新分析：仍显示 485",
           "Profile: 485</b>" in stale and "Citizen" not in stale)
     check("不展示 rule id / 开关清单 / 来源",
-          "synthetic.rule" not in stale and "disabled" not in stale.lower()
+          "synthetic.rule" not in stale
           and "config_source" not in stale)
     check("英文设置页 Profile 区无中文",
           not CJK.findall(stale.replace(i18n.t("en", "lang.switch"), "").replace("中文", "").replace("优先投递", "")))

@@ -234,7 +234,7 @@ def test_render_contract() -> None:
         check("fetch argv round-trips exactly",
               fetch["ProgramArguments"] == [
                   mapping["__PYTHON_PATH__"], "-u", "-m", "jobs.cli",
-                  "--config", mapping["__CONFIG_PATH__"], "run"],
+                  "--config", mapping["__CONFIG_PATH__"], "run", "--trigger", "scheduled"],
               str(fetch["ProgramArguments"]))
         check("WorkingDirectory round-trips",
               panel["WorkingDirectory"] == mapping["__PROJECT_DIR__"]
@@ -526,7 +526,7 @@ def test_template_input_completeness() -> None:
         check("rendered fetch argv matches the contract",
               rendered_fetch["ProgramArguments"] == [
                   mapping["__PYTHON_PATH__"], "-u", "-m", "jobs.cli",
-                  "--config", mapping["__CONFIG_PATH__"], "run"])
+                  "--config", mapping["__CONFIG_PATH__"], "run", "--trigger", "scheduled"])
 
         extra = write_templates(root / "extra", ["panel", "fetch"])
         (extra / "unrelated.plist.example").write_text("<plist/>", encoding="utf-8")

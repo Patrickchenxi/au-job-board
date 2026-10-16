@@ -93,6 +93,7 @@ def test_presets_and_legacy() -> None:
         "citizen": (True, False, True, False, None, None),
         "permanent_resident": (False, True, True, False, None, None),
         "485": (False, False, True, False, False, None),
+        "whv": (False, False, None, None, False, None),
         "student_visa": (False, False, None, None, False, None),
     }
     for name, tup in expected.items():

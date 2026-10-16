@@ -15,12 +15,14 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
+import copy
+import uuid
 import json
 import os
 import signal
 import sys
 import time
+import threading
 from pathlib import Path
 
 import yaml
@@ -34,6 +36,7 @@ from .dedupe import assign_groups, dedupe_key
 from .filters import build_job_text, evaluate
 from .scoring import score_job
 from . import skills as skills_mod
+from . import run_state
 
 # 供 cmd_skills 复用；模块级 import 避免每个分支再 import 一次
 
@@ -48,7 +51,9 @@ def _resolve(path: str):
 
 
 def _open(args):
-    config = load_config(getattr(args, "config", None))
+    config = copy.deepcopy(getattr(args, "_config_snapshot", None))
+    if config is None:
+        config = load_config(getattr(args, "config", None))
     return config, database.connect(db_path(config))
 
 
@@ -56,23 +61,25 @@ def _open(args):
 # 联网命令
 # --------------------------------------------------------------------------
 
-def cmd_fetch(args) -> int:
+def _cmd_fetch(args) -> int:
     from .sources import iter_sources
 
     config, conn = _open(args)
     queries = config.get("queries") or []
-    if getattr(args, "result_file", None):
-        config["_run_source_failures"] = {}
+    config["_run_source_failures"] = {}
     if not queries:
         print("config.yaml 里没有 queries", file=sys.stderr)
+        conn.close()
         return 1
 
     started = database.utcnow()
     stats = {}
     only = getattr(args, "only", None)
+    source_count = 0
     for name, fetch_fn in iter_sources(config):
         if only and name != only:
             continue
+        source_count += 1
         print(f"[fetch] {name} ...", flush=True)
         try:
             jobs = fetch_fn(config, queries)
@@ -96,11 +103,15 @@ def cmd_fetch(args) -> int:
                 args._run_counts[field] += stats[name][field]
         print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
 
+    if not source_count:
+        conn.close()
+        return 1
     if hasattr(args, "_run_counts"):
         args._run_failed_sources.update(config.get("_run_source_failures", {}))
     database.log_run(conn, "fetch", started, stats)
     conn.commit()
     print(f"[fetch] 完成 -> {database.counts(conn)}")
+    conn.close()
     return 0
 
 
@@ -288,7 +299,10 @@ def cmd_analyze(args) -> int:
     永不触碰。
     """
     # ---- 预检（不碰 DB）----
-    raw, error = _read_config_root_checked(getattr(args, "config", None))
+    if getattr(args, "_config_snapshot", None) is not None:
+        raw, error = copy.deepcopy(args._config_snapshot), None
+    else:
+        raw, error = _read_config_root_checked(getattr(args, "config", None))
     if error is not None:
         print(f"[analyze] {error}", file=sys.stderr)
         return 1
@@ -703,76 +717,71 @@ def _on_alarm(signum, frame):        # noqa: ARG001
     raise RunTimeout()
 
 
-def _acquire_run_lock():
-    """取得 run 的排他锁，拿不到就返回 None。
-
-    为什么需要：并发抓取不仅重复请求（平台会限流），还会在 SQLite 上互相等锁。
-
-    用 flock 而不是 PID 文件：进程无论怎么退出（含被 kill）都由内核自动释放，
-    不会留下需要人工清理的死锁。
-    """
-    from .config import ROOT
-    lock_path = ROOT / "data" / "run.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(lock_path, "w")
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
-        return None
-    handle.write(f"pid={os.getpid()}\n")
-    handle.flush()
-    return handle
+def _acquire_run_lock(config=None):
+    return run_state.acquire_lock(config or load_config())
 
 
 def _write_run_result(args, state, stage=None, error=None):
-    """Optional private, machine-readable progress; never contains logs or paths."""
-    target = getattr(args, "result_file", None)
-    if not target:
-        return
+    """Durable bounded progress, including runs launched outside the panel."""
     result = {
+        "task_id": args._task_id, "kind": args._task_kind,
+        "trigger": getattr(args, "trigger", None) or "cli",
         "state": state, "stage": stage,
-        "started_at": getattr(args, "_run_started", None),
+        "started_at": args._run_started,
         "finished_at": None if state == "running" else database.utcnow(),
-        "counts": dict(getattr(args, "_run_counts", {})),
-        "failed_sources": sorted(getattr(args, "_run_failed_sources", set())),
-        "error": error,
-        "refresh_available": state in ("success", "partial") or
-                             bool(getattr(args, "_run_counts", {}).get("seen")),
+        "counts": dict(args._run_counts),
+        "failed_sources": sorted(args._run_failed_sources), "error": error,
+        "refresh_available": state == "success" or
+                             (state == "partial" and bool(args._run_counts.get("seen"))),
     }
-    target = Path(target)
-    temporary = target.with_name(target.name + ".tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        os.chmod(temporary, 0o600)
-        json.dump(result, handle)
-    temporary.replace(target)
+    # Rejected competing attempts must never replace the current execution.
+    if state != "busy":
+        run_state.publish(args._config_snapshot, result, apply_generation=False)
+    target = getattr(args, "result_file", None)
+    if target:
+        run_state.atomic_json(target, result)
+    return result
 
 
-def cmd_run(args) -> int:
-    """Full pipeline with the shared scheduler lock and optional safe progress."""
+def _execute_pipeline(args, *, fetch_only=False):
+    initial = load_config(getattr(args, "config", None))
+    inherited = getattr(args, "run_lock_fd", None)
+    lock = os.fdopen(os.dup(inherited), "a+") if inherited is not None else _acquire_run_lock(initial)
+    previous_snapshot = getattr(args, "_config_snapshot", None)
     args._run_started = getattr(args, "result_started_at", None) or database.utcnow()
     args._run_counts = {"seen": 0, "inserted": 0, "updated": 0, "details_fetched": 0}
     args._run_failed_sources = set()
     args._run_details_incomplete = False
-    lock = _acquire_run_lock()
+    args._task_id = getattr(args, "task_id", None) or uuid.uuid4().hex
+    args._task_kind = "fetch" if fetch_only else "run"
+    args._config_snapshot = initial
     if lock is None:
         _write_run_result(args, "busy", error="run_busy")
-        print("[run] 已有一个 run 在执行，跳过本次（不并发）", file=sys.stderr)
+        args._config_snapshot = previous_snapshot
+        print("[run] another update is running", file=sys.stderr)
         return 4
-
+    args._pipeline_active = True
     limit = int(getattr(args, "timeout", None) or 0)
-    if limit:
-        signal.signal(signal.SIGALRM, _on_alarm)
-        signal.setitimer(signal.ITIMER_REAL, limit, limit)
-
     stage = None
     state, error = "error", "run_failed"
+    previous_alarm = None
+    previous_term = None
     try:
-        for step in (cmd_fetch, cmd_details, cmd_analyze, cmd_report):
-            stage = step.__name__.removeprefix("cmd_")
+        fresh_config = load_config(getattr(args, "config", None))
+        if db_path(initial).resolve() != db_path(fresh_config).resolve():
+            raise ValueError("database changed while waiting for configuration lock")
+        args._config_snapshot = fresh_config
+        if threading.current_thread() is threading.main_thread():
+            previous_term = signal.signal(signal.SIGTERM, lambda signum, _frame: (_ for _ in ()).throw(SystemExit(128 + signum)))
+        if limit:
+            previous_alarm = signal.signal(signal.SIGALRM, _on_alarm)
+            signal.setitimer(signal.ITIMER_REAL, limit)
+        steps = (("fetch", _cmd_fetch),) if fetch_only else (("fetch", cmd_fetch), ("details", cmd_details), ("analyze", cmd_analyze), ("report", cmd_report))
+        for stage, step in steps:
             _write_run_result(args, "running", stage)
             code = step(args)
             if code:
+                error = "no_sources" if stage == "fetch" else "run_failed"
                 return code
         if args._run_failed_sources:
             state, error = "partial", "source_failed"
@@ -783,24 +792,54 @@ def cmd_run(args) -> int:
         return 0
     except RunTimeout:
         state, error = "timeout", "run_timeout"
-        print(f"[run] 超过 {limit} 秒仍未跑完，已强制中断。"
-              f"已完成的步骤均已入库，下次定时会接着跑。", file=sys.stderr)
         return 3
+    except (KeyboardInterrupt, SystemExit):
+        state, error = "interrupted", "run_interrupted"
+        raise
     finally:
         if limit:
             signal.setitimer(signal.ITIMER_REAL, 0)
+            if previous_alarm is not None:
+                signal.signal(signal.SIGALRM, previous_alarm)
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
         try:
-            _write_run_result(args, state, stage, error)
-            # Historical run rows remain informational, not proof of success.
-            _, conn = _open(args)
-            database.log_run(conn, "run", args._run_started,
-                             {"timeout": limit, "state": state})
-            conn.commit()
-            conn.close()
-        except Exception:  # Logging must not change historical CLI exit semantics.
-            pass
+            if getattr(args, "_config_snapshot", None) is not None:
+                result = _write_run_result(args, state, stage, error)
+                if not fetch_only:
+                    _, conn = _open(args)
+                    database.log_run(conn, "run", args._run_started, result)
+                    conn.commit()
+                    conn.close()
+                # Only finalization after all DB logging can make this terminal
+                # recoverable. Inherited workers defer generation to the panel
+                # watcher, or to a later reader which proves the flock is free.
+                result['completion_ready'] = True
+                if getattr(args, "result_file", None):
+                    run_state.atomic_json(args.result_file, result)
+                run_state.publish(args._config_snapshot, result,
+                                  apply_generation=inherited is None)
+        except Exception:
+            # A failed finalization must not leave a recoverable success marker.
+            try:
+                _write_run_result(args, "error", stage, "storage_unavailable")
+            except Exception:
+                pass
+            raise
         finally:
+            args._config_snapshot = previous_snapshot
+            args._pipeline_active = False
             lock.close()
+
+
+def cmd_fetch(args) -> int:
+    if getattr(args, "_pipeline_active", False):
+        return _cmd_fetch(args)
+    return _execute_pipeline(args, fetch_only=True)
+
+
+def cmd_run(args) -> int:
+    return _execute_pipeline(args)
 
 
 def main(argv=None) -> int:
@@ -876,6 +915,9 @@ def main(argv=None) -> int:
                             "无人值守时防卡死：launchd 不会重入，卡一次就永远不再抓")
     p_run.add_argument("--result-file", help=argparse.SUPPRESS)
     p_run.add_argument("--result-started-at", help=argparse.SUPPRESS)
+    p_run.add_argument("--run-lock-fd", type=int, help=argparse.SUPPRESS)
+    p_run.add_argument("--task-id", help=argparse.SUPPRESS)
+    p_run.add_argument("--trigger", choices=("manual", "scheduled", "cli", "unknown"), default="cli", help="execution source")
     p_run.set_defaults(func=cmd_run)
 
     p_panel = sub.add_parser("panel", help="启动本地网页面板（不联网）")

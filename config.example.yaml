@@ -77,8 +77,8 @@ filtering:
 
 # Legacy rule switches for analyze. Separate from the eligibility section:
 # this section selects which rules.yaml exclude / override entries run.
-# Supported profiles: citizen, permanent_resident, 485, student_visa, custom.
-#   485 / student_visa / custom keep every rule on (this example).
+# Supported profiles: citizen, permanent_resident, 485, whv, student_visa, custom.
+#   485 / whv / student_visa / custom keep every rule on (this example).
 #   citizen disables citizenship.exclusive and citizenship.or_pr.
 #   permanent_resident disables citizenship.or_pr.
 # Optional per-rule overrides by rule id: true runs it, false disables it.
@@ -86,8 +86,8 @@ filtering:
 # citizen / PR presets can still exclude; visa.or stays a global override.
 # See docs/legacy-rule-profiles.md.
 # Editing this section does not recompute existing results, and the running
-# panel does not hot-reload it. Its Settings page shows the profile used by the
-# last analyze. To apply a change, run from the repo directory:
+# panel shows saved next-run settings separately from the profile used by the
+# last successful analyze. Settings can edit this section; saving does not analyze. To apply a change, run from the repo directory:
 #   .venv/bin/python -m jobs.cli analyze
 # This refreshes the machine analysis stored in the database, keeps your manual
 # labels and notes, and does not fetch new jobs. Later analyze / scheduled runs
@@ -101,7 +101,7 @@ legacy_rule_profile:
 
 # Eligibility profile. This is a software capability template, not a legal
 # determination, and it is only read by the read-only eligibility-profile command.
-# Supported values: citizen, permanent_resident, 485, student_visa, custom.
+# Supported values: citizen, permanent_resident, 485, whv, student_visa, custom.
 # Choose the one that matches your own situation. See docs/eligibility-profiles.md.
 # The value below is only an example of the syntax.
 eligibility:

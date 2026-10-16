@@ -6,6 +6,12 @@ production-operations authorization, or permission to fetch listings, schedule
 services or expose a panel. The agent follows exactly the same steps as a human
 in [install.md](install.md); it does not invent a different implementation.
 
+On macOS, recommend source installation first. If the user explicitly chooses
+Docker, follow [docker.md](docker.md), preserving its localhost binding and all
+persistent volumes. Do not install Docker Desktop or change an existing
+deployment merely because Docker is available. Report the architecture actually
+tested and keep network fetching and scheduling as separate user choices.
+
 ## Copyable instruction for the user
 
 > Install AU Job Board from source following docs/install.md and
@@ -79,7 +85,7 @@ personal facts from the request to install.
 |---|---|
 | Job keywords / roles | Free text; recommend a few broad terms such as cybersecurity, software engineer or IT support |
 | City / region | e.g. Melbourne VIC, or "All Australia" |
-| Rule profile (`legacy_rule_profile.profile`) | `citizen`, `permanent_resident`, `485`, `student_visa`, `custom`. No assumed default: ask which one matches the user's own situation. The public example uses `485` only as syntax. |
+| Rule profile (`legacy_rule_profile.profile`) | `citizen`, `permanent_resident`, `485`, `whv`, `student_visa`, `custom`. No assumed default: ask which one matches the user's own situation. The public example uses `485` only as syntax. |
 | Sources to enable | SEEK and Indeed recommended; LinkedIn optional and slower |
 
 Do not ask about regular expressions, scoring weights or every YAML field.

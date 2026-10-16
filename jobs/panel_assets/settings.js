@@ -252,3 +252,143 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(!document.getElementById('skill-tree')) return;
   renderTree(TREE); bindNewSkill();
 });
+
+/* The configuration file remains the source of truth. This form edits only
+   allowlisted execution fields; it never receives paths, secrets or raw YAML. */
+function bindConfigEditor(){
+  const root=document.getElementById('config-editor'); if(!root) return;
+  const en=window.__LANG__==='en';
+  const msg=(zh,eng)=>en?eng:zh;
+  const words={queries:msg('抓取关键词（每行一个）','Search terms (one per line)'),
+    'seek.locations':msg('SEEK 地区（每行一个）','SEEK locations (one per line)'),
+    enabled:msg('启用','Enabled'), location:msg('地区','Location'),
+    pages_per_query:msg('每个关键词页数','Pages per term'), daterange:msg('最近天数（留空表示不限）','Posted within days (empty for any time)'),
+    detail_sleep:msg('正文请求间隔（秒）','Detail request delay (seconds)'),
+    country_indeed:msg('国家','Country'), results_wanted:msg('每个关键词请求条数','Requested results per term'),
+    fetch_description:msg('抓取完整描述','Fetch full descriptions'),
+    profile:msg('下次运行 Profile','Profile for the next run')};
+  const errors={conflict:msg('文件已被其他页面或外部编辑。你的输入仍保留；重新载入后重新应用更改。','The file changed in another tab or editor. Your input is retained; reload the file and reapply your changes.'),
+    run_busy:msg('更新正在运行，暂时不能保存配置。输入已保留。','An update is running. Configuration cannot be saved yet; your input is retained.'),
+    config_invalid:msg('配置包含非法字段、重复键、别名/合并键或不安全的 YAML。请先修复配置文件。','The configuration has invalid fields, duplicate keys, aliases/merge keys or unsafe YAML. Repair the file first.'),
+    config_unavailable:msg('无法读取配置文件。请检查文件是否存在及读取权限。','The configuration file cannot be read. Check that it exists and is readable.'),
+    write_failed:msg('配置写入失败。请检查目录权限与磁盘空间。','The configuration could not be written. Check directory permissions and free disk space.'),
+    validation_failed:msg('字段类型或数值范围不合法。','A field has an invalid type or range.'),
+    demo_disabled:msg('演示环境不能编辑配置。','Configuration editing is disabled in the demo.')};
+  let state=null, controls={}, dirty=false, saving=false;
+  const status=el('p','config-status'); status.setAttribute('role','status'); status.setAttribute('aria-live','polite');
+  const form=el('form','config-form');
+  const heading=el('h3',null,msg('下次运行配置','Configuration for the next run'));
+  const note=el('p','muted',msg('保存后用于下次运行，不会自动抓取或重算已有结果。默认值表示文件中未显式设置。','Saved values apply to the next run. Saving does not fetch or reanalyze existing jobs. Default means the file does not explicitly set the field.'));
+  const fields=el('div','config-fields');
+  const preview=el('div','config-preview'); preview.hidden=true;
+  const previewTitle=el('h4',null,msg('确认改动','Review changes'));
+  const diff=el('pre');
+  const actions=el('div','config-actions');
+  const review=el('button','primary-btn',msg('预览改动','Review changes')); review.type='submit';
+  const reset=el('button','linkbtn',msg('重新载入文件','Reload file')); reset.type='button';
+  const commit=el('button','primary-btn',msg('确认保存','Save changes')); commit.type='button';
+  const cancel=el('button','linkbtn',msg('取消','Cancel')); cancel.type='button';
+  actions.append(review,reset); preview.append(previewTitle,diff,commit,cancel);
+  form.append(fields,actions,preview); root.append(heading,note,status,form);
+  const listPaths=new Set(['queries','seek.locations']);
+  const numberPaths=new Set(['seek.pages_per_query','seek.daterange','seek.detail_sleep','jobspy.indeed.results_wanted','jobspy.linkedin.results_wanted']);
+  function valueFor(path){
+    const input=controls[path];
+    if(path.startsWith('legacy_rule_profile.')&&path!=='legacy_rule_profile.profile') return input.value==='default'?null:input.value==='true';
+    if(input.type==='checkbox') return input.checked;
+    if(listPaths.has(path)) return input.value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
+    if(numberPaths.has(path)) return input.value===''?null:Number(input.value);
+    return input.value;
+  }
+  function changes(){
+    const result={}; if(!state) return result;
+    Object.keys(controls).forEach(path=>{const value=valueFor(path);if(JSON.stringify(value)!==JSON.stringify(state.values[path]))result[path]=value;});
+    return result;
+  }
+  function updateDirty(){
+    dirty=Object.keys(changes()).length>0;
+    review.disabled=!dirty||saving; reset.disabled=saving; commit.disabled=saving;
+    status.textContent=dirty?msg('有未保存的改动','Unsaved changes'):msg('已从配置文件读取','Read from the configuration file');
+    preview.hidden=true;
+  }
+  function makeField(path,value){
+    const wrap=el('label','config-field');
+    const tail=path.split('.').pop();
+    let label=words[path]||words[tail]||path;
+    const rule=path.startsWith('legacy_rule_profile.')&&path!=='legacy_rule_profile.profile';
+    if(rule)label=path.slice('legacy_rule_profile.'.length);
+    const title=el('span',null,label); let input;
+    if(path==='legacy_rule_profile.profile'||rule){
+      input=el('select');
+      const options=rule?[["default",msg('使用预设默认值','Use preset default')],["true",msg('启用','Enabled')],["false",msg('停用','Disabled')]]:state.profiles.map(v=>[v,v]);
+      options.forEach(([key,text])=>{const o=el('option',null,text);o.value=key;input.append(o);});
+      input.value=rule?(value===null?'default':String(value)):value;
+    }else if(typeof value==='boolean'){
+      input=el('input');input.type='checkbox';input.checked=value;
+    }else if(listPaths.has(path)){
+      input=el('textarea'); input.rows=Math.max(2,Math.min(value.length,6));input.value=value.join('\n');input.required=true;
+    }else{
+      input=el('input'); input.type=numberPaths.has(path)?'number':'text'; input.value=value===null?'':String(value);
+      if(input.type==='number'){
+        input.min=path==='seek.daterange'||path==='seek.detail_sleep'?'0':'1';
+        input.max=path==='seek.detail_sleep'?'60':path==='seek.daterange'?'3650':path==='seek.pages_per_query'?'100':'1000';
+        input.step=path==='seek.detail_sleep'?'0.05':'1';input.required=path!=='seek.daterange';
+      }else{input.required=true;input.maxLength=1000;}
+    }
+    input.dataset.configPath=path; input.setAttribute('aria-label',label);
+    if(!state.explicit[path])title.append(el('small','muted',msg(' · 默认值',' · Default')));
+    input.addEventListener('input',updateDirty);input.addEventListener('change',updateDirty);
+    controls[path]=input;wrap.append(title,input);return wrap;
+  }
+  function render(data){
+    state=data;controls={};fields.textContent='';
+    const groups=[['queries',msg('关键词','Search terms')],['seek.', 'SEEK'],['jobspy.indeed.','Indeed'],['jobspy.linkedin.','LinkedIn'],['legacy_rule_profile.',msg('原始规则开关','Legacy rule switches')]];
+    groups.forEach(([prefix,title])=>{
+      const section=el('fieldset','config-group');section.append(el('legend',null,title));
+      Object.entries(state.values).filter(([path])=>path.startsWith(prefix)).forEach(([path,value])=>section.append(makeField(path,value)));
+      fields.append(section);
+    });
+    updateDirty();
+  }
+  function failure(error){status.textContent=(errors[error.error]||msg('请求失败，输入已保留。','The request failed; your input is retained.'))+(error.field?' ('+error.field+')':'');status.classList.add('error');}
+  async function load(){
+    review.disabled=true;status.textContent=msg('正在读取配置…','Reading configuration…');
+    try{
+      const response=await fetch('/api/config-settings');const data=await response.json();
+      if(!response.ok||!data.ok){failure(data);return;}
+      status.classList.remove('error');render(data);
+    }catch(e){failure({});}
+  }
+  form.addEventListener('submit',event=>{
+    event.preventDefault();if(!state||saving||!dirty||!form.reportValidity())return;
+    const edited=changes();
+    diff.textContent=Object.entries(edited).map(([path,value])=>path+'\n  '+JSON.stringify(state.values[path])+' → '+JSON.stringify(value)).join('\n\n');
+    preview.hidden=false;commit.focus();
+  });
+  cancel.onclick=()=>{preview.hidden=true;review.focus();};
+  reset.onclick=()=>{if(!dirty||window.confirm(msg('丢弃未保存的改动并重新载入？','Discard unsaved changes and reload?')))load();};
+  commit.onclick=async()=>{
+    if(saving||!state)return;saving=true;review.disabled=true;commit.disabled=true;reset.disabled=true;
+    // Freeze editable inputs while saving so the readback cannot replace typing.
+    Object.values(controls).forEach(input=>{input.disabled=true;});
+    try{
+      const response=await fetch('/api/config-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({digest:state.digest,changes:changes()})});
+      const data=await response.json();
+      if(!response.ok||!data.ok){failure(data);return;}
+      render(data);if(typeof loadUpdateConfig==='function')loadUpdateConfig();document.dispatchEvent(new CustomEvent('config-saved',{detail:data}));status.textContent=msg('已保存并从文件读回。下次运行生效。','Saved and read back from the file. Applies to the next run.');toast(msg('配置已保存','Configuration saved'));
+    }catch(e){failure({});}
+    finally{saving=false;Object.values(controls).forEach(input=>{input.disabled=false;});review.disabled=!dirty;commit.disabled=false;reset.disabled=false;}
+  };
+  window.addEventListener('beforeunload',event=>{if(dirty||saving){event.preventDefault();event.returnValue='';}});
+  document.addEventListener('click',event=>{
+    const link=event.target.closest&&event.target.closest('a[href]');
+    if(!link||(!dirty&&!saving)||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||link.target==='_blank'||link.hasAttribute('download'))return;
+    const target=new URL(link.href,location.href);
+    if(target.href===location.href||target.hash&&target.origin===location.origin&&target.pathname===location.pathname&&target.search===location.search)return;
+    if(saving){event.preventDefault();status.textContent=msg('正在保存，请稍候再离开。','Saving. Please wait before leaving.');return;}
+    if(!window.confirm(msg('有未保存的配置改动。丢弃并继续前往目标页面？','There are unsaved configuration changes. Discard them and continue to the selected page?'))){event.preventDefault();event.stopImmediatePropagation();}
+    else dirty=false;
+  },true);
+  load();
+}
+document.addEventListener('DOMContentLoaded',bindConfigEditor);

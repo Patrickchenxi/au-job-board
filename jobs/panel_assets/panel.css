@@ -649,12 +649,12 @@ body.portrait .detail.swap>*{animation:none}
 }
 
 /* Fetch configuration and manual updates share the existing quiet settings UI. */
-.update-widget{flex:0 0 auto;display:flex;align-items:flex-start;gap:10px 18px;flex-wrap:wrap;
+.update-widget{flex:0 0 auto;display:flex;align-items:center;gap:10px 18px;flex-wrap:wrap;
  border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:12px 14px;min-width:0}
 .update-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .update-controls .iconbtn{width:34px;height:34px;flex:0 0 34px;text-decoration:none}
 .update-widget button:disabled{cursor:default;opacity:.55}
-.update-feedback{flex:1 1 260px;min-width:0;font-size:12.5px;overflow-wrap:anywhere}
+.update-feedback{flex:1 1 150px;min-width:0;font-size:12.5px;overflow-wrap:anywhere}
 .update-feedback p{margin:0}
 .update-feedback .muted:empty{display:none}
 .update-feedback .muted{margin-top:3px;font-size:12px}
@@ -679,3 +679,24 @@ body.portrait .detail.swap>*{animation:none}
  .fetch-config-row{grid-template-columns:minmax(0,1fr);gap:3px;padding:10px 0}
  .fetch-source{padding:10px 12px}
 }
+
+/* v1.2: one compact update control alongside the last-fetch timestamp. */
+.update-compact{display:inline-flex;margin:0;padding:0;border:0;background:none;width:auto;gap:4px}
+.update-compact .update-feedback{max-width:220px;flex:0 1 auto}
+.update-compact #update-status:empty{display:none}
+.update-widget [aria-busy="true"] svg{animation:update-spin 1s linear infinite}
+@keyframes update-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.update-widget [aria-busy="true"] svg{animation:none}}
+.config-editor{margin-top:20px}
+.config-field{display:grid;grid-template-columns:minmax(130px,38%) minmax(0,1fr);gap:8px 18px;margin:12px 0;align-items:center}
+.config-field input:not([type=checkbox]),.config-field textarea,.config-field select{width:100%;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit}
+.config-field textarea{min-height:78px;resize:vertical}
+@media(max-width:600px){.config-field{grid-template-columns:1fr;gap:4px}}
+
+.config-group{min-width:0;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:8px}
+.config-fields{display:grid;gap:12px}
+.config-field label{display:flex;flex-direction:column;gap:6px;min-width:0}
+.config-field input[type=checkbox]{width:auto;justify-self:start}
+.config-preview pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.config-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.config-status.error{color:var(--bad,#b53636)}

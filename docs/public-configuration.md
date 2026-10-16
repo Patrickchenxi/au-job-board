@@ -69,7 +69,7 @@ Reading the configuration or starting the panel never fetches anything. Only
 Two sections mention profiles and they do different things:
 
 - `legacy_rule_profile` is the one that matters. `profile` is `citizen`,
-  `permanent_resident`, `485`, `student_visa` or `custom`, and the optional
+  `permanent_resident`, `485`, `whv`, `student_visa` or `custom`, and the optional
   `exclude` / `overrides` mappings switch individual rule ids on or off. A missing
   section keeps every rule on. The example uses `profile: "485"` (all rules on).
   `citizenship.requirement` is a mixed rule that stays on for every preset, so

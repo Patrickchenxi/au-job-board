@@ -111,22 +111,16 @@ def _js(value) -> str:
 
 
 def _update_widget(lang: str, *, compact: bool = False) -> str:
-    """One update controller per page; state is fetched without refreshing edits."""
-    T = lambda k: i18n.t(lang, k)  # noqa: E731
-    return "".join([
-        f'<section class="update-widget{" update-compact" if compact else ""}" '
-        f'aria-label="{_e(T("js.update_title"))}">',
-        '<div class="update-controls">',
-        f'<button type="button" class="btn" id="update-start" title="{_e(T("set.update_hint"))}" disabled>{_e(T("js.update_title"))}</button>',
-        f'<a id="update-refresh" class="iconbtn" href="/" '
-        f'title="{_e(T("js.update_refresh"))}" aria-label="{_e(T("js.update_refresh"))}" hidden>'
-        f'{ICON_REFRESH}</a>',
-        '</div><div class="update-feedback">',
-        f'<p id="update-status" role="status" aria-live="polite" aria-atomic="true">{_e(T("js.update_checking"))}</p>',
-        '<p id="update-meta" class="muted"></p>',
-        '</div>',
-        f'<noscript><p>{_e(T("js.update_nojs"))}</p></noscript>',
-        '</section>',
+    T = lambda key: i18n.t(lang, key)
+    icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg>'
+    return ''.join([
+        '<span class="update-widget update-compact">' if compact else '<section class="update-widget">',
+        f'<button type="button" class="{"iconbtn" if compact else "btn"}" id="update-start" '
+        f'title="{_e(T("set.update_hint"))}" aria-label="{_e(T("js.update_title"))}" disabled>',
+        icon if compact else _e(T("js.update_title")), '</button>',
+        '<span class="update-feedback"><span id="update-status" role="status" aria-live="polite" aria-atomic="true"></span>',
+        '' if compact else '<span id="update-meta" class="muted"></span>',
+        '</span>', '</span>' if compact else '</section>',
     ])
 
 
@@ -371,30 +365,32 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
 STALE_AFTER_DAYS = 2
 
 
-def _last_run_note(conn, lang: str = "zh") -> str:
-    """「上次抓取」提示。
-
-    存在的意义：定时任务**静默死掉是没有任何反馈的** —— 页面照常打开、
-    数据照常存在，只是不再更新。把时间摆出来，超过 STALE_AFTER_DAYS 变红。
-    """
-    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
-    stamp = database.last_run_at(conn, "run") or database.last_run_at(conn)
-    if not stamp:
-        return f'<span class="run">{_e(T("run.never"))}</span>'
-    try:
-        then = datetime.fromisoformat(stamp)
-    except ValueError:
-        return f'<span class="run">{_e(T("run.at", stamp=stamp))}</span>'
-    seconds = (datetime.now(timezone.utc) - then).total_seconds()
-    if seconds < 3600:
-        ago = T("ago.minutes", n=max(1, int(seconds // 60)))
-    elif seconds < 86400:
-        ago = T("ago.hours", n=int(seconds // 3600))
+def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
+    """Latest fetch/run fact; analyze and report never make data look fresh."""
+    from . import run_state
+    T = lambda key, **kw: i18n.t(lang, key, **kw)
+    if config is None:
+        config = {"db_path": conn.execute("PRAGMA database_list").fetchone()[2]}
+    fact = run_state.latest(config, conn)
+    stamp = fact.get("finished_at")
+    state = fact.get("state", "idle")
+    if state == "running":
+        text = T("js.update_running", stage=T("js.update_stage_" + (fact.get("stage") or "wait")))
+    elif not stamp:
+        text = T("run.never")
     else:
-        ago = T("ago.days", n=int(seconds // 86400))
-    stale = seconds > STALE_AFTER_DAYS * 86400
-    return (f'<span class="run{" stale" if stale else ""}"><span class="dot {"bad" if stale else "good"}"></span>'
-            f'{_e(T("run.ago", ago=ago))}{_e(T("run.stale")) if stale else ""}</span>')
+        try:
+            then = datetime.fromisoformat(stamp)
+            if then.tzinfo is None:
+                then = then.replace(tzinfo=timezone.utc)
+            seconds = max(0, (datetime.now(timezone.utc) - then).total_seconds())
+            unit, n = ("minutes", max(1, int(seconds // 60))) if seconds < 3600 else (("hours", int(seconds // 3600)) if seconds < 86400 else ("days", int(seconds // 86400)))
+            text = T("run.ago", ago=T("ago." + unit, n=n))
+        except ValueError:
+            text = T("run.at", stamp=stamp)
+        if state != "success":
+            text += " · " + T("js.update_" + state)
+    return f'<span class="run" data-run-time="{_e(stamp or "")}" data-run-state="{_e(state)}">{_e(text)}</span>'
 
 
 def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
@@ -701,12 +697,19 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     data/panel.log 的耗时都靠它。删掉参数容易让人顺手把计时链路一起删了。
     """
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    from . import run_state
+    result_generation = run_state.generation(config)
     filters = filters or {}
     since = _resolve_since(conn, view, filters)
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
     page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
+    # A new batch can shrink the filtered result set. Stay in this view and
+    # use its last available page instead of showing an empty stale offset.
+    if total and offset >= total:
+        offset = ((total - 1) // limit) * limit
+        page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
     stats = labels_mod.summary(conn)
     skill_counts = database.skill_counts(conn)
 
@@ -743,7 +746,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
     stat_items = _stats(view, stats, total, lang)
     stats_html = "".join(f'<span>{_e(name)} <b>{_e(n)}</b></span>' for name, n in stat_items)
-    run_note = _last_run_note(conn, lang)
+    run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
     if page:
         cards = "".join(_card(r, since, lang) for r in page)
@@ -793,9 +796,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'{_search_explanation(filters, skills_cfg, total, lang)}</div></div>',
         f'<div class="ctx-stats">{stats_html}'
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span>'
-        f'{run_note}</div>',
+        f'<span class="run-controls">{run_note}{_update_widget(lang, compact=True)}</span></div>',
         "</div>",
-        _update_widget(lang, compact=True),
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
@@ -831,7 +833,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         '<div class="note-menu" id="note-menu"></div>',
         _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
-                        "__SKILLS__": skill_embed}),
+                        "__SKILLS__": skill_embed, "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
         "</body></html>",
     ])
@@ -843,7 +845,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
 SETTINGS_SECTIONS = ("skills", "fetch", "display")
 
-_PROFILE_NAMES = ("citizen", "permanent_resident", "485", "student_visa", "custom")
+_PROFILE_NAMES = ("citizen", "permanent_resident", "485", "whv", "student_visa", "custom")
 
 
 def _profile_display(conn, T) -> str:
@@ -903,7 +905,7 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<p class="set-hint">{_e(T("set.fetch_hint"))}</p>',
             '<div id="update-config" class="fetch-config" aria-live="polite">'
             f'<p class="muted">{_e(T("js.loading"))}</p></div>',
-            f'<p class="set-foot">{_e(T("set.fetch_readonly"))}</p>',
+            '<div id="config-editor"></div>',
             f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
             f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
             _update_widget(lang),
@@ -930,9 +932,6 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             radios("theme", theme or "auto", [("auto", T("set.theme_auto"), "prefers-color-scheme"),
                                               ("light", T("set.theme_light"), ""),
                                               ("dark", T("set.theme_dark"), "")], "setTheme"),
-            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
-            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
-            f'<br>{_e(T("set.profile_used"))}</p>',
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
             f'<li>{_e(T("set.keep1"))}</li><li>{_e(T("set.keep2"))}</li><li>{_e(T("set.keep3"))}</li></ul></div>',
         ])

@@ -62,6 +62,14 @@ PRESETS: dict[str, dict] = {
         "security_clearance_eligible": False,
         "max_weekly_hours": None,
     },
+    "whv": {
+        "australian_citizen": False,
+        "permanent_resident": False,
+        "unrestricted_work_rights": None,
+        "requires_sponsorship": None,
+        "security_clearance_eligible": False,
+        "max_weekly_hours": None,
+    },
     "student_visa": {
         "australian_citizen": False,
         "permanent_resident": False,

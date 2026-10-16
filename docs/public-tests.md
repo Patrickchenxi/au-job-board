@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 18 checks: 17 Python tests
+be collected by accident. The entry currently has 20 checks: 19 Python tests
 plus one Node behavior test.
 
 Run it from the project root with the project interpreter:
@@ -42,11 +42,13 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_config_edit.py` | YAML roundtrip/CLI semantics, form allowlist, conflicts, shared lock and API boundary | all |
+| `tools/test_run_state.py` | Unified run/fetch facts, generations and orphan-worker recovery | all |
 | `tools/test_public_configuration.py` | Public example configuration, source selection, loopback binding, read-only profile command | all |
 | `tools/test_citizenship_rules.py` | Citizenship rules against the synthetic fixture | all |
 | `tools/test_eeo_rules.py` | Citizenship EEO / welcome guard | all |
 | `tools/test_experience_rules.py` | Experience-year scoring signals | all |
-| `tools/test_legacy_rule_profiles.py` | The five legacy rule profiles and per-rule switches | all |
+| `tools/test_legacy_rule_profiles.py` | The six legacy rule profiles and per-rule switches | all |
 | `tools/test_legacy_rule_profile_integration.py` | Profile wiring through analyze, report and panel | all |
 | `tools/test_eligibility_profile.py` | Eligibility profile parsing, validation and the read-only command | all |
 | `tools/test_labels_notes.py` | Manual labels and notes | all |
@@ -59,13 +61,18 @@ nothing in the suite fetches listings.
 | `tools/test_legacy_cleanup.py` | Legacy single-path end to end | all |
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
-| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and explicit result refresh with a detail hash | all |
+| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output
 contains one `[FAIL]` line from a deliberate negative control (a wrong expected
 value used to prove the check can fail). Judge a run by the exit status of each
 test and the entry's summary line, not by a single printed line.
+
+Docker has a separate opt-in smoke test: `python tools/test_docker.py`. It
+requires an active Docker Engine and may download packages during the build.
+Runtime sources are mocked and containers have no network. See
+[docker.md](docker.md) for its checks and actual tested architecture.
 
 ## What is not in the public entry
 
@@ -82,8 +89,8 @@ test and the entry's summary line, not by a single printed line.
 combination is the only environment with evidence so far; Linux, Windows and
 other Python versions are not verified and are deliberately not configured.
 
-The workflow runs automatically for a pull request into `main` and for every
-push to `main`, and it can be started by hand (`workflow_dispatch`). It has no
+The workflow runs automatically for a pull request into `main` or `dev` and for every
+push to `main` or `dev`, and it can be started by hand (`workflow_dispatch`). It has no
 path filter and does not skip drafts, so a documentation-only change still
 produces the check. The job is named `macOS 15 / Python 3.12 / Node 24.21.0`;
 that is the check name to look for on a pull request. It uses the ordinary

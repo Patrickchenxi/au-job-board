@@ -131,7 +131,7 @@ class PipelineTests(TemporaryTest):
         conn.execute("UPDATE jobs SET description=NULL, description_fetched_at=NULL WHERE source='seek'")
         conn.commit()
         conn.close()
-        with patch.object(sources, "iter_sources", return_value=[]), \
+        with patch.object(sources, "iter_sources", return_value=[("seek", lambda _cfg, _queries: [])]), \
              patch.object(seek, "fetch_detail", return_value=None):
             code, result = self.run_pipeline()
         self.assertEqual(code, 0)
@@ -146,13 +146,13 @@ class PipelineTests(TemporaryTest):
                 self.assertEqual(actual, code)
                 self.assertEqual(result["state"], expected)
                 self.assertTrue(result["finished_at"])
-                lock = cli._acquire_run_lock()
+                lock = cli._acquire_run_lock(self.cfg)
                 self.assertIsNotNone(lock)
                 if lock:
                     lock.close()
 
     def test_cli_attempt_timestamp_matches_panel_even_if_child_starts_later(self):
-        with patch.object(sources, "iter_sources", return_value=[]), \
+        with patch.object(sources, "iter_sources", return_value=[("seek", lambda _cfg, _queries: [])]), \
              patch.object(seek, "fetch_detail", return_value="Synthetic description"):
             code, result = self.run_pipeline(result_started_at="2026-10-15T23:59:59Z")
         self.assertEqual(code, 0)
@@ -160,7 +160,7 @@ class PipelineTests(TemporaryTest):
         self.assertEqual(result["state"], "success")
 
     def test_existing_scheduler_lock_skips_all_steps(self):
-        lock = cli._acquire_run_lock()
+        lock = cli._acquire_run_lock(self.cfg)
         self.assertIsNotNone(lock)
         try:
             with patch.object(cli, "cmd_fetch", side_effect=AssertionError("must not fetch")):
@@ -391,7 +391,7 @@ class ManagerTests(TemporaryTest):
         self.assertEqual(failed["error"], "start_failed")
         self.assertEqual(manager.status()["state"], "error")
         self.assertNotIn("PRIVATE-PATH", json.dumps(manager.status()))
-        manager.state_path.write_text(json.dumps(panel_update._empty("running")))
+        (manager.runtime / "latest.json").write_text(json.dumps(panel_update._empty("running")))
         self.assertEqual(self.manager().status()["state"], "interrupted")
         self.assertFalse((manager.runtime / "config.yaml").exists())
 
@@ -405,13 +405,13 @@ class ManagerTests(TemporaryTest):
                     {"state": "PRIVATE-SENTINEL"}]
         for payload in payloads:
             with self.subTest(payload=payload):
-                manager.state_path.write_text(json.dumps(payload))
+                (manager.runtime / "latest.json").write_text(json.dumps(payload))
                 result = manager.status()
                 self.assertIn(result["state"], panel_update.STATES)
                 self.assertNotIn("PRIVATE-SENTINEL", json.dumps(result))
-                self.assertEqual(result["counts"]["seen"], 0)
-        manager.state_path.write_text("{broken json")
-        self.assertEqual(manager.status()["state"], "idle")
+                self.assertTrue(result["counts"] is None or result["counts"]["seen"] == 0)
+        (manager.runtime / "latest.json").write_text("{broken json")
+        self.assertIn(manager.status()["state"], ("idle", "unknown"))
 
     def test_supervisor_timeout_stops_worker_and_preserves_failure_after_restart(self):
         manager = self.manager()

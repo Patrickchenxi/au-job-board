@@ -1,4 +1,4 @@
-"""原始规则＋启用开关＋五 profile 预设（纯内存，未接入 analyze / 面板）。
+"""原始规则＋启用开关＋六 profile 预设（纯内存，未接入 analyze / 面板）。
 
 本模块只做一件事：按一个独立的 `legacy_rule_profile` 配置段，选择现有
 `rules.yaml` 里哪些 `exclude` / `overrides` 条目参与旧 `filters.evaluate`
@@ -32,7 +32,7 @@ import copy
 from .filters import evaluate
 
 SECTION = "legacy_rule_profile"
-PROFILES = ("citizen", "permanent_resident", "485", "student_visa", "custom")
+PROFILES = ("citizen", "permanent_resident", "485", "whv", "student_visa", "custom")
 SECTION_KEYS = ("profile", "exclude", "overrides")
 NAMESPACES = ("exclude", "overrides")
 
@@ -43,6 +43,7 @@ _DEFAULT_DISABLED = {
                 "overrides": ()},
     "permanent_resident": {"exclude": ("citizenship.or_pr",), "overrides": ()},
     "485": {"exclude": (), "overrides": ()},
+    "whv": {"exclude": (), "overrides": ()},
     "student_visa": {"exclude": (), "overrides": ()},
     "custom": {"exclude": (), "overrides": ()},
 }
@@ -53,7 +54,7 @@ LIMITS = (
     "citizen / permanent_resident 仍可能被其中重叠条件排除。",
     "关闭 citizenship.or_pr 不保证 PR 岗位全部放行；visa.or 是全局 override，"
     "默认保留，关闭它只是去掉一条救回路径，不会更精确。",
-    "student_visa 与 485 的默认开关相同，不表示工作权相同；"
+    "WHV、student_visa 与 485 的默认开关相同，不表示工作权相同；"
     "不推断小时上限、也不从身份推断已持有许可。",
 )
 

@@ -59,6 +59,7 @@ Field order is fixed: `australian_citizen`, `permanent_resident`,
 | `citizen` | true | false | true | false | null | null |
 | `permanent_resident` | false | true | true | false | null | null |
 | `485` | false | false | true | false | false | null |
+| `whv` | false | false | null | null | false | null |
 | `student_visa` | false | false | null | null | false | null |
 | `custom` | all six fields given explicitly | | | | | |
 

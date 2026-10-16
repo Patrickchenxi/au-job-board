@@ -1,6 +1,6 @@
 name: Offline public tests
 
-# Runs for pull requests into main, for pushes to main, and on manual dispatch.
+# Runs for pull requests into main/dev, for pushes to main/dev, and on manual dispatch.
 # There is deliberately no path filter and no draft skip, so the check always
 # exists for a pull request. The plain pull_request event is used (never
 # pull_request_target) and the workflow has read-only access and no secrets.
@@ -8,9 +8,11 @@ on:
   pull_request:
     branches:
       - main
+      - dev
   push:
     branches:
       - main
+      - dev
   workflow_dispatch:
 
 # Least privilege: this workflow only reads the checkout.

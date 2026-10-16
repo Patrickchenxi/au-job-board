@@ -93,12 +93,14 @@ its own directory and serves on `127.0.0.1:8091`. The steps are in the
 
 ## Install
 
-The pipeline is installed from source into its own virtual environment. The
-steps are in the [installation guide](docs/install.md). Python 3.12 on macOS 15
-is what has been checked on one machine; other versions and platforms are not
-verified. Getting
-the source and installing dependencies may both use the network; the offline
-checks and the synthetic demo do not.
+**On macOS, source installation is recommended.** Install into its own virtual
+environment following the [installation guide](docs/install.md). Python 3.12 on
+macOS 15 has been checked. [Docker with Compose](docs/docker.md) is an optional
+alternative with persistent configuration, data and reports; it does not replace
+the source workflow or add a scheduler. See the dated
+[verification record](docs/installation-verification.md) for tested platforms
+and architectures. Getting the source, building an image and installing
+dependencies may use the network; offline checks and the synthetic demo do not.
 
 Get the source from `https://github.com/SkywingJam/au-job-board`. If you already have it (a
 download or a copy you were given), use that directory instead. Otherwise clone
@@ -148,7 +150,7 @@ to the agent:
   English text. They can wrongly exclude a job or wrongly keep one, which is why
   the Excluded view and the audit report exist.
 - **Profiles are rule switches, not legal advice.** A profile such as `citizen`,
-  `permanent_resident`, `485`, `student_visa` or `custom` only decides which
+  `permanent_resident`, `485`, `whv`, `student_visa` or `custom` only decides which
   existing rules run. Mixed and overlapping rules still have known limits. See
   [rule profiles](docs/legacy-rule-profiles.md).
 - **Changing a profile does not update history by itself.** The Settings page
@@ -197,9 +199,10 @@ Not verified, and the documentation does not imply otherwise:
 | [Installation](docs/install.md) | Source install for a new machine |
 | [Agent-assisted installation](docs/agent-install.md) | The same steps for an AI agent |
 | [Usage guide](docs/usage.md) | Workflow, commands, local data, notes, languages |
-| [Fetch settings and updates](docs/manual-updates.md) | Read-only configuration and background updates from the panel |
+| [Fetch settings and updates](docs/manual-updates.md) | Editable next-run configuration and background updates from the panel |
+| [Optional Docker](docs/docker.md) | Local image, Compose, persistent volumes, commands and backup |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |
-| [Rule profiles](docs/legacy-rule-profiles.md) | The five profiles, per-rule switches, applying a change |
+| [Rule profiles](docs/legacy-rule-profiles.md) | The six profiles, per-rule switches, applying a change |
 | [Eligibility snapshot](docs/eligibility-profiles.md) | The separate, read-only `eligibility` section |
 | [Safety and sources](docs/safety-and-sources.md) | Panel exposure, platform terms, data redistribution |
 | [Demo](docs/demo.md) | The offline synthetic demo |
