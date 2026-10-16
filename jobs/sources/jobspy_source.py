@@ -73,6 +73,8 @@ def fetch(config: dict, queries: list[str], site: str = SOURCE_INDEED) -> list[d
         except RunTimeout:
             raise            # 超时要整体中断，不能被当成「这个查询失败」吞掉
         except Exception as exc:                       # noqa: BLE001
+            if "_run_source_failures" in config:
+                config["_run_source_failures"][site] = True
             print(f"  [{site}] {query!r} 抓取失败: {type(exc).__name__}: {exc}")
             continue
 

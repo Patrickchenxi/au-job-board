@@ -70,6 +70,9 @@ ICON_GLOBE = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" strok
 ICON_INFO = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>')
+ICON_REFRESH = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                '<path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-.7 7"/></svg>')
 # 主题按钮同时放太阳和月亮，CSS 按当前生效的主题只显示一个（见 panel.css）
 ICON_THEME = ('<svg class="i-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" '
               'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
@@ -105,6 +108,26 @@ def _e(value) -> str:
 def _js(value) -> str:
     """嵌进 <script> 的 JSON。转义 </ 以免提前结束 script 标签。"""
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _update_widget(lang: str, *, compact: bool = False) -> str:
+    """One update controller per page; state is fetched without refreshing edits."""
+    T = lambda k: i18n.t(lang, k)  # noqa: E731
+    return "".join([
+        f'<section class="update-widget{" update-compact" if compact else ""}" '
+        f'aria-label="{_e(T("js.update_title"))}">',
+        '<div class="update-controls">',
+        f'<button type="button" class="btn" id="update-start" title="{_e(T("set.update_hint"))}" disabled>{_e(T("js.update_title"))}</button>',
+        f'<a id="update-refresh" class="iconbtn" href="/" '
+        f'title="{_e(T("js.update_refresh"))}" aria-label="{_e(T("js.update_refresh"))}" hidden>'
+        f'{ICON_REFRESH}</a>',
+        '</div><div class="update-feedback">',
+        f'<p id="update-status" role="status" aria-live="polite" aria-atomic="true">{_e(T("js.update_checking"))}</p>',
+        '<p id="update-meta" class="muted"></p>',
+        '</div>',
+        f'<noscript><p>{_e(T("js.update_nojs"))}</p></noscript>',
+        '</section>',
+    ])
 
 
 def _tag_html(kind: str, text: str, title: str | None = None) -> str:
@@ -772,6 +795,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span>'
         f'{run_note}</div>',
         "</div>",
+        _update_widget(lang, compact=True),
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
@@ -817,7 +841,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # 设置页
 # ---------------------------------------------------------------------------
 
-SETTINGS_SECTIONS = ("skills", "display")
+SETTINGS_SECTIONS = ("skills", "fetch", "display")
 
 _PROFILE_NAMES = ("citizen", "permanent_resident", "485", "student_visa", "custom")
 
@@ -873,6 +897,21 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<p class="set-foot">{_e(T("set.footnote"))}</p>',
         ])
         extra = {"__SKILL_TREE__": tree}
+    elif section == "fetch":
+        pane = "".join([
+            f'<h2>{_e(T("set.fetch_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.fetch_hint"))}</p>',
+            '<div id="update-config" class="fetch-config" aria-live="polite">'
+            f'<p class="muted">{_e(T("js.loading"))}</p></div>',
+            f'<p class="set-foot">{_e(T("set.fetch_readonly"))}</p>',
+            f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
+            _update_widget(lang),
+            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
+            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
+            f'<br>{_e(T("set.profile_used"))}</p>',
+        ])
+        extra = {}
     else:
         def radios(name: str, current: str, options: list[tuple[str, str, str]], fn: str) -> str:
             return '<div class="opts">' + "".join(

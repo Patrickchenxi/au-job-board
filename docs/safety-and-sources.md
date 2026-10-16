@@ -12,10 +12,11 @@ the implementation actually does:
 
 - **No authentication.** Anyone who can reach the address and port can open every
   page, read all listings, descriptions and your notes, and use the write
-  endpoints: change labels and notes, and add, alias or remove skills in your
-  vocabulary overlay.
-- **No transport encryption and no origin check.** It serves HTTP, not HTTPS, and
-  it does not check where a write request comes from.
+  endpoints: change labels and notes, add, alias or remove skills in your
+  vocabulary overlay, and trigger a full network update.
+- **No transport encryption.** It serves HTTP, not HTTPS. The manual-update
+  endpoint requires JSON and checks the request host and browser origin; older
+  label/skill endpoints do not check origin. These checks are not authentication.
 - **Wildcard binding is refused, nothing else is.** `panel.serve` refuses to start
   on `0.0.0.0`, `::` or an empty host. It still accepts any specific address, so a
   LAN or other interface address works, and then it is exposed to everyone on
@@ -64,8 +65,9 @@ decision and your responsibility.
 You control volume and pacing in your configuration (`queries`,
 `pages_per_query`, `daterange`, `detail_sleep`, `results_wanted`). Keep them
 modest. Reading the configuration, running `analyze`, `report` or `panel`, or
-starting the panel never fetches anything. Only `fetch`, `details` and `run` use
-the network.
+starting the panel never fetches anything. `fetch`, `details` and `run` use the
+network; clicking **Update jobs** in the panel starts `run`. See
+[manual-updates.md](manual-updates.md).
 
 ### Third-party data and redistribution
 

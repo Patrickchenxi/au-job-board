@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 16 checks: 15 Python tests
+be collected by accident. The entry currently has 18 checks: 17 Python tests
 plus one Node behavior test.
 
 Run it from the project root with the project interpreter:
@@ -52,12 +52,14 @@ nothing in the suite fetches listings.
 | `tools/test_labels_notes.py` | Manual labels and notes | all |
 | `tools/test_panel_logic.py` | Panel core logic | all |
 | `tools/test_panel_i18n.py` | Panel English / Chinese text | all |
+| `tools/test_panel_update.py` | Frozen fetch settings, background-run state, locks, partial failure, timeout and label preservation | all |
+| `tools/test_panel_update_http.py` | Update API, same-origin/host checks, JSON input and disabled demo | all |
 | `tools/test_skills_and_search.py` | Skill vocabulary and search matching | all |
 | `tools/test_demo.py` | Synthetic demo end to end (isolated, loopback only) | all |
 | `tools/test_legacy_cleanup.py` | Legacy single-path end to end | all |
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
-| `tools/test_panel_note_separators.mjs` | Panel note separators and default labels (UI-02, UI-03) | all |
+| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and explicit result refresh with a detail hash | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output

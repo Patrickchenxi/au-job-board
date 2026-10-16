@@ -65,6 +65,13 @@ description, salary present, freshness, skills, tier and your own label values.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
+**Settings → Fetching & updates** shows the current read-only fetch configuration
+separately from the Profile used by the last successful analysis. **Update jobs**
+starts the full pipeline in the background, shows its outcome and leaves you in
+control of refreshing results. This button uses the network; opening the panel
+does not. See [fetch settings and manual updates](manual-updates.md) for config
+timing, partial failures and concurrency limits.
+
 ## Labels, notes and follow-up
 
 Each job carries three independent label axes, because one "apply or not" flag

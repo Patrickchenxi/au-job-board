@@ -139,9 +139,13 @@ def fetch(config: dict, queries: list[str]) -> list[dict]:
                 try:
                     data = search_page(query, where, page, daterange)
                 except HTTPError as exc:
+                    if "_run_source_failures" in config:
+                        config["_run_source_failures"]["seek"] = True
                     print(f"  [seek] {query!r} p{page} HTTP {exc.code}")
                     break
                 except (URLError, TimeoutError) as exc:
+                    if "_run_source_failures" in config:
+                        config["_run_source_failures"]["seek"] = True
                     print(f"  [seek] {query!r} p{page} 网络错误: {exc}")
                     break
                 records = data.get("data") or []

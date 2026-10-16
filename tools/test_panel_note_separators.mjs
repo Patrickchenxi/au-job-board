@@ -14,6 +14,7 @@
     （中英各自：原样显示、过滤不抛错、鼠标/键盘点选与保存保真、默认仍翻译）
   - emoji 保真、IME 组字保护不退化
   - 英文相邻完整标签显示「; 」（结尾单个 ;、不叠加空格、不新增空标签），中文不变
+  - 手动刷新结果在带详情 hash 时真正重载，并保留筛选/详情及修饰键语义
 
 这些断言直接执行 panel.js 里的真实函数（在 vm 里加载），不是静态源码检查。
 面板依赖的 window / document / fetch 用最小 stub 顶替，不连网、不碰真实库。
@@ -136,6 +137,7 @@ function loadPanel(lang, tags, noteTagLabels) {
   const menu = new FakeEl("div");
   const toast = new FakeEl("div");
   const byId = new Map([["note-menu", menu], ["toast", toast]]);
+  const listeners = new Map();
   const document = {
     documentElement: { style: { setProperty() {} }, dataset: {} },
     body: { classList: new ClassList() },
@@ -145,7 +147,10 @@ function loadPanel(lang, tags, noteTagLabels) {
     querySelector: () => null,
     querySelectorAll: () => [],
     createElement: (tag) => new FakeEl(tag),
-    addEventListener() {},
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
     removeEventListener() {},
   };
   const sandbox = {
@@ -194,7 +199,8 @@ function loadPanel(lang, tags, noteTagLabels) {
   imeComposing, imeStart, imeEnd, imeBusy, imeJustComposed, NOTE_TAGS, NOTE_TAG_LABELS, LABELS };
 `;
   vm.runInContext(src, sandbox, { filename: "panel.js" });
-  const panel = { api: sandbox.__PANEL__, sandbox, menu, calls: [] };
+  const panel = { api: sandbox.__PANEL__, sandbox, menu, calls: [], elements: byId,
+    ready: () => (listeners.get("DOMContentLoaded") || []).forEach((fn) => fn()) };
   panel.respondWith = (responder) => {
     panel.calls.length = 0;
     sandbox.fetch = async (url, opts) => {
@@ -731,6 +737,35 @@ function testEmojiAndIme() {
   }
 }
 
+function testUpdateRefreshWithDetailHash() {
+  const panel = loadPanel("zh", TAGS);
+  const refresh = new FakeEl("a");
+  const current = "/?view=all&q=synthetic#seek%3Asynthetic-refresh";
+  refresh.href = current;
+  panel.elements.set("update-refresh", refresh);
+  panel.ready();
+  panel.sandbox.location.href = current;
+  panel.sandbox.location.hash = "#seek%3Asynthetic-refresh";
+  let reloads = 0, prevented = 0, reloadedUrl;
+  panel.sandbox.location.reload = () => { reloads++; reloadedUrl = panel.sandbox.location.href; };
+  eq("刷新：没有用户点击时不自动重载", reloads, 0);
+  refresh.dispatch("click", { button: 0, preventDefault() { prevented++; } });
+  eq("刷新：带详情 hash 的普通点击确实重载一次", reloads, 1);
+  eq("刷新：阻止仅执行同页 hash 定位", prevented, 1);
+  eq("刷新：保留当前筛选、视图和详情位置", reloadedUrl, current);
+  for (const modifiers of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true },
+                            { altKey: true }, { button: 1 }]) {
+    refresh.dispatch("click", { button: 0, ...modifiers, preventDefault() { prevented++; } });
+  }
+  eq("刷新：修饰键/中键仍走原生链接、不重载当前页", reloads, 1);
+  eq("刷新：修饰键/中键不被 preventDefault", prevented, 1);
+  panel.sandbox.document.body.classList.add("settings");
+  refresh.href = "/";
+  refresh.dispatch("click", { button: 0, preventDefault() { prevented++; } });
+  eq("刷新：设置页保留前往结果列表的原生导航", reloads, 1);
+  eq("刷新：设置页的结果链接不被拦截", prevented, 1);
+}
+
 async function main() {
   console.log("== 备注分隔符 / 默认标签本地化 JS 交互（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -740,6 +775,7 @@ async function main() {
   await testEnglishBoundarySpace();
   await testPrototypeKeys();
   testEmojiAndIme();
+  testUpdateRefreshWithDetailHash();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);

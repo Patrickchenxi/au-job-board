@@ -86,6 +86,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         lang, theme = self._prefs()
+        if parsed.path in ("/api/update-config", "/api/update-state"):
+            manager = getattr(self.server, "update_manager", None)
+            reason = "demo_disabled" if "demo" in self.config else "config_unavailable"
+            if parsed.path == "/api/update-config":
+                result = manager.preview() if manager else {"ok": False, "error": reason}
+            else:
+                result = manager.status() if manager else {"state": "disabled", "error": reason}
+            self._json(result, 200, started)
+            return
         conn = database.connect(_db_path(self.config))
         try:
             if parsed.path == "/api/job":
@@ -137,6 +146,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):                                  # noqa: N802
         started = time.perf_counter()
+        if self.path == "/api/update":
+            self._post_update(started)
+            return
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -165,6 +177,53 @@ class Handler(BaseHTTPRequestHandler):
             self._send(str(exc).encode(), 400, "text/plain", started)
         finally:
             conn.close()
+
+    def _post_update(self, started: float):
+        """A browser may start a network update only from this panel's origin."""
+        try:
+            request_host = urlparse("//" + self.headers.get("Host", ""))
+            bound_host, bound_port = self.server.server_address[:2]
+            allowed_hosts = {str(bound_host).lower()}
+            if bound_host in ("127.0.0.1", "::1"):
+                allowed_hosts.add("localhost")
+            host_ok = (request_host.hostname in allowed_hosts
+                       and (request_host.port or 80) == bound_port
+                       and not request_host.username and not request_host.password)
+            origin = self.headers.get("Origin")
+            if origin is not None:
+                parsed = urlparse(origin)
+                host_ok = host_ok and (parsed.scheme == "http"
+                                      and parsed.netloc == request_host.netloc
+                                      and not parsed.path and not parsed.query
+                                      and not parsed.fragment)
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            host_ok, length = False, 0
+        if not host_ok:
+            self.close_connection = True
+            self._json({"error": "origin_rejected"}, 403, started)
+            return
+        if self.headers.get_content_type() != "application/json" or not 0 < length <= 4096:
+            self.close_connection = True
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        if payload != {}:
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        manager = getattr(self.server, "update_manager", None)
+        if manager is None:
+            self._json({"state": "disabled", "error": "demo_disabled" if "demo" in self.config
+                        else "config_unavailable", "accepted": False}, 503, started)
+            return
+        result = manager.start()
+        status = 202 if result.get("accepted") else (
+            409 if result.get("state") in ("busy", "running") else 400)
+        self._json(result, status, started)
 
     def _post_skills(self, payload: dict, started: float):
         """技能词表的两个写操作：新增技能 / 给已有技能加别名。
@@ -215,7 +274,7 @@ def _db_path(config: dict):
     return db_path(config)
 
 
-def serve(config: dict) -> None:
+def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> None:
     panel = config.get("panel") or {}
     host = str(panel.get("host", "")).strip()
     port = int(panel.get("port", 8090))
@@ -226,8 +285,14 @@ def serve(config: dict) -> None:
             "请在配置里指定明确的地址（例如回环地址 127.0.0.1）；"
             "如需远程访问，请自行配置受保护的访问层。")
 
-    Handler.config = config
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    from .panel_update import UpdateManager
+
+    # Each listener owns its configuration and runner; demo/test handlers do not
+    # inherit a runner from another listener in the same interpreter.
+    handler = type("PanelHandler", (Handler,), {"config": config})
+    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
+                                        skills_path=skills_path)
 
     # 启动指纹：Python 在启动时就把模块加载进内存，改了代码不重启不会生效。
     # 把 panel.py 的修改时间打出来，「跑的是哪一版」就不用猜了。
