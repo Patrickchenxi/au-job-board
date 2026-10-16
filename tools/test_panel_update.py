@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml
 from jobs import RunTimeout, cli, config, db as database, demo, labels, panel_update, sources
+from jobs import panel, skills as skills_mod
 from jobs.sources import jobspy_source, seek
 
 
@@ -231,6 +232,51 @@ class ManagerTests(TemporaryTest):
 
         self.process_mock.side_effect = lambda *_args, **_kwargs: Process()
         return release, reaped
+
+    def test_external_cwd_keeps_rules_skills_and_worker_selection_consistent(self):
+        launch = self.root / "external-launch"
+        launch.mkdir()
+        (launch / "rules.yaml").write_text("version: 91\n")
+        for name in ("vocab.yaml", "override.yaml"):
+            (launch / name).write_text(yaml.safe_dump({"version": 1, "skills": [{"name": name}]}))
+        self.cfg["skills_path"] = "vocab.yaml"
+        self.write(self.cfg)
+        for override in (None, "override.yaml"):
+            with self.subTest(override=override):
+                with contextlib.chdir(launch):
+                    manager = panel_update.UpdateManager(self.cfg, self.path, rules_path="rules.yaml", skills_path=override)
+                expected_skills = launch / (override or "vocab.yaml")
+                self.assertEqual(manager.rules_path, launch / "rules.yaml")
+                self.assertEqual(manager.skills_path, expected_skills)
+                self.assertEqual(skills_mod.load_skills(manager.skills_path)["skills"][0]["name"], expected_skills.name)
+                self.assertTrue(manager.preview()["ok"])
+                release, reaped = self.fake_worker(manager)
+                self.assertTrue(manager.start()["accepted"])
+                command = self.process_mock.call_args.args[0]
+                self.assertEqual(Path(command[command.index("--rules") + 1]), launch / "rules.yaml")
+                self.assertEqual(Path(command[command.index("--skills") + 1]), expected_skills)
+                release.set()
+                self.assertTrue(reaped.wait(2))
+                self.assertEqual(self.wait_finished(manager)["state"], "success")
+                # Once the watcher closes its snapshot, the next subtest may start.
+                deadline = time.monotonic() + 2
+                while (manager.runtime / "config.yaml").exists() and time.monotonic() < deadline:
+                    time.sleep(0.005)
+        with contextlib.chdir(launch):
+            manager = panel_update.UpdateManager(self.cfg, self.path)
+        self.write({**self.cfg, "skills_path": "other.yaml"})
+        self.assertEqual(manager.preview()["error"], "reload_required")
+
+    def test_panel_from_external_cwd_pins_the_editable_vocabulary_target(self):
+        launch = self.root / "external-launch"
+        launch.mkdir()
+        self.cfg["skills_path"] = "vocab.yaml"
+        self.write(self.cfg)
+        for override in (None, "override.yaml"):
+            with self.subTest(override=override), contextlib.chdir(launch), patch.object(panel, "serve") as serve:
+                args = argparse.Namespace(config=str(self.path), rules="rules.yaml", skills=override, host=None, port=None)
+                self.assertEqual(cli.cmd_panel(args), 0)
+                self.assertEqual(serve.call_args.args[0]["skills_path"], str(launch / (override or "vocab.yaml")))
 
     def test_preview_uses_real_adapter_defaults_and_source_switches_without_writes(self):
         manager = self.manager()

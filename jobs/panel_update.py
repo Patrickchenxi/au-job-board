@@ -151,10 +151,13 @@ class UpdateManager:
     def __init__(self, config, config_path=None, *, rules_path=None, skills_path=None):
         self.config = copy.deepcopy(config)
         self.demo = "demo" in config
+        self.launch_dir = Path.cwd()
         self.config_path = Path(config_path).resolve() if config_path is not None else ROOT / "config.yaml"
-        self.rules_path = _path(rules_path) if rules_path is not None else ROOT / "rules.yaml"
-        self.skills_override = _path(skills_path) if skills_path is not None else None
-        self.skills_path = self.skills_override or _path(config.get("skills_path") or "skills.yaml")
+        # Explicit CLI paths and panel skills paths historically use launch cwd;
+        # database/report paths separately use the repository root.
+        self.rules_path = Path(rules_path).resolve() if rules_path is not None else ROOT / "rules.yaml"
+        self.skills_override = Path(skills_path).resolve() if skills_path is not None else None
+        self.skills_path = self._skills_target(config)
         self.targets = self._targets(config)
         active_db = db_path(config).resolve()
         # No directories or files are created until an actual update request.
@@ -165,10 +168,19 @@ class UpdateManager:
         self._mutex = threading.RLock()
         self._process = None
 
+    def _skills_target(self, config):
+        if self.skills_override is not None:
+            return self.skills_override
+        configured = config.get("skills_path")
+        if not configured:
+            return ROOT / "skills.yaml"
+        path = Path(configured)
+        return (path if path.is_absolute() else self.launch_dir / path).resolve()
+
     def _targets(self, config):
         report = _section(config, "report")
         return (db_path(config).resolve(), _path(report.get("out_dir", "out")),
-                self.skills_override or _path(config.get("skills_path") or "skills.yaml"))
+                self._skills_target(config))
 
     def _fresh(self):
         config = read_config_root(self.config_path)

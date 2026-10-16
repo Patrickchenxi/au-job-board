@@ -690,8 +690,11 @@ def cmd_panel(args) -> int:
     if args.port:
         panel["port"] = args.port
     config["panel"] = panel
-    if args.skills:
-        config["skills_path"] = str(Path(args.skills).resolve())
+    panel_skills = args.skills or config.get("skills_path")
+    if panel_skills:
+        # Panel edits and the worker must target the same vocabulary even when
+        # launched outside the repository (skills paths use launch cwd).
+        config["skills_path"] = str(Path(panel_skills).resolve())
     serve(config, config_path=args.config, rules_path=args.rules, skills_path=args.skills)
     return 0
 
