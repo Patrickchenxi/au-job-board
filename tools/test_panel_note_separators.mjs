@@ -759,6 +759,11 @@ function testUpdateRefreshWithDetailHash() {
   }
   eq("刷新：修饰键/中键仍走原生链接、不重载当前页", reloads, 1);
   eq("刷新：修饰键/中键不被 preventDefault", prevented, 1);
+  panel.sandbox.document.body.classList.add("settings");
+  refresh.href = "/";
+  refresh.dispatch("click", { button: 0, preventDefault() { prevented++; } });
+  eq("刷新：设置页保留前往结果列表的原生导航", reloads, 1);
+  eq("刷新：设置页的结果链接不被拦截", prevented, 1);
 }
 
 async function main() {

@@ -1063,6 +1063,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const refresh=document.getElementById('update-refresh');
   if(refresh)refresh.addEventListener('click',event=>{
     if(event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if(document.body.classList.contains('settings')) return;
     // Navigating to this same URL with a detail hash only scrolls in-page.
     // An explicit reload fetches fresh results and retains filters/detail.
     event.preventDefault();
