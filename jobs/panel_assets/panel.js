@@ -1060,6 +1060,14 @@ async function loadUpdateConfig(){
 document.addEventListener('DOMContentLoaded',()=>{
   const button=document.getElementById('update-start');
   if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
+  const refresh=document.getElementById('update-refresh');
+  if(refresh)refresh.addEventListener('click',event=>{
+    if(event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    // Navigating to this same URL with a detail hash only scrolls in-page.
+    // An explicit reload fetches fresh results and retains filters/detail.
+    event.preventDefault();
+    location.reload();
+  });
   loadUpdateConfig();
 });
 document.addEventListener('visibilitychange',()=>{

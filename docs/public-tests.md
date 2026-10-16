@@ -59,7 +59,7 @@ nothing in the suite fetches listings.
 | `tools/test_legacy_cleanup.py` | Legacy single-path end to end | all |
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
-| `tools/test_panel_note_separators.mjs` | Panel note separators and default labels (UI-02, UI-03) | all |
+| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and explicit result refresh with a detail hash | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output
