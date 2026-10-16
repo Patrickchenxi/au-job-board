@@ -198,7 +198,14 @@ class UpdateManager:
         try:
             _, result = self._fresh()
             # Compare the displayed execution fields, unaffected by host/port overrides.
-            result["changed_since_start"] = result.get("queries") != _summary(self.config).get("queries") or result.get("sources") != _summary(self.config).get("sources")
+            # A repaired file must not remain invalid because the startup
+            # configuration had no queries or malformed fetch settings.
+            try:
+                original = _summary(self.config)
+            except (ValueError, TypeError, AttributeError):
+                original = {}
+            result["changed_since_start"] = any(
+                result.get(key) != original.get(key) for key in ("queries", "sources"))
             return result
         except (ValueError, TypeError, AttributeError, yaml.YAMLError):
             return {**empty, "error": "config_invalid"}

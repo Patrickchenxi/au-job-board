@@ -233,6 +233,18 @@ class ManagerTests(TemporaryTest):
         self.process_mock.side_effect = lambda *_args, **_kwargs: Process()
         return release, reaped
 
+    def test_repaired_fetch_config_is_visible_without_panel_restart(self):
+        self.cfg.pop("queries")
+        self.write(self.cfg)
+        manager = self.manager()
+        self.assertEqual(manager.preview()["error"], "config_invalid")
+        self.cfg["queries"] = ["repaired synthetic developer"]
+        self.write(self.cfg)
+        preview = manager.preview()
+        self.assertTrue(preview["ok"])
+        self.assertEqual(preview["queries"], self.cfg["queries"])
+        self.assertTrue(preview["changed_since_start"])
+
     def test_external_cwd_keeps_rules_skills_and_worker_selection_consistent(self):
         launch = self.root / "external-launch"
         launch.mkdir()
