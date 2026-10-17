@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml
 from jobs import RunTimeout, cli, config, db as database, demo, labels, panel_update, sources
-from jobs import panel, skills as skills_mod
+from jobs import panel, run_state, skills as skills_mod
 from jobs.sources import jobspy_source, seek
 
 
@@ -433,6 +433,51 @@ class ManagerTests(TemporaryTest):
         release.set()
         self.assertTrue(reaped.wait(2))
         self.assertEqual(self.wait_finished(manager)["state"], "error")
+
+    def test_watcher_preserves_completion_for_recovery_after_generation_write_failure(self):
+        for state in ("success", "partial"):
+            with self.subTest(state=state):
+                manager = self.manager()
+                handle = run_state.acquire_lock(self.cfg)
+                self.assertIsNotNone(handle)
+                self.addCleanup(handle.close)
+                task = "completed-" + state
+                result = {**panel_update._empty(state), "task_id": task,
+                          "completion_ready": True, "refresh_available": True}
+                manager.result_path.write_text(json.dumps(result))
+                snapshot = manager.runtime / "config.yaml"
+                snapshot.write_text("queries: [synthetic]\n")
+                original = run_state.atomic_json
+
+                def fail_generation(path, value):
+                    if Path(path).name == "generation.json":
+                        raise OSError("synthetic generation write failure")
+                    original(path, value)
+
+                class Process:
+                    def wait(self, timeout=None):
+                        return 0
+
+                with patch.object(run_state, "atomic_json", side_effect=fail_generation):
+                    manager._watch(Process(), handle, snapshot, result)
+                self.assertTrue(handle.closed)
+                self.assertFalse(snapshot.exists())
+                self.assertNotEqual(run_state.generation(self.cfg), task)
+                self.assertIs(json.loads((manager.runtime / "latest.json").read_text())["completion_ready"], True)
+                restarted = self.manager()
+                recovered = restarted.status()
+                self.assertEqual(recovered["state"], state)
+                self.assertEqual(recovered["generation"], task)
+                generation_path = manager.runtime / "generation.json"
+                stamp = generation_path.stat().st_mtime_ns
+                self.assertEqual(restarted.status()["generation"], task)
+                self.assertEqual(generation_path.stat().st_mtime_ns, stamp)
+
+    def test_completion_marker_requires_a_boolean_true(self):
+        for marker in (True, False, 1, "true", None):
+            with self.subTest(marker=marker):
+                safe = panel_update._safe_state({"state": "success", "completion_ready": marker})
+                self.assertIs(safe["completion_ready"], marker is True)
 
     def test_zero_exit_without_terminal_result_is_not_success(self):
         manager = self.manager()

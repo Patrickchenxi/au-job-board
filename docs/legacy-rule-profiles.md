@@ -131,10 +131,12 @@ legacy_rule_profile:
    derived decisions, scores, salary, de-duplication and skill tables, **does not
    fetch** anything, and **keeps your labels and notes**. Scheduled `run` jobs
    also analyse, so later scheduled runs read the new profile.
-3. **Check the result.** Settings → Fetching & updates shows the profile used by
-   the last successful analysis, separately from editable next-run settings.
-   Saving settings never triggers automatic recalculation. Reports show the same recorded profile, and an older
-   analysis that recorded none is shown as "not recorded". The jobs panel itself
+3. **Check the result.** In Settings → Fetching & updates, the legacy rule-switch
+   region shows current values first and saved next-run changes after them.
+   Current values come from the last successful analysis snapshot; older records
+   without a snapshot are explicitly labeled (see [fetch settings](manual-updates.md)).
+   Saving settings never triggers automatic recalculation. Reports show the
+   recorded profile, or "not recorded" when an older analysis recorded none. The jobs panel itself
    does not display the per-rule switch summary.
 
 `analyze` validates the section before it opens the database, so an invalid

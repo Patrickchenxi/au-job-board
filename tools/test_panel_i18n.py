@@ -21,12 +21,13 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from jobs import db as database          # noqa: E402
-from jobs import i18n, panel             # noqa: E402
+from jobs import i18n, panel, panel_views, run_state  # noqa: E402
 from jobs import labels as labels_mod    # noqa: E402
 
 failures: list[str] = []
@@ -157,64 +158,33 @@ def test_render() -> None:
 
 
 def test_settings_profile() -> None:
-    print("\n== 设置页 Profile 只读显示（合成库）==")
+    print("\n== 设置页移除重复 Profile 摘要（合成库）==")
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-
-    def page(stats, lang, config=None):
-        """stats=None 表示没有任何 analyze 记录。"""
-        with tempfile.TemporaryDirectory() as d:
-            conn = database.connect(os.path.join(d, "p.db"))
-            if stats is not None:
-                database.log_run(conn, "analyze", now, stats)
-                conn.commit()
-            html = panel.render_settings(conn, config or {}, lang, None, "fetch", lang)
-            conn.close()
-            return visible(html)
 
     def rec(profile):
         return {"rule_profile": {"profile": profile, "config_source": "x",
                                  "exclude": {"synthetic.rule": False}, "overrides": {}}}
 
-    expected = {
-        "citizen": ("公民", "Citizen"),
-        "permanent_resident": ("永久居民", "PR"),
-        "485": ("485", "485"),
-        "whv": ("WHV（打工度假）", "Working Holiday (WHV)"),
-        "student_visa": ("学生", "Student"),
-        "custom": ("自定义", "Custom"),
-    }
-    for name, (zh_name, en_name) in expected.items():
-        check(f"最近分析 {name}：中文显示 Profile：{zh_name}",
-              f"Profile：{zh_name}</b>" in page(rec(name), "zh"))
-        check(f"最近分析 {name}：英文显示 Profile: {en_name}",
-              f"Profile: {en_name}</b>" in page(rec(name), "en"))
-    zh = page(rec("485"), "zh")
-    check("附带说明「最近一次分析使用」", "最近一次分析使用" in zh
-          and "Used by the last analyze" in page(rec("485"), "en"))
-    check("缺省 profile：默认 / 全部规则开启",
-          "Profile：默认 / 全部规则开启</b>" in page(rec(None), "zh")
-          and "Profile: Default / all rules on</b>" in page(rec(None), "en"))
-    check("没有记录：未记录 / 重新分析后显示，不伪造 485",
-          "Profile：未记录 / 重新分析后显示</b>" in page(None, "zh")
-          and "Profile: Not recorded / shown after re-analysis</b>" in page(None, "en")
-          and "485" not in page(None, "zh").split("分析规则")[1].split("</p>")[0])
-    old = page({"unrelated": 1}, "zh")
-    check("旧分析没有 rule_profile：同样显示未记录", "Profile：未记录 / 重新分析后显示" in old)
-    weird = page(rec("<b>evil</b>"), "en")
-    check("无法识别的值显示 Unknown，不回显输入",
-          "Profile: Unknown</b>" in weird and "evil" not in weird)
-    check("Custom 只在最近分析是 custom 时出现",
-          "Profile: Custom</b>" not in page(rec("485"), "en")
-          and "Profile：自定义</b>" not in zh)
-
-    stale = page(rec("485"), "en", {"legacy_rule_profile": {"profile": "citizen"}})
-    check("配置改成 citizen 但没重新分析：仍显示 485",
-          "Profile: 485</b>" in stale and "Citizen" not in stale)
-    check("不展示 rule id / 开关清单 / 来源",
-          "synthetic.rule" not in stale
-          and "config_source" not in stale)
-    check("英文设置页 Profile 区无中文",
-          not CJK.findall(stale.replace(i18n.t("en", "lang.switch"), "").replace("中文", "").replace("优先投递", "")))
+    with tempfile.TemporaryDirectory() as d:
+        conn = database.connect(os.path.join(d, "settings.db"))
+        database.log_run(conn, "analyze", now, rec("485"))
+        conn.commit()
+        for lang in ("zh", "en"):
+            for section in ("fetch", "display"):
+                with patch.object(run_state, "generation", return_value="rendered-generation"):
+                    html = panel.render_settings(conn, {}, lang, None, section, lang)
+                check(f"{lang}/{section}：嵌入渲染时结果版本",
+                      'window.__SETTINGS_GENERATION__="rendered-generation"' in html)
+                content = visible(html)
+                check(f"{lang}/{section}：没有重复的分析规则/Profile摘要",
+                      i18n.t(lang, "set.profile_title") not in content
+                      and i18n.t(lang, "set.profile_used") not in content
+                      and i18n.t(lang, "set.profile_label", name="485") not in content)
+                if section == "fetch":
+                    check(f"{lang}：保留分区配置与更新入口",
+                          'id="config-editor"' in html
+                          and i18n.t(lang, "js.update_title") in content)
+        conn.close()
 
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "p.db")
@@ -224,7 +194,8 @@ def test_settings_profile() -> None:
         conn.close()
         before = Path(path).read_bytes()
         conn = database.connect(path)
-        panel.render_settings(conn, {}, "zh", None, "display", "zh")
+        for section in ("fetch", "display"):
+            panel.render_settings(conn, {}, "zh", None, section, "zh")
         conn.close()
         check("渲染设置页不写库", Path(path).read_bytes() == before)
 
@@ -242,6 +213,22 @@ def test_settings_profile() -> None:
                               + visible(panel.render_page(conn, {}, v, 0, 40, None, {}, "en", None)))]
         check("主页面各视图没有规则状态摘要", not leaks, str(leaks))
         conn.close()
+
+
+def test_stale_fetch_warning() -> None:
+    print("\n== 抓取过期提示 ==")
+    now = dt.datetime.now(dt.timezone.utc)
+    for lang in ("zh", "en"):
+        for state in ("success", "partial", "error"):
+            for age in (1, 3):
+                fact = {"state": state, "finished_at": (now - dt.timedelta(days=age)).isoformat()}
+                with patch.object(run_state, "latest", return_value=fact):
+                    html = panel_views._last_run_note(None, lang, {})
+                stale = age >= panel_views.STALE_AFTER_DAYS
+                check(f"{lang}/{state}/{age}天：正确显示过期警告",
+                      ('class="run stale"' in html) == stale
+                      and ('class="dot bad"' in html) == stale
+                      and (i18n.t(lang, "run.stale") in html) == stale)
 
 
 def test_salary_tag_and_empty_jd() -> None:
@@ -416,6 +403,7 @@ def main() -> int:
     test_layout()
     test_render()
     test_settings_profile()
+    test_stale_fetch_warning()
     test_salary_tag_and_empty_jd()
     test_note_gap()
     test_note_separators()

@@ -384,6 +384,28 @@ def test_primary_display_names() -> None:
         check(f"无效展示名 {invalid!r} 回退", skills.display_names(stale)["Kubernetes"] == "Kubernetes")
     removed = skills.merge(base, dict(local, remove=["K8s"]))
     check("删除展示别名后回退规范名", skills.display_names(removed)["Kubernetes"] == "Kubernetes")
+    for alias, alias_overlay in (("K8s", {}), ("Kube", {"Kubernetes": ["Kube"]})):
+        edited = {"alias": alias_overlay, "display_names": {"Kubernetes": alias}}
+        skills.apply_edit(edited, skills.merge(base, edited), alias.swapcase(), "remove")
+        check(f"删除主要展示别名 {alias} 清除覆盖选择",
+              "Kubernetes" not in edited["display_names"])
+        check(f"删除主要展示别名 {alias} 后回退规范名",
+              skills.display_names(skills.merge(base, edited))["Kubernetes"] == "Kubernetes")
+    with tempfile.TemporaryDirectory() as directory:
+        vocab = Path(directory) / "skills.yaml"
+        local_alias = {"alias": {"Kubernetes": ["Kube", "kubectl"]},
+                       "display_names": {"Kubernetes": "Kube"}}
+        skills.apply_edit(local_alias, skills.merge(base, local_alias), "kubectl", "remove")
+        check("删除其他别名保留主要展示名", local_alias["display_names"]["Kubernetes"] == "Kube")
+        skills.apply_edit(local_alias, skills.merge(base, local_alias), "Kube", "remove")
+        skills.save_local(local_alias, vocab)
+        restored = skills.load_local(vocab)
+        skills.apply_edit(restored, skills.merge(base, restored), "Kube", "alias", "Kubernetes")
+        skills.save_local(restored, vocab)
+        reloaded = skills.merge(base, skills.load_local(vocab))
+        check("重新添加已删除别名后仍可正常抽取", skills.extract("Kube", reloaded) == ["Kubernetes"])
+        check("删除并重加别名不会复活旧主要展示名",
+              skills.display_names(reloaded)["Kubernetes"] == "Kubernetes")
     seeded = {"skills": [dict(base["skills"][0], display_name="K8s")]}
     check("种子可选字段生效", skills.display_names(skills.merge(seeded, {}))["Kubernetes"] == "K8s")
     for token, target in (("Docker", "Kubernetes"), ("K8s", "missing")):

@@ -423,8 +423,10 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
     if action == "remove":
         if not owner:
             raise ValueError(f"词表里没有「{token}」，无需移除")
-        if token.lower() == owner.lower():
-            (local.get("display_names") or {}).pop(owner, None)
+        display_overrides = local.get("display_names") or {}
+        if (token.lower() == owner.lower()
+                or _clean(display_overrides.get(owner)).lower() == token.lower()):
+            display_overrides.pop(owner, None)
         # 优先从补充层直接删，让它只记「相对种子的差异」；只有种子里的词
         # 才写进 remove 抑制列表。这样补充层始终可读、可整体丢弃。
         for entry in list(local.get("add") or []):

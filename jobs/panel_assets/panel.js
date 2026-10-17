@@ -1006,6 +1006,11 @@ function applyLatestResults(hash){
   if(url.href===location.href) location.reload();
   else {history.replaceState(null,'',url.href);location.reload();}
 }
+function isRunStale(data){
+  const seconds=(Date.now()-new Date(data.finished_at).getTime())/1000;
+  return data.state!=='running' && !!data.finished_at && Number.isFinite(seconds)
+    && seconds>=window.__STALE_AFTER_DAYS__*86400;
+}
 function relativeRunTime(data){
   const stamp=data.finished_at;
   if(data.state==='running') return T('js.update_running',{stage:T('js.update_stage_'+(data.stage||'wait'))});
@@ -1015,6 +1020,7 @@ function relativeRunTime(data){
   const unit=seconds<3600?'minutes':seconds<86400?'hours':'days';
   const n=Math.max(1,Math.floor(seconds/(unit==='minutes'?60:unit==='hours'?3600:86400)));
   let text=T('run.ago',{ago:T('ago.'+unit,{n})});
+  if(isRunStale(data))text+=T('run.stale');
   if(data.state!=='success')text+=' · '+T('js.update_'+data.state);
   return text;
 }
@@ -1048,7 +1054,14 @@ function renderUpdateState(data, fromPoll=false){
   status.textContent=settings?message:(UPDATE_PENDING?T('js.update_pending'):UPDATE_CONFIG_ERRORS.includes(data.error)?message:'');
   button.disabled=state==='running'||state==='disabled'||UPDATE_REQUESTING;
   button.setAttribute('aria-busy',state==='running'?'true':'false');
-  document.querySelectorAll('[data-run-time]').forEach(el=>{el.textContent=relativeRunTime(data);});
+  document.querySelectorAll('[data-run-time]').forEach(el=>{
+    const stale=isRunStale(data);
+    el.classList.toggle('stale',stale);
+    el.dataset.runTime=data.finished_at||'';el.dataset.runState=data.state||'idle';
+    el.textContent='';
+    if(stale){const dot=document.createElement('span');dot.className='dot bad';dot.setAttribute('aria-hidden','true');el.appendChild(dot);}
+    const text=document.createElement('span');text.textContent=relativeRunTime(data);el.appendChild(text);
+  });
   const meta=[];
   if(data.task_id)meta.push(T('js.update_task',{id:data.task_id}));
   if(data.trigger)meta.push(T('js.update_trigger',{source:T('js.update_trigger_'+data.trigger)}));

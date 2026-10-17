@@ -24,7 +24,6 @@ from pathlib import Path
 from . import db as database
 from . import i18n
 from . import labels as labels_mod
-from . import report as report_mod
 from . import skills as skills_mod
 from .panel_data import (
     FILTER_KEYS, FRESH_KEY, NONE_TOKEN, PRIORITY_KEY,
@@ -374,6 +373,7 @@ def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
     fact = run_state.latest(config, conn)
     stamp = fact.get("finished_at")
     state = fact.get("state", "idle")
+    stale = False
     if state == "running":
         text = T("js.update_running", stage=T("js.update_stage_" + (fact.get("stage") or "wait")))
     elif not stamp:
@@ -386,11 +386,16 @@ def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
             seconds = max(0, (datetime.now(timezone.utc) - then).total_seconds())
             unit, n = ("minutes", max(1, int(seconds // 60))) if seconds < 3600 else (("hours", int(seconds // 3600)) if seconds < 86400 else ("days", int(seconds // 86400)))
             text = T("run.ago", ago=T("ago." + unit, n=n))
+            stale = seconds >= STALE_AFTER_DAYS * 86400
+            if stale:
+                text += T("run.stale")
         except ValueError:
             text = T("run.at", stamp=stamp)
         if state != "success":
             text += " · " + T("js.update_" + state)
-    return f'<span class="run" data-run-time="{_e(stamp or "")}" data-run-state="{_e(state)}">{_e(text)}</span>'
+    dot = '<span class="dot bad" aria-hidden="true"></span>' if stale else ""
+    return (f'<span class="run{" stale" if stale else ""}" data-run-time="{_e(stamp or "")}" '
+            f'data-run-state="{_e(state)}">{dot}<span>{_e(text)}</span></span>')
 
 
 def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
@@ -670,7 +675,8 @@ def _lang_button(lang: str) -> str:
 
 
 def _scripts(lang: str, extra: dict | None = None) -> str:
-    data = {"__I18N__": i18n.js_strings(lang), "__LANG__": lang}
+    data = {"__I18N__": i18n.js_strings(lang), "__LANG__": lang,
+            "__STALE_AFTER_DAYS__": STALE_AFTER_DAYS}
     data.update(extra or {})
     return "".join(f"<script>window.{k}={_js(v)};</script>" for k, v in data.items())
 
@@ -846,22 +852,6 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
 SETTINGS_SECTIONS = ("skills", "fetch", "display")
 
-_PROFILE_NAMES = ("citizen", "permanent_resident", "485", "whv", "student_visa", "custom")
-
-
-def _profile_display(conn, T) -> str:
-    """最近一次成功 analyze 记录的 profile 显示名；只读库，不读配置。"""
-    info = report_mod.latest_rule_profile(conn)
-    if info.get("status") != "recorded":
-        return T("set.profile_unrecorded")
-    profile = info.get("profile")
-    if profile is None:
-        return T("set.profile_default")
-    if profile in _PROFILE_NAMES:
-        return T("set.profile_" + profile)
-    return T("set.profile_unknown")
-
-
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
                     section: str = "skills", lang_pref: str = "auto") -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
@@ -908,9 +898,6 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
             f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
             _update_widget(lang),
-            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
-            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
-            f'<br>{_e(T("set.profile_used"))}</p>',
         ])
         extra = {}
     else:
@@ -936,6 +923,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         ])
         extra = {}
 
+    from . import run_state
+    extra["__SETTINGS_GENERATION__"] = run_state.generation(config)
     return "".join([
         _head(lang, theme, f'{T("settings.title")} · {T("app.title")}'
               + _demo_suffix(config, lang), "settings"),

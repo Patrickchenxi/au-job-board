@@ -84,6 +84,7 @@ def _safe_state(value):
     result["trigger"] = value.get("trigger") if value.get("trigger") in ("manual", "scheduled", "cli", "unknown") else "unknown"
     result["kind"] = value.get("kind") if value.get("kind") in ("run", "fetch") else None
     result["refresh_available"] = value.get("refresh_available") is True
+    result["completion_ready"] = value.get("completion_ready") is True
     return result
 
 

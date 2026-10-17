@@ -86,8 +86,8 @@ filtering:
 # citizen / PR presets can still exclude; visa.or stays a global override.
 # See docs/legacy-rule-profiles.md.
 # Editing this section does not recompute existing results, and the running
-# panel shows saved next-run settings separately from the profile used by the
-# last successful analyze. Settings can edit this section; saving does not analyze. To apply a change, run from the repo directory:
+# panel shows the current profile and any saved next-run changes together in
+# the rule-switch region. Settings can edit this section; saving does not analyze. To apply a change, run from the repo directory:
 #   .venv/bin/python -m jobs.cli analyze
 # This refreshes the machine analysis stored in the database, keeps your manual
 # labels and notes, and does not fetch new jobs. Later analyze / scheduled runs

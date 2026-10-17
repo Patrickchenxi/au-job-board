@@ -133,7 +133,7 @@ class FakeEl {
 }
 
 /* 在最小 DOM stub 里加载真实 panel.js，并把备注相关函数暴露出来。 */
-function loadPanel(lang, tags, noteTagLabels) {
+function loadPanel(lang, tags, noteTagLabels, settingsGeneration) {
   const menu = new FakeEl("div");
   const toast = new FakeEl("div");
   const byId = new Map([["note-menu", menu], ["toast", toast]]);
@@ -193,6 +193,8 @@ function loadPanel(lang, tags, noteTagLabels) {
   sandbox.window.__NOTE_TAG_LABELS__ = noteTagLabels || {};
   sandbox.window.__SKILLS__ = [];
   sandbox.window.__VIEW__ = "all";
+  sandbox.window.__STALE_AFTER_DAYS__ = 2;
+  if(settingsGeneration!==undefined)sandbox.window.__SETTINGS_GENERATION__=settingsGeneration;
   vm.createContext(sandbox);
   const src = fs.readFileSync(PANEL_JS, "utf8") + `
 ;globalThis.__PANEL__ = { noteSegments, noteCurrent, noteClosed, notePick, noteToDisplay,
@@ -778,6 +780,41 @@ async function testUpdateRefreshWithDetailHash() {
     eq('设置页hashchange：保留页面锚点',panel.sandbox.location.hash,'#another-settings-anchor');
   }
   const completed={state:'success',task_id:'task-2',generation:'generation-2',finished_at:'2026-10-17T00:00:00Z'};
+  {
+    for(const baseline of ['generation-1','']){
+      const panel=loadPanel('en',TAGS,undefined,baseline);
+      panel.sandbox.document.body.classList.add('settings');
+      panel.elements.set('update-start',new FakeEl('button'));
+      panel.elements.set('update-status',new FakeEl('span'));
+      let updates=0;
+      panel.sandbox.CustomEvent=class {constructor(type){this.type=type;}};
+      panel.sandbox.document.dispatchEvent=event=>{if(event.type==='job-results-updated')updates++;};
+      panel.api.renderUpdateState(completed,true);
+      eq('设置页首次轮询比较渲染时版本 '+JSON.stringify(baseline),updates,1);
+      panel.api.renderUpdateState(completed,true);
+      eq('设置页重复轮询同版本不重复更新 '+JSON.stringify(baseline),updates,1);
+    }
+  }
+  {
+    const {panel}=fixture();
+    const run=new FakeEl('span');run.className='run';
+    panel.sandbox.document.querySelectorAll=selector=>selector==='[data-run-time]'?[run]:[];
+    const old=new Date(Date.now()-3*86400000).toISOString();
+    panel.api.renderUpdateState({...completed,finished_at:old});
+    check('过期抓取轮询：保留警告、红点和stale样式',run.classList.contains('stale')
+      && run.children.some(el=>el.className==='dot bad')
+      && run.children.some(el=>el.textContent.includes('run.stale')));
+    // FakeEl has no browser textContent child-clearing semantics.
+    run.children=[];
+    panel.api.renderUpdateState({...completed,finished_at:new Date().toISOString()});
+    check('新抓取完成轮询：清除过期警告和红点',!run.classList.contains('stale')
+      && !run.children.some(el=>el.className==='dot bad')
+      && !run.children.some(el=>el.textContent.includes('run.stale')));
+    run.children=[];
+    panel.api.renderUpdateState({...completed,state:'running',finished_at:old});
+    check('正在更新：不把旧终态误标为过期',!run.classList.contains('stale'));
+  }
+
   {
     const {panel,reloads}=fixture();
     panel.api.renderUpdateState({...completed,generation:'generation-1'});

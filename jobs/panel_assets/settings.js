@@ -423,11 +423,11 @@ function bindConfigEditor(){
     };
   }
   async function load(){
-    if(loading)return;if(saving||editing){refreshPending=true;return;}
+    if(loading||saving||editing){refreshPending=true;return;}
     loading=true;reload.disabled=true;root.querySelectorAll('.config-edit').forEach(button=>button.disabled=true);status.classList.remove('error');status.textContent=msg('正在读取配置…','Reading configuration…');
     try{const response=await fetch('/api/config-settings'),data=await response.json();if(!response.ok||!data.ok){status.classList.add('error');status.textContent=errors[data.error]||msg('配置读取失败','Could not read configuration');return;}render(data);}
     catch(error){status.classList.add('error');status.textContent=msg('配置读取失败，请重试。','Could not read configuration. Try again.');}
-    finally{loading=false;reload.disabled=false;root.querySelectorAll('.config-edit').forEach(button=>button.disabled=false);}
+    finally{loading=false;reload.disabled=false;root.querySelectorAll('.config-edit').forEach(button=>button.disabled=false);if(refreshPending&&!saving&&!editing){refreshPending=false;load();}}
   }
   reload.onclick=()=>{if(saving)return;if(editing&&!close(false))return;load();};
   modal.addEventListener('click',event=>{if(event.target===modal)close(false);});confirmation.addEventListener('click',event=>{if(event.target===confirmation)cancelConfirmation();});
