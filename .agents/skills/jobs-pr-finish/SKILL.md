@@ -1,0 +1,53 @@
+---
+name: jobs-pr-finish
+description: Triage AU Job Board PR or auto-review feedback and verify fixes, or finalize an existing PR for handoff.
+---
+
+# Finish a PR review round
+
+## 1. Establish the round and authorization
+
+Read root AGENTS and the user's current constraints. Confirm repository, PR, base/head, actual diff and CI revision; attach the PR to the task when the app tool is available.
+
+Record the snapshot time/head and authorized stop point. “Check the latest/all issues” means one complete snapshot including older unresolved items, then authorized fixes and verification. Continuous monitoring, external replies/thread resolution, new review requests, merge, release and deployment follow current-task authorization; reuse existing permission. A no-new-review instruction persists after a push. Platform-triggered reviews differ from a manual request.
+
+For feedback, continue to **2**. For a handoff with no feedback check requested, go to **4** once the agreed implementation/independent acceptance evidence is available.
+
+## 2. Collect a complete snapshot
+
+Read all four sources and their pages:
+
+- Conversation/issue comments.
+- Inline review comments.
+- Review submissions, including bodies with no inline comment.
+- Review threads with resolution/outdated metadata and their comments.
+
+When available, GitHub MCP's `fetch_pr_comments` provides a merged timeline and `list_pull_request_review_threads` supplies thread metadata. Establish completeness from actual responses; use `gh` REST/GraphQL when the tool cannot establish pagination coverage.
+
+For the three REST feeds, replace NUMBER with the confirmed PR number:
+
+```bash
+gh api --paginate 'repos/SkywingJam/au-job-board/issues/NUMBER/comments?per_page=100'
+gh api --paginate 'repos/SkywingJam/au-job-board/pulls/NUMBER/comments?per_page=100'
+gh api --paginate 'repos/SkywingJam/au-job-board/pulls/NUMBER/reviews?per_page=100'
+```
+
+For GraphQL `reviewThreads`, request `pageInfo { hasNextPage endCursor }` and advance `after` to the end; paginate comments within each thread too. REST inline comments alone lack resolved state. Normalize with feed type and stable ID; a quoted summary is not automatically another defect.
+
+**Coverage gate:** each source is exhausted or explicitly marked incomplete. On failure/truncation, retry the failed read once or try one alternate path. If it remains incomplete, retain known feedback and report the missing coverage. A partial snapshot cannot support “all clear.”
+
+## 3. Judge and verify every collected finding
+
+Keep a compact local ledger: source/ID or URL, reviewed SHA when supplied, affected behavior, disposition/evidence and fixed SHA when applicable. Each candidate finding needs a disposition: confirmed, already fixed, not applicable/unsupported, duplicate or unresolved. Resolved/outdated metadata alone does not prove correctness; issue comments may have no reviewed SHA.
+
+Read the affected call chain and reproduce plausible defects. Batch common-root fixes and leave material uncertain product choices to the user with evidence. Use [jobs-verify](../jobs-verify/SKILL.md) for affected checks and UI journeys; root AGENTS defines independent-review requirements. Independently inspect the integrated diff after delegated fixes.
+
+Proceed when every collected candidate has a disposition and confirmed fixes have actual verification results or explicit gaps.
+
+## 4. Update and hand off
+
+For an authorized PR update, describe the final problem/behavior and actual validation on the candidate. Verify base/head/diff and checks on the latest revision. Follow the contributor guide's delivery route; retain draft status while unfinished when requested, and set ready only after agreed local acceptance/review.
+
+Stop when this snapshot's findings have dispositions, verification/coverage gaps are reported, authorized updates are complete and the user has the remaining CI/acceptance status. Wait for user acceptance at that boundary.
+
+Only for explicitly requested continuous care, use an available watcher such as babysit-pr after reading its instructions and applying the user's duration, budget and action limits. An available one-shot `--once` helper can collect a snapshot without starting background monitoring.
