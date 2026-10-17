@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml
 from jobs.config_edit import ConfigEditor, ConfigEditError
-from jobs import panel, run_state
+from jobs import cli, db, panel, run_state
 
 
 class ConfigEditorTest(unittest.TestCase):
@@ -222,6 +224,190 @@ class ConfigEditorTest(unittest.TestCase):
     def test_demo_refuses_reads_and_writes(self):
         editor = ConfigEditor({**self.config, "demo": {}}, self.path, ROOT/"rules.yaml")
         self.error("demo_disabled", editor.read)
+
+    def seed_analysis(self):
+        self.skills_path = self.root / "skills.yaml"
+        self.skills_path.write_text("version: 1\nskills: [{name: Python, aliases: []}]\n")
+        conn = db.connect(self.config["db_path"])
+        self.addCleanup(conn.close)
+        db.upsert_job(conn, {"source": "seek", "source_id": "synthetic",
+                            "title": "Synthetic Engineer", "company": "Example",
+                            "description": "Synthetic Python role", "url": "https://example.invalid/job"})
+        conn.commit()
+        return conn
+
+    def analyze(self):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return cli.cmd_analyze(argparse.Namespace(
+                config=str(self.path), rules=str(ROOT / "rules.yaml"), skills=str(self.skills_path)))
+
+    def test_applied_snapshot_tracks_successful_analyze_and_survives_reload(self):
+        self.seed_analysis()
+        self.assertEqual(self.editor.read()["applied"]["status"], "unavailable")
+        initial = self.editor.read()
+        self.assertEqual(self.analyze(), 0)
+        applied = self.editor.read()["applied"]
+        self.assertEqual(applied["status"], "recorded")
+        self.assertEqual(applied["values"], initial["values"])
+        self.assertEqual(applied["explicit"], initial["explicit"])
+        self.assertEqual(applied["effective_rules"], initial["effective_rules"])
+        self.assertIsInstance(applied["analyzed_at"], str)
+        saved = self.save({"queries": ["next synthetic term"], "seek.pages_per_query": 7,
+                           "legacy_rule_profile.profile": "whv"})
+        self.assertEqual(saved["applied"], applied)
+        self.assertEqual(saved["values"]["seek.pages_per_query"], 7)
+        # Reload uses the committed run, never the panel's startup config.
+        fresh = ConfigEditor(yaml.safe_load(self.path.read_text()), self.path, ROOT / "rules.yaml")
+        self.assertEqual(fresh.read()["applied"], applied)
+        self.assertEqual(self.analyze(), 0)
+        newer = fresh.read()
+        self.assertEqual(newer["applied"]["values"], newer["values"])
+        self.assertEqual(newer["applied"]["effective_rules"], newer["effective_rules"])
+        serialized = json.dumps(newer["applied"])
+        for private in ("synthetic-secret", "private_unknown", "db_path", str(self.path), str(self.root)):
+            self.assertNotIn(private, serialized)
+
+    def test_failed_analyze_does_not_advance_applied_snapshot(self):
+        conn = self.seed_analysis()
+        self.assertEqual(self.analyze(), 0)
+        applied = self.editor.read()["applied"]
+        before = conn.execute("SELECT COUNT(*) FROM runs WHERE kind='analyze'").fetchone()[0]
+        self.save({"seek.pages_per_query": 8})
+        with patch("jobs.cli._sync_skills_transactional", side_effect=RuntimeError("synthetic failure")):
+            self.assertEqual(self.analyze(), 1)
+        self.assertEqual(self.editor.read()["applied"], applied)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM runs WHERE kind='analyze'").fetchone()[0], before)
+
+    def test_full_run_applies_same_locked_configuration_and_pre_analyze_failure_does_not(self):
+        self.seed_analysis()
+        self.assertEqual(self.analyze(), 0)
+        applied = self.editor.read()["applied"]
+        self.save({"seek.pages_per_query": 9, "legacy_rule_profile.profile": "whv"})
+        args = argparse.Namespace(config=str(self.path), rules=str(ROOT / "rules.yaml"),
+                                  skills=str(self.skills_path), timeout=0)
+        # Real pipeline orchestration and analyze; only network/report stages mocked.
+        with patch("jobs.cli.cmd_fetch", return_value=1), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.cmd_run(args), 1)
+        self.assertEqual(self.editor.read()["applied"], applied)
+        with patch("jobs.cli.cmd_fetch", return_value=0), patch("jobs.cli.cmd_details", return_value=0), \
+                patch("jobs.cli.cmd_report", return_value=0), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.cmd_run(args), 0)
+        latest = self.editor.read()
+        self.assertEqual(latest["applied"]["values"], latest["values"])
+        self.assertEqual(latest["applied"]["effective_rules"], latest["effective_rules"])
+
+    def test_missing_old_or_corrupt_snapshot_does_not_infer_or_create(self):
+        self.assertFalse(Path(self.config["db_path"]).exists())
+        self.assertEqual(self.editor.read()["applied"]["status"], "unavailable")
+        self.assertFalse(Path(self.config["db_path"]).exists())
+        self.assertEqual(self.save({"seek.pages_per_query": 3})["applied"]["status"], "unavailable")
+        conn = self.seed_analysis()
+        self.assertEqual(self.analyze(), 0)
+        for stats in ({}, {"config_snapshot": "synthetic-secret"},
+                      {"config_snapshot": {"version": 1, "values": {}, "explicit": {}, "effective_rules": {}}}):
+            db.log_run(conn, "analyze", db.utcnow(), stats)
+            conn.commit()
+            view = self.editor.read()
+            self.assertEqual(view["applied"]["status"], "unavailable")
+            self.assertNotIn("synthetic-secret", json.dumps(view))
+        conn.execute("UPDATE runs SET stats='invalid json' WHERE kind='analyze'")
+        conn.commit()
+        self.assertEqual(self.editor.read()["applied"]["status"], "unavailable")
+
+    def test_snapshot_allowlist_rejects_malformed_values_and_omits_unknowns(self):
+        conn = self.seed_analysis()
+        self.assertEqual(self.analyze(), 0)
+        stats = json.loads(conn.execute("SELECT stats FROM runs WHERE kind='analyze'").fetchone()[0])
+        snapshot = stats["config_snapshot"]
+        snapshot["values"]["password"] = "synthetic-secret"
+        snapshot["explicit"]["password"] = True
+        snapshot["effective_rules"]["exclude"]["private-rule"] = "synthetic-secret"
+        conn.execute("UPDATE runs SET stats=? WHERE kind='analyze'", (json.dumps(stats),))
+        conn.commit()
+        self.assertEqual(self.editor.read()["applied"]["status"], "recorded")
+        self.assertNotIn("synthetic-secret", json.dumps(self.editor.read()))
+        snapshot["values"]["seek.enabled"] = "synthetic-secret"
+        conn.execute("UPDATE runs SET stats=? WHERE kind='analyze'", (json.dumps(stats),))
+        conn.commit()
+        self.assertEqual(self.editor.read()["applied"]["status"], "unavailable")
+
+    def test_legacy_baseline_persists_edits_reload_and_revert_without_claiming_applied(self):
+        conn = self.seed_analysis()
+        db.log_run(conn, "analyze", db.utcnow(), {})
+        conn.commit()
+        initial = self.editor.read()
+        self.assertEqual(initial["baseline"]["status"], "unavailable")
+        self.assertFalse(self.editor._baseline_path().exists())
+        first = self.save({"seek.pages_per_query": 5})
+        self.assertEqual(first["applied"]["status"], "unavailable")
+        self.assertEqual(first["baseline"]["status"], "recorded")
+        self.assertEqual(first["baseline"]["source"], "file_before_edit")
+        self.assertEqual(first["baseline"]["values"], initial["values"])
+        self.assertEqual(first["values"]["seek.pages_per_query"], 5)
+        second = self.save({"seek.pages_per_query": 7})
+        self.assertEqual(second["baseline"], first["baseline"])
+        fresh = ConfigEditor(yaml.safe_load(self.path.read_text()), self.path, ROOT / "rules.yaml")
+        self.assertEqual(fresh.read()["baseline"], first["baseline"])
+        reverted = fresh.save({"digest": fresh.read()["digest"], "changes": {"seek.pages_per_query": 2}})
+        self.assertEqual(reverted["values"], reverted["baseline"]["values"])
+        self.assertEqual(reverted["effective_rules"], reverted["baseline"]["effective_rules"])
+        for private in ("synthetic-secret", "private_unknown", "db_path", str(self.path), str(self.root)):
+            self.assertNotIn(private, self.editor._baseline_path().read_text())
+
+    def test_baseline_get_and_noop_dont_write_failure_preserves_file(self):
+        baseline_path = self.editor._baseline_path()
+        self.assertEqual(self.editor.read()["baseline"]["status"], "unavailable")
+        self.assertFalse(baseline_path.parent.exists())
+        self.assertFalse(Path(self.config["db_path"]).exists())
+        self.save({})
+        self.save({"seek.pages_per_query": 2})
+        self.assertFalse(baseline_path.exists())
+        with patch("jobs.run_state.atomic_json", side_effect=OSError):
+            self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))
+        self.assertEqual(self.path.read_text(), self.original)
+        self.assertFalse(baseline_path.exists())
+        with patch.object(self.editor, "_replace", side_effect=ConfigEditError("write_failed")):
+            self.error("write_failed", lambda: self.save({"seek.pages_per_query": 5}))
+        current = self.editor.read()
+        self.assertEqual(current["baseline"]["values"], current["values"])
+        self.assertEqual(current["applied"]["status"], "unavailable")
+        self.assertEqual(self.path.read_text(), self.original)
+
+    def test_baseline_context_invalidates_source_rules_or_new_analysis(self):
+        conn = self.seed_analysis()
+        self.save({"seek.pages_per_query": 5})
+        self.assertEqual(self.editor.read()["baseline"]["status"], "recorded")
+        other_path = self.root / "another-config.yaml"
+        other_path.write_text(self.path.read_text())
+        other = ConfigEditor(self.config, other_path, ROOT / "rules.yaml")
+        self.assertEqual(other.read()["baseline"]["status"], "unavailable")
+        rules_path = self.root / "rules-copy.yaml"
+        rules_path.write_bytes((ROOT / "rules.yaml").read_bytes())
+        other = ConfigEditor(self.config, self.path, rules_path)
+        self.assertEqual(other.read()["baseline"]["status"], "unavailable")
+        other.save({"digest": other.read()["digest"], "changes": {"seek.pages_per_query": 6}})
+        self.assertEqual(other.read()["baseline"]["status"], "recorded")
+        rules_path.write_text(rules_path.read_text()+"\n# changed rules file\n")
+        self.assertEqual(other.read()["baseline"]["status"], "unavailable")
+        # Any newer completed analyze invalidates old pre-edit history, even when
+        # that analyze cannot supply a proven applied snapshot.
+        self.save({"seek.pages_per_query": 7})
+        db.log_run(conn, "analyze", db.utcnow(), {})
+        conn.commit()
+        self.assertEqual(self.editor.read()["baseline"]["status"], "unavailable")
+
+    def test_recorded_applied_supersedes_baseline_and_unknown_fields_are_omitted(self):
+        self.seed_analysis()
+        self.save({"seek.pages_per_query": 5})
+        info = json.loads(self.editor._baseline_path().read_text())
+        info["values"]["password"] = "synthetic-secret"
+        self.editor._baseline_path().write_text(json.dumps(info))
+        self.assertNotIn("synthetic-secret", json.dumps(self.editor.read()["baseline"]))
+        self.assertEqual(self.analyze(), 0)
+        current = self.editor.read()
+        self.assertEqual(current["applied"]["status"], "recorded")
+        self.assertEqual(current["applied"]["values"], current["values"])
+        self.assertEqual(current["baseline"]["status"], "unavailable")
 
 
 class LocalRequestTest(unittest.TestCase):

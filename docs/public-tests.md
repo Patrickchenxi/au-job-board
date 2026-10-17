@@ -42,7 +42,7 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
-| `tools/test_config_edit.py` | YAML roundtrip/CLI semantics, form allowlist, conflicts, shared lock and API boundary | all |
+| `tools/test_config_edit.py` | YAML roundtrip/CLI semantics, allowlist, conflicts, shared lock, applied and legacy-file snapshots | all |
 | `tools/test_run_state.py` | Unified run/fetch facts, generations and orphan-worker recovery | all |
 | `tools/test_public_configuration.py` | Public example configuration, source selection, loopback binding, read-only profile command | all |
 | `tools/test_citizenship_rules.py` | Citizenship rules against the synthetic fixture | all |
@@ -56,7 +56,7 @@ nothing in the suite fetches listings.
 | `tools/test_panel_i18n.py` | Panel English / Chinese text | all |
 | `tools/test_panel_update.py` | Frozen fetch settings, background-run state, locks, partial failure, timeout and label preservation | all |
 | `tools/test_panel_update_http.py` | Update API, same-origin/host checks, JSON input and disabled demo | all |
-| `tools/test_skills_and_search.py` | Skill vocabulary and search matching | all |
+| `tools/test_skills_and_search.py` | Skill vocabulary, compatible display names and search matching | all |
 | `tools/test_demo.py` | Synthetic demo end to end (isolated, loopback only) | all |
 | `tools/test_legacy_cleanup.py` | Legacy single-path end to end | all |
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |

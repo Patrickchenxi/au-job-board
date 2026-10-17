@@ -265,11 +265,13 @@ def _analyze_legacy(args, config: dict, rules: dict, selected_rules: dict,
 
     _, scored, groups = _derive_scores_and_dedupe(conn, rules, jobs)
     skill_counts = _sync_skills_transactional(conn, skills_mod.load_skills(args.skills))
+    from .config_edit import public_config_snapshot
 
     database.log_run(conn, "analyze", started,
                      {"jobs": len(jobs), "excluded": excluded, "scored": scored,
                       "skills": len(skill_counts), "filtering_mode": "legacy",
-                      "rule_profile": _rule_profile_stats(resolution)})
+                      "rule_profile": _rule_profile_stats(resolution),
+                      "config_snapshot": public_config_snapshot(config, rules)})
     conn.commit()
 
     disabled_ex = sum(1 for on in resolution["exclude"].values() if not on)

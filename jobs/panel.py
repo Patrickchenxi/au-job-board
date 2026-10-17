@@ -262,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(result, status, started)
 
     def _post_skills(self, payload: dict, started: float):
-        """技能词表的两个写操作：新增技能 / 给已有技能加别名。
+        """技能词表编辑，只把差异写进本地补充层。
 
         只写 skills.local.yaml（补充层），**不碰**手写的 skills.yaml。
         config 里没有 skills_path 时用仓库默认词表；独立 demo 会显式给出自己的路径
@@ -281,6 +281,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400, started)
                 return
             skills_mod.save_local(local, skills_path)
+            if info.get("kind") == "display_name":
+                # Presentation only: canonical DB/filter identity is unchanged.
+                self._json({"ok": True, "docs": 0, **info}, 200, started)
+                return
             fresh = skills_mod.load_skills(skills_path)
             if info.get("kind") == "remove":
                 # 删除会波及所有靠旧 token 命中过的岗位（别名尤其如此），

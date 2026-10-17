@@ -6,18 +6,35 @@ switches, locations and existing fetch limits, the next-run rule profile, and
 individual rule switches. `whv` uses the same rule defaults as `485`; it does not
 automatically evaluate legal work rights or employer-duration conditions.
 
-Fields marked **Default** are absent from the file and show the program default.
-Rule switches can use their preset default, or explicitly enable/disable a rule.
-Paths, credentials, listener settings and unknown configuration keys are not
-editable through this form. Skill vocabulary edits still use the skills overlay.
+Configuration is read-only by default. Each region (search terms, each source,
+and legacy rule switches) has a pencil button. Editing opens a dialog with the
+same motion as the skill editor. Individual rule IDs are under **Advanced** in
+the rule-switch dialog. The document/refresh icon at the right of the heading
+rereads the actual file.
 
-Choose **Review changes**, inspect the before/after values, then save or cancel.
-Saving writes the actual configuration file and reads it back. It does not fetch,
-analyze, or change the profile shown for the **last successful analysis**. The
-next explicitly started update or CLI analysis reads the saved configuration.
-Refresh/reload the form to see external YAML edits. A stale form is rejected
-instead of overwriting another tab or file edit; failed saves retain the input.
-Unsaved changes prompt before leaving, and inputs are frozen while saving.
+Choose **Confirm** after editing. A second dialog lists each value changing from
+A to B and says that the new rules take effect on the next run. Cancel returns to
+the edit without writing. Confirmation saves and reads the file back. There is
+no separate preview button. Paths, credentials, listener settings and unknown
+configuration keys remain outside this form; vocabulary edits use the skill
+overlay.
+
+After saving, a solid **Current** region stays first with its pencil, followed by
+a dashed **Next run** region. Editing again replaces that next-run value; saving
+the current value again removes the next-run region. Current is taken from the
+most recent successful analysis, rather than inferred from the startup file.
+Saving neither fetches nor changes existing results. A later successful analysis
+records the new current values. A failed run before analysis leaves them alone.
+
+Older analysis records do not contain configuration snapshots. In that case the
+page says so. The first edit retains a safe **file before editing** baseline,
+clearly labeled as a file value rather than proven past execution. It persists
+across reloads, supports later edits/reversion, and yields to an actual analysis
+snapshot. A changed configuration source, rules or analyze record invalidates it.
+
+A stale form is rejected instead of overwriting another tab or external YAML
+edit; failed saves retain the input. Unsaved changes prompt before leaving,
+inputs freeze while saving, and region editors wait until file reload finishes.
 
 The editor preserves comments, unknown fields and file permissions, and replaces
 the file atomically. It rejects invalid/duplicate YAML keys, aliases, merge keys

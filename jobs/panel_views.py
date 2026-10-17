@@ -424,12 +424,13 @@ def _toggle(key: str, label: str, checked: bool) -> str:
             f'onchange="applyFilter()"> {_e(label)}</label>')
 
 
-def _skill_picker(filters: dict, counts: dict, lang: str = "zh") -> str:
+def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=None) -> str:
     """技能多选。**默认一个都不勾、面板收起** —— 相当一部分岗位一个技术词
     都没有，默认开启会静默藏掉它们。按实际命中数降序，只露头部
     （SKILL_PICK_TOP），长尾交给搜索框。已选中的一定出现，否则取消不掉。"""
     if not counts:
         return ""
+    skill_labels = skill_labels or {}
     selected = list(filters.get(SKILL_KEY) or [])
     ordered = [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
     shown = [s for s in ordered if s in selected]
@@ -442,10 +443,10 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh") -> str:
             f'<label class="skillopt">'
             f'<input type="checkbox" data-fkey="{SKILL_KEY}" value="{_e(name)}"{checked} '
             f'onchange="applyFilter()">'
-            f'<span>{_e(name)}</span>'
+            f'<span>{_e(skill_labels.get(name, name))}</span>'
             f'<span class="skc">{counts.get(name, 0)}</span></label>')
     title = i18n.t(lang, "filter.skill")
-    value = ", ".join(selected) if selected else i18n.t(lang, "filter.any")
+    value = ", ".join(skill_labels.get(name, name) for name in selected) if selected else i18n.t(lang, "filter.any")
     return (f'<div class="skillpick" id="skillpick">'
             f'<button type="button" class="ctl{" on" if selected else ""}" aria-haspopup="true" '
             f'title="{_e(i18n.t(lang, "filter.skill_hint"))}" onclick="skillToggle(event)">'
@@ -460,7 +461,7 @@ def _tier_select(filters: dict, lang: str = "zh") -> str:
     return _select(TIER_KEY, i18n.t(lang, "filter.tier"), options, filters.get(TIER_KEY, ""))
 
 
-def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
+def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     if key in FILTER_KEYS:
         options = ([("", T("filter.any"))]
@@ -474,7 +475,7 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
     if key == PRIORITY_KEY:
         return _toggle(PRIORITY_KEY, T("filter.priority"), bool(filters.get(PRIORITY_KEY)))
     if key == SKILL_KEY:
-        return _skill_picker(filters, skill_counts, lang)
+        return _skill_picker(filters, skill_counts, lang, skill_labels)
     if key == TIER_KEY:
         return _tier_select(filters, lang)
     if key == "labeled":
@@ -484,7 +485,7 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
     return ""
 
 
-def _chip_text(key: str, filters: dict, lang: str) -> str:
+def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     colon = T("js.colon")
     value = filters.get(key)
@@ -502,11 +503,11 @@ def _chip_text(key: str, filters: dict, lang: str) -> str:
     if key == TIER_KEY:
         return T("filter.tier") + colon + str(value)
     if key == SKILL_KEY:
-        return T("filter.skill") + colon + ", ".join(value or [])
+        return T("filter.skill") + colon + ", ".join((skill_labels or {}).get(name, name) for name in value or [])
     return key
 
 
-def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") -> str:
+def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None) -> str:
     """工具栏 + 「更多筛选」面板 + 生效条件。
 
     **搜索和筛选是同一套机制**：同一个 `data-fkey` + `applyFilter()`，
@@ -536,7 +537,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
             f'oncompositionend="searchEnd(event)" '
             f'autocomplete="off" spellcheck="false"></label>')
     out.append('<span id="primary-home" hidden></span><div class="filter-group" id="primary-filters">')
-    out.extend(_control(k, filters, skill_counts, lang) for k in primary)
+    out.extend(_control(k, filters, skill_counts, lang, skill_labels) for k in primary)
     out.append("</div>")
     if hidden_keys:
         badge = f'<span class="badge">{len(hidden_active)}</span>' if hidden_active else ""
@@ -574,7 +575,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
         out.append(f'<fieldset class="fgroup"><legend>{_e(T("filter.group." + group))} '
                    f'<span>· {_e(T("filter.group." + group + "_hint"))}</span></legend>'
                    f'<div class="filter-group">'
-                   + "".join(_control(k, filters, skill_counts, lang) for k in keys)
+                   + "".join(_control(k, filters, skill_counts, lang, skill_labels) for k in keys)
                    + "</div></fieldset>")
     clear_hidden = (f'<button type="button" class="linkbtn" onclick="clearHidden()">'
                     f'{_e(T("filter.clear_hidden"))}</button>') if hidden_keys else ""
@@ -584,8 +585,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
 
     if hidden_active:
         chips = "".join(
-            f'<span class="achip">{_e(_chip_text(k, filters, lang))}'
-            f'<button type="button" aria-label="{_e(T("filter.remove"))}: {_e(_chip_text(k, filters, lang))}" '
+            f'<span class="achip">{_e(_chip_text(k, filters, lang, skill_labels))}'
+            f'<button type="button" aria-label="{_e(T("filter.remove"))}: {_e(_chip_text(k, filters, lang, skill_labels))}" '
             f'onclick="removeFilter(\'{k}\')">×</button></span>'
             for k in hidden_active)
         out.append(f'<div class="chips" id="active-chips"><span class="chips-label">'
@@ -731,7 +732,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
     note_tags = labels_mod.note_tag_candidates(conn)
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
-    skill_embed = [{"name": e.get("name"), "aliases": e.get("aliases") or []}
+    skill_embed = [{"name": e.get("name"), "display_name": skills_mod.display_name(e), "aliases": e.get("aliases") or []}
                    for e in sorted(skills_cfg.get("skills") or [],
                                    key=lambda e: str(e.get("name") or "").lower())]
 
@@ -788,7 +789,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<a class="iconbtn setlink" href="/settings" title="{_e(T("nav.settings"))}">'
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
         "</div></div>",
-        _filter_bar(view, filters, skill_counts, lang),
+        _filter_bar(view, filters, skill_counts, lang, skills_mod.display_names(skills_cfg)),
         "</header>",
         '<div class="ctxbar">',
         f'<div class="ctx-desc">{ICON_INFO}<div><span class="ctx-text">'
@@ -901,10 +902,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         extra = {"__SKILL_TREE__": tree}
     elif section == "fetch":
         pane = "".join([
-            f'<h2>{_e(T("set.fetch_title"))}</h2>',
-            f'<p class="set-hint">{_e(T("set.fetch_hint"))}</p>',
-            '<div id="update-config" class="fetch-config" aria-live="polite">'
-            f'<p class="muted">{_e(T("js.loading"))}</p></div>',
+            '<div class="config-title-line">'
+            f'<h2>{_e(T("set.fetch_title"))}</h2><span id="config-actions"></span></div>',
             '<div id="config-editor"></div>',
             f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
             f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
@@ -952,6 +951,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         f'<section class="set-pane{" set-pane-scroll" if section != "skills" else ""}">{pane}</section>',
         "</main>",
         '<div class="modal" id="sk-modal" hidden></div>',
+        '<div class="modal" id="config-modal" hidden></div>',
+        '<div class="modal config-confirm" id="config-confirm" hidden></div>',
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         _scripts(lang, extra),
         f"<script>{asset('panel.js')}</script>",

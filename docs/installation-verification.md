@@ -39,6 +39,33 @@ cloud deployment, image publication, or a production update. Source installation
 remains available and is the recommended macOS deployment. The older entries
 below retain their original source-installation and CI evidence.
 
+## v1.2 configuration-dialog follow-up (2026-10-17)
+
+The follow-up to candidate `99bb6fe` replaced the always-open settings form with
+read-only regions, pencil edit dialogs and a separate save confirmation using
+the existing skill-editor motion. Current settings remain first with a solid
+outline; saved next-run settings follow with a dashed outline. Repeated edits,
+page reload and reverting to current values were verified, including an actual
+legacy database with no historical configuration snapshot. The UI explicitly
+labels its fallback as the file before editing. A real mocked full run advanced
+current values and removed the consumed next-run region.
+
+The public offline entry again passed **20/20** locally; the configuration suite
+now contains **26** tests. Independent review reproduced and verified fixes for
+reload/edit races, legacy baseline persistence and name selection during a skill
+save. Browser checks also covered save-conflict input retention, the advanced
+rule switches, skill display-name save/reload with unchanged canonical filters,
+English/light mobile, Chinese/dark desktop, keyboard focus and reduced motion.
+The homepage timestamp/icon gap measured **12 CSS pixels**; the left description,
+info icon, right statistics and action had the same vertical center. The reload icon was
+right-aligned and the tested 390px dialogs had no horizontal overflow.
+
+The rebuilt **linux/arm64** image passed the independent no-build Docker smoke
+and retained configuration/data/state across recreation. Hashes of the dialog
+assets, configuration editor, CLI and skill code matched the source candidate.
+The local Compose mock was recreated from that image; no production deployment
+or real source fetching was part of this verification.
+
 ## Local fresh clone and new environment (2026-10-08)
 
 The subject was the public candidate tree: 296 files under the MIT license,

@@ -97,6 +97,13 @@ pre-seed your own additions, aliases or removals, copy
 exist); the panel and the `skills` command also write that overlay. Never
 overwrite an existing overlay.
 
+Settings can choose a skill's primary display name from its canonical name and
+existing aliases. This saves a `display_names` mapping in the local overlay, for
+example `display_names: {Kubernetes: K8s}`. A seed skill record may also provide
+an optional `display_name: K8s`. Omitted, invalid or removed display aliases
+fall back to the canonical name. Changing the label applies on refresh and does
+not re-analyze jobs or change matching, stored skill names, or filter URL values.
+
 Paths in the configuration are relative to the project root, not to the
 directory containing the config file. `--config` is a global option and goes
 **before** the subcommand.

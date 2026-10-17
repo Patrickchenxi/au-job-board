@@ -616,7 +616,7 @@ function skillRender(){
   // 想打 "Amazon Web Service" 去认 AWS 时，列表会被逐字筛空，反而找不到。
   // 候选标签带上别名，扫一眼就知道是不是它。
   SKILLS.forEach(s=>{
-    rows.push({kind:'alias', label:T('js.skill_as_alias',{name:s.name}), target:s.name});
+    rows.push({kind:'alias', label:T('js.skill_as_alias',{name:s.display_name||s.name}), target:s.name});
   });
   m.innerHTML=''; m.scrollTop=0;
   if(!rows.length){
@@ -659,7 +659,8 @@ async function saveSkill(kind,target){
   input.value='';
   input.disabled=true;
   skillStatus(T('js.skill_saving'));
-  const verb = kind==='add' ? T('js.skill_added',{token:token}) : T('js.skill_aliased',{token:token,name:target});
+  const targetSkill=SKILLS.find(s=>s.name===target);
+  const verb = kind==='add' ? T('js.skill_added',{token:token}) : T('js.skill_aliased',{token:token,name:targetSkill?.display_name||target});
   try{
     const r=await fetch('/api/skills',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({token:token,action:(kind==='add'?'add':'alias'),target:target})});
@@ -1027,6 +1028,14 @@ function renderUpdateState(data, fromPoll=false){
   const button=document.getElementById('update-start'),status=document.getElementById('update-status');
   if(!button || !status)return;
   const settings=document.body.classList.contains('settings');
+  if(settings){
+    const generation=data.generation||'';
+    if(window.__SETTINGS_GENERATION__===undefined)window.__SETTINGS_GENERATION__=generation;
+    else if(generation && generation!==window.__SETTINGS_GENERATION__){
+      window.__SETTINGS_GENERATION__=generation;
+      document.dispatchEvent(new CustomEvent('job-results-updated'));
+    }
+  }
   const state=UPDATE_STATES.includes(data.state)?data.state:'disabled';
   const stage=['fetch','details','analyze','report'].includes(data.stage)?data.stage:'wait';
   let message=T('js.update_'+state,{stage:T('js.update_stage_'+stage)});
@@ -1098,50 +1107,9 @@ async function startJobUpdate(){
   }catch(e){updateConnectionLost();}
   finally{UPDATE_REQUESTING=false;scheduleUpdatePoll(1500);}
 }
-function fetchConfigRow(list,key,value){
-  const row=updateNode('div','fetch-config-row');
-  row.append(updateNode('dt','',T(FETCH_TEXT_PREFIX+key)),updateNode('dd','',value));
-  list.append(row);
-}
-async function loadUpdateConfig(){
-  const root=document.getElementById('update-config');if(!root)return;
-  try{
-    const data=await updateJson('/api/update-config');root.textContent='';
-    if(!data.ok){
-      const key=UPDATE_CONFIG_ERRORS.includes(data.error)?'js.update_'+data.error:'js.update_config_failed';
-      root.append(updateNode('p','set-hint',T(key)));
-      if(!Array.isArray(data.sources)) return;
-    }
-    if(data.changed_since_start)root.append(updateNode('p','fetch-config-notice',T('set.fetch_changed')));
-    const queries=Array.isArray(data.queries)?data.queries.filter(v=>typeof v==='string'):[];
-    const terms=updateNode('dl','fetch-config-list');
-    fetchConfigRow(terms,'queries',queries.join(' · ')||T('set.fetch_none'));root.append(terms);
-    root.append(updateNode('h3','',T('set.fetch_sources')));
-    const names={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
-    for(const source of (Array.isArray(data.sources)?data.sources:[])){
-      if(!source || !Object.hasOwn(names,source.name)) continue;
-      const card=updateNode('section','fetch-source');
-      const title=updateNode('h4','',names[source.name]);
-      title.append(updateNode('span','fetch-source-state',T(source.enabled?'set.fetch_enabled':'set.fetch_disabled')));card.append(title);
-      const fields=updateNode('dl','fetch-config-list');
-      const locations=Array.isArray(source.locations)?source.locations.filter(v=>typeof v==='string'):[];
-      fetchConfigRow(fields,'locations',locations.join(' · ')||T('set.fetch_none'));
-      for(const key of ['pages_per_query','daterange','results_wanted']){
-        if(!Object.hasOwn(source,key))continue;
-        const value=source[key];
-        fetchConfigRow(fields,key,key==='daterange'&&(value===null||value===0)?T('set.fetch_anytime'):
-          Number.isSafeInteger(value)&&value>=0?String(value):T('set.fetch_none'));
-      }
-      if(typeof source.fetch_description==='boolean')fetchConfigRow(fields,'fetch_description',T(source.fetch_description?'set.fetch_yes':'set.fetch_no'));
-      if(typeof source.country_indeed==='string')fetchConfigRow(fields,'country_indeed',source.country_indeed);
-      card.append(fields);root.append(card);
-    }
-  }catch(e){root.textContent=T('js.update_config_failed');}
-}
 document.addEventListener('DOMContentLoaded',()=>{
   const button=document.getElementById('update-start');
   if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
-  loadUpdateConfig();
 });
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden && document.getElementById('update-start'))pollUpdateState();

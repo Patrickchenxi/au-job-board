@@ -146,10 +146,10 @@ a.clear{color:var(--bad);text-decoration:none;font-size:12.5px;white-space:nowra
 .skillopt .skc{color:var(--ink3);font-family:var(--mono);font-size:11px;margin-left:auto;padding-left:12px}
 
 /* ---- 视图说明条：一句话口径 + 统计 + 上次抓取 ---------------------------- */
-.ctxbar{flex:0 0 auto;display:flex;align-items:flex-start;gap:8px 20px;flex-wrap:wrap;padding:9px 20px;
+.ctxbar{flex:0 0 auto;display:flex;align-items:center;gap:8px 20px;flex-wrap:wrap;padding:9px 20px;
  border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
-.ctx-desc{display:flex;gap:8px;align-items:flex-start;flex:1 1 520px;min-width:0}
-.ctx-desc>svg{flex:0 0 auto;margin-top:1px;color:var(--accent)}
+.ctx-desc{display:flex;gap:8px;align-items:center;flex:1 1 520px;min-width:0}
+.ctx-desc>svg{flex:0 0 auto;margin-top:0;color:var(--accent)}
 .ctx-text b{color:var(--ink)}
 .ctx-stats{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
 .ctx-stats b{color:var(--ink);font-family:var(--mono)}
@@ -687,16 +687,53 @@ body.portrait .detail.swap>*{animation:none}
 .update-widget [aria-busy="true"] svg{animation:update-spin 1s linear infinite}
 @keyframes update-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.update-widget [aria-busy="true"] svg{animation:none}}
-.config-editor{margin-top:20px}
-.config-field{display:grid;grid-template-columns:minmax(130px,38%) minmax(0,1fr);gap:8px 18px;margin:12px 0;align-items:center}
-.config-field input:not([type=checkbox]),.config-field textarea,.config-field select{width:100%;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit}
-.config-field textarea{min-height:78px;resize:vertical}
-@media(max-width:600px){.config-field{grid-template-columns:1fr;gap:4px}}
-
-.config-group{min-width:0;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:8px}
-.config-fields{display:grid;gap:12px}
-.config-field label{display:flex;flex-direction:column;gap:6px;min-width:0}
-.config-field input[type=checkbox]{width:auto;justify-self:start}
-.config-preview pre{white-space:pre-wrap;overflow-wrap:anywhere}
-.config-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
-.config-status.error{color:var(--bad,#b53636)}
+/* One visual group keeps the fetch time and action apart, even in wrapping bars. */
+.run-controls{display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap}
+.run-controls .update-compact{flex:0 0 auto}
+.config-title-line{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;flex:0 0 auto}
+.config-title-line h2{margin:0}
+.config-toolbar{display:flex;align-items:center;justify-content:flex-end}
+.config-toolbar>span{font-size:12.5px}
+.config-reload{flex:0 0 34px;width:34px;height:34px}
+.config-reload svg{display:block;width:20px;height:20px}
+.config-status{font-size:12.5px;line-height:1.7;color:var(--ink2);margin:0 0 14px}
+.config-status:empty{display:none}
+.config-status.error{color:var(--bad)}
+.config-regions{display:grid;gap:18px;margin:0 0 4px}
+.config-region{min-width:0;display:flex;flex-direction:column;gap:8px}
+.config-version{min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px 16px 14px;background:var(--surface)}
+.config-next{border:1px dashed var(--line3);background:var(--surface2);padding-top:14px}
+.config-region-head{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:36px;margin-bottom:4px}
+.config-region-head h3{margin:0;font-size:14px}
+.config-region-head .pen{flex:0 0 36px}
+.config-version-label{display:block;font-size:12px;color:var(--ink3);margin-bottom:8px}
+.config-next .config-version-label{color:var(--accent-ink)}
+.config-summary{margin:0;display:grid;gap:8px}
+.config-summary-row{display:grid;grid-template-columns:minmax(110px,35%) minmax(0,1fr);gap:8px 16px;font-size:13px;line-height:1.65}
+.config-summary-row dt{color:var(--ink2)}
+.config-summary-row dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.config-current>p{font-size:13px;margin:0}
+.config-dialog-hint{font-size:13px;color:var(--ink2);line-height:1.7;margin:0}
+.config-form{display:flex;flex-direction:column;gap:16px}
+.config-field{display:grid;grid-template-columns:minmax(130px,38%) minmax(0,1fr);gap:8px 18px;align-items:center;min-width:0;font-size:13px}
+.config-field>span{min-width:0;overflow-wrap:anywhere}
+.config-field small{display:block;font-size:11.5px;margin-top:3px;font-weight:400}
+.config-field input:not([type=checkbox]),.config-field textarea,.config-field select{width:100%;min-width:0;max-width:100%;padding:8px 10px;border:1px solid var(--line2);border-radius:7px;background:var(--surface);color:var(--ink);font:inherit;min-height:38px}
+.config-field textarea{min-height:90px;resize:vertical;line-height:1.6}
+.config-field input[type=checkbox]{width:17px;height:17px;justify-self:start;accent-color:var(--accent)}
+.config-advanced{border-top:1px solid var(--line);padding-top:12px;margin-top:2px}
+.config-advanced summary{color:var(--ink2);cursor:pointer;font-size:13px;min-height:28px}
+.config-advanced-fields{display:grid;gap:16px;padding-top:14px}
+.config-confirm{z-index:270}
+.config-confirm .dialog{max-width:520px}
+.config-change-lines{display:grid;gap:12px;overflow-wrap:anywhere;font-size:14px;line-height:1.75}
+.config-change-lines p{margin:0;white-space:pre-wrap}
+.config-confirm-note{margin:0;padding-top:12px;border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
+@media(max-width:600px){
+ .run-controls{gap:12px}
+ .config-summary-row{grid-template-columns:minmax(0,1fr);gap:2px}
+ .config-version{padding:10px 12px 14px}
+ .config-field{grid-template-columns:1fr;gap:6px}
+ .config-field input:not([type=checkbox]),.config-field textarea,.config-field select{font-size:16px}
+ .config-confirm .dialog{max-width:none}
+}

@@ -257,8 +257,8 @@ def test_skill_tree_and_settings() -> None:
               "del.onclick=()=>armConfirm(del," in html)
         check("技能行只留铅笔按钮，别名与删除在编辑窗里",
               "openEditor(s.name)" in html and "skBtn(" not in html)
-        check("编辑窗：主要展示名用拖拽，并标明暂未实现",
-              "addEventListener('drop'" in html and "set.not_yet" in html)
+        check("编辑窗：主要展示名支持拖拽并写入补充层",
+              "addEventListener('drop'" in html and "action:'display_name'" in html)
         check("来源三态与按来源着色的泡泡",
               "srcpair" in html and "alias_origins" in html)
         want2 = {"source", "alias_origins"}
@@ -353,6 +353,86 @@ def test_incremental_sync() -> None:
         conn.close()
 
 
+def test_primary_display_names() -> None:
+    """Labels persist without changing canonical extraction, filtering or DB."""
+    import tempfile
+    from unittest.mock import patch
+    from jobs import db as database, report, panel_views
+
+    print("\n== 可选主要展示名与兼容性 ==")
+    base = {"version": 1, "skills": [
+        {"name": "Kubernetes", "aliases": ["K8s"], "not": []},
+        {"name": "Docker", "aliases": [], "not": []}]}
+    check("旧词表默认规范名", skills.display_names(skills.merge(base, {})) ==
+          {"Kubernetes": "Kubernetes", "Docker": "Docker"})
+    local = {}
+    skills.apply_edit(local, skills.merge(base, local), "k8s", "display_name", "Kubernetes")
+    merged = skills.merge(base, local)
+    check("别名展示不改变规范抽取", skills.extract("K8s", merged) == ["Kubernetes"])
+    check("展示名使用已有 token 的原大小写", skills.display_names(merged)["Kubernetes"] == "K8s")
+    check("搜索解释用主要展示名", skills.term_matcher("kubernetes", merged)[2] == "K8s")
+    picker = panel_views._skill_picker({"skill": ["Kubernetes"]}, {"Kubernetes": 3},
+                                      "en", skills.display_names(merged))
+    check("筛选展示别名但提交规范名", 'value="Kubernetes" checked' in picker
+          and "<span>K8s</span>" in picker and '<span class="v">K8s</span>' in picker)
+    chip = panel_views._chip_text("skill", {"skill": ["Kubernetes"]}, "en",
+                                  skills.display_names(merged))
+    check("已选筛选 chip 展示主要名称", "K8s" in chip and "Kubernetes" not in chip)
+    check("合并不修改种子对象", "display_name" not in base["skills"][0])
+    for invalid in ("missing", 12, [], {"x": "K8s"}, None):
+        stale = skills.merge(base, {"display_names": {"Kubernetes": invalid}})
+        check(f"无效展示名 {invalid!r} 回退", skills.display_names(stale)["Kubernetes"] == "Kubernetes")
+    removed = skills.merge(base, dict(local, remove=["K8s"]))
+    check("删除展示别名后回退规范名", skills.display_names(removed)["Kubernetes"] == "Kubernetes")
+    seeded = {"skills": [dict(base["skills"][0], display_name="K8s")]}
+    check("种子可选字段生效", skills.display_names(skills.merge(seeded, {}))["Kubernetes"] == "K8s")
+    for token, target in (("Docker", "Kubernetes"), ("K8s", "missing")):
+        try:
+            skills.apply_edit({}, merged, token, "display_name", target)
+            rejected = False
+        except ValueError:
+            rejected = True
+        check(f"拒绝错误展示名目标 {token}/{target}", rejected)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        vocab = root / "skills.yaml"
+        import yaml
+        vocab.write_text(yaml.safe_dump(base), encoding="utf-8")
+        seed_bytes = vocab.read_bytes()
+        config = {"skills_path": str(vocab), "db_path": str(root / "test.db")}
+        conn = database.connect(config["db_path"])
+        database.upsert_job(conn, {"source": "synthetic", "source_id": "label",
+                                   "title": "K8s developer", "description": "K8s"})
+        conn.commit()
+        skills.sync(conn, skills.load_skills(vocab))
+        before = database.skills_map(conn)
+        conn.close()
+        handler = panel.Handler.__new__(panel.Handler)
+        handler.config = config
+        replies = []
+        handler._json = lambda data, status, started: replies.append((data, status))
+        with patch.object(skills, "sync", side_effect=AssertionError("unexpected recompute")), \
+             patch.object(skills, "sync_incremental", side_effect=AssertionError("unexpected recompute")):
+            handler._post_skills({"action": "display_name", "target": "Kubernetes", "token": "K8s"}, 0)
+        check("API 展示编辑不重算", replies[-1][1] == 200 and replies[-1][0].get("docs") == 0)
+        fresh = skills.load_skills(vocab)
+        check("主要展示名写入补充层并可重载", skills.display_names(fresh)["Kubernetes"] == "K8s")
+        check("种子文件字节保持原样", vocab.read_bytes() == seed_bytes)
+        conn = database.connect(config["db_path"])
+        check("DB 技能身份保持原样", database.skills_map(conn) == before)
+        rows, _excluded, _labels, _index = report.load(conn, config)
+        row = rows[0]
+        check("列表和详情 tag 展示别名", ("skill", "K8s") in tags_for(row))
+        check("旧规范名筛选继续匹配", panel.passes_filters(row, {}, {"skill": ["Kubernetes"]}))
+        check("旧规范名搜索继续匹配", bool(panel._search(rows, "Kubernetes", {}, {}, fresh)))
+        tree = panel.skill_tree(conn, str(vocab))
+        entry = next(s for s in tree["skills"] if s["name"] == "Kubernetes")
+        check("设置数据含展示名和本地来源", entry["display_name"] == "K8s"
+              and entry["display_name_origin"] == "local" and entry["source"] == "mixed")
+        conn.close()
+
+
 def main() -> int:
     test_extract()
     test_term_matcher()
@@ -364,6 +444,7 @@ def main() -> int:
     test_skill_tree_and_settings()
     test_remove_edit()
     test_incremental_sync()
+    test_primary_display_names()
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")
