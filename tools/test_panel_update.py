@@ -473,6 +473,39 @@ class ManagerTests(TemporaryTest):
                 self.assertEqual(restarted.status()["generation"], task)
                 self.assertEqual(generation_path.stat().st_mtime_ns, stamp)
 
+    def test_start_failure_cannot_overwrite_a_run_started_after_unlock(self):
+        manager = self.manager()
+        acquire = run_state.acquire_lock
+        handle = acquire(self.cfg)
+        self.assertIsNotNone(handle)
+        contender = []
+        def cleanup():
+            handle.close()
+            for lock in contender:
+                lock.close()
+        self.addCleanup(cleanup)
+
+        class ReleasingHandle:
+            def fileno(inner):
+                return handle.fileno()
+            def close(inner):
+                handle.close()
+                newer = acquire(self.cfg)
+                self.assertIsNotNone(newer)
+                contender.append(newer)
+                run_state.publish(self.cfg, {"state": "running", "task_id": "newer-scheduled",
+                                             "kind": "run", "trigger": "scheduled"})
+
+        self.process_mock.side_effect = OSError("synthetic start failure")
+        with patch.object(run_state, "acquire_lock", return_value=ReleasingHandle()):
+            failed = manager.start()
+        self.assertFalse(failed["accepted"])
+        self.assertEqual(failed["error"], "start_failed")
+        latest = run_state.latest(self.cfg)
+        self.assertEqual(latest["task_id"], "newer-scheduled")
+        self.assertEqual(latest["state"], "running")
+        self.assertFalse((manager.runtime / "config.yaml").exists())
+
     def test_completion_marker_requires_a_boolean_true(self):
         for marker in (True, False, 1, "true", None):
             with self.subTest(marker=marker):

@@ -286,18 +286,21 @@ class UpdateManager:
                 thread.start()
                 return {**state, "accepted": True}
             except (OSError, ValueError, RuntimeError):
-                if process is not None:
-                    self._stop(process)
-                handle.close()
-                snapshot.unlink(missing_ok=True)
-                state = _empty("error", "start_failed")
-                state["finished_at"] = utcnow()
                 try:
-                    _atomic_json(self.state_path, state)
-                    run_state.publish(self.config, state)
-                except OSError:
-                    pass
-                return {**state, "accepted": False}
+                    if process is not None:
+                        self._stop(process)
+                    snapshot.unlink(missing_ok=True)
+                    state = _empty("error", "start_failed")
+                    state["finished_at"] = utcnow()
+                    try:
+                        _atomic_json(self.state_path, state)
+                        run_state.publish(self.config, state)
+                    except OSError:
+                        pass
+                    return {**state, "accepted": False}
+                finally:
+                    # Persist failure before another runner can replace latest.
+                    handle.close()
 
     @staticmethod
     def _stop(process):
