@@ -151,7 +151,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):                                  # noqa: N802
         started = time.perf_counter()
         if self.path == "/api/config-settings":
-            payload = self._local_json(started, 65536)
+            from .config_edit import MAX_BYTES
+            payload = self._local_json(started, MAX_BYTES)
             if payload is not None:
                 self._config_settings(payload, started)
             return

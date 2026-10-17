@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import yaml
-from jobs.config_edit import ConfigEditor, ConfigEditError
+from jobs.config_edit import ConfigEditor, ConfigEditError, MAX_BYTES
 from jobs import cli, db, panel, run_state
 
 
@@ -431,6 +431,30 @@ class LocalRequestTest(unittest.TestCase):
                 handler = self.handler(**args)
                 self.assertIsNone(handler._local_json(0))
                 self.assertEqual(handler.response[1], 403)
+
+    def test_config_post_accepts_large_valid_edit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.yaml"
+            path.write_text("queries: [synthetic]\n")
+            editor = ConfigEditor({"db_path": str(Path(directory) / "jobs.db")}, path, ROOT / "rules.yaml")
+            queries = [str(i) + "x" * 997 for i in range(70)]
+            payload = {"digest": editor.read()["digest"], "changes": {"queries": queries}}
+            self.assertGreater(len(json.dumps(payload).encode()), 65536)
+            handler = self.handler(payload=payload)
+            handler.path = "/api/config-settings"
+            handler.server.config_editor = editor
+            handler.do_POST()
+            self.assertEqual(handler.response[1], 200)
+            self.assertEqual(editor.read()["values"]["queries"], queries)
+
+    def test_config_post_rejects_body_above_editor_limit_without_reading(self):
+        handler = self.handler()
+        handler.path = "/api/config-settings"
+        handler.headers.replace_header("Content-Length", str(MAX_BYTES + 1))
+        with patch.object(handler.rfile, "read", side_effect=AssertionError("oversized body read")):
+            handler.do_POST()
+        self.assertEqual(handler.response[1], 400)
+        self.assertTrue(handler.close_connection)
 
     def test_container_wildcard_keeps_local_host_origin_boundary(self):
         with patch.dict(os.environ, {"JOBS_CONTAINER": "1"}):
