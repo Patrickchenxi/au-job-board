@@ -1135,7 +1135,7 @@ window.addEventListener('pageshow',()=>{if(UPDATE_STOPPED){UPDATE_STOPPED=false;
 document.addEventListener('click',event=>{
   const link=event.target.closest('a[href]');
   if(!link || event.defaultPrevented || event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target==='_blank')return;
-  if(!NOTE_REQUESTS.size && !hasDetailDraft())return;
+  if(!NOTE_REQUESTS.size && !SKILL_REQUEST && !hasDetailDraft())return;
   event.preventDefault();
   allowDetailNavigation().then(allowed=>{if(allowed){DETAIL_LEAVING=true;location.href=link.href;}});
 });

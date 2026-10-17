@@ -201,7 +201,7 @@ function loadPanel(lang, tags, noteTagLabels, settingsGeneration) {
   noteToStore, noteTagDisplay, noteTagTranslate, noteReconcile, noteCanonicalSegments,
   noteCanonicalize, noteAdopt, noteSync, noteRender, noteBlur, setNote, noteKeys,
   imeComposing, imeStart, imeEnd, imeBusy, imeJustComposed, NOTE_TAGS, NOTE_TAG_LABELS, LABELS,
-  renderUpdateState, openJob, closeDetail, navigatePanel, applyLatestResults,
+  renderUpdateState, openJob, closeDetail, navigatePanel, applyLatestResults, skillPick,
   setUpdateTestState(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   getUpdateTestState(){return {uid:OPEN_UID,baseline:UPDATE_BASELINE,pending:UPDATE_PENDING};},
   addPendingNote(promise){NOTE_REQUESTS.add(promise);promise.finally(()=>NOTE_REQUESTS.delete(promise));} };
@@ -778,6 +778,21 @@ async function testUpdateRefreshWithDetailHash() {
     panel.dispatchWindow('hashchange',{});await tick();
     eq('设置页hashchange：不按JD路由、不抛错',requests,0);
     eq('设置页hashchange：保留页面锚点',panel.sandbox.location.hash,'#another-settings-anchor');
+  }
+  {
+    const {panel,reloads}=fixture();
+    const input=new FakeEl('input');input.value='synthetic skill';panel.elements.set('skill-q',input);
+    let release;panel.sandbox.fetch=()=>new Promise(resolve=>{release=()=>resolve({ok:true,json:async()=>({ok:true})});});
+    const saving=panel.api.skillPick('add','');
+    eq('技能保存开始后输入已清空',input.value,'');
+    let prevented=0;
+    const target='http://localhost/settings?section=fetch#editor';
+    panel.dispatch('click',{target:{closest:()=>({href:target})},button:0,preventDefault(){prevented++;}});
+    eq('技能请求在途：普通链接阻止立即跳转',prevented,1);
+    check('技能请求在途：保持原详情URL',panel.sandbox.location.href.includes('#A'));
+    release();await saving;await tick();
+    eq('技能保存完成：继续完整目的URL',panel.sandbox.location.href,target);
+    eq('技能保存完成：不插入旧页reload',reloads(),0);
   }
   const completed={state:'success',task_id:'task-2',generation:'generation-2',finished_at:'2026-10-17T00:00:00Z'};
   {
