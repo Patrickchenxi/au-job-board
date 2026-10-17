@@ -82,8 +82,8 @@ test.
 
 ## Pull requests
 
-Changes to `main` are made through a pull request. The workflow check named
-`macOS 15 / Python 3.12 / Node 24.21.0` (the 16 public offline tests) runs
+Development starts from `dev`; stable changes to `main` are made through a pull request. The workflow check named
+`macOS 15 / Python 3.12 / Node 24.21.0` (the public offline suite) runs
 automatically on the pull request and should pass, and review discussions should
 be resolved, before merging. No second person's approval is required. The
 maintainer may use an emergency exception, and only through a pull request.
@@ -100,3 +100,23 @@ Force-pushing to `main` or deleting it is not part of the process.
   addresses out of reader documentation.
 - Screenshots, banners and videos must come from synthetic data and must not
   suggest real users or real results.
+
+## Agent-assisted maintenance
+
+[AGENTS.md](../AGENTS.md) keeps durable engineering/review invariants. Two
+repository-local skills provide task-specific procedures:
+
+- [jobs-verify](../.agents/skills/jobs-verify/SKILL.md): affected checks, synthetic
+  browser acceptance and a separate usability walkthrough for substantial UI work.
+- [jobs-pr-finish](../.agents/skills/jobs-pr-finish/SKILL.md): complete feedback
+  collection, evidence-based fixes and a bounded handoff.
+
+Basic usability is part of implementation quality. Start substantial UI work
+with a representative user journey and a small clickable slice; make primary
+actions clear and disclose maintenance/advanced controls in context. User
+feedback settles goals and meaningful tradeoffs, rather than replacing this
+self-review. Small layout fixes do not need a full prototype approval cycle.
+
+Use these files on demand, without requiring extra plugins or a global skill
+installation. Local verification and PR CI are evidence about their actual
+revision, not authorization to merge, release or deploy.
