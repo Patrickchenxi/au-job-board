@@ -111,11 +111,9 @@ repository-local skills provide task-specific procedures:
 - [jobs-pr-finish](../.agents/skills/jobs-pr-finish/SKILL.md): complete feedback
   collection, evidence-based fixes and a bounded handoff.
 
-Basic usability is part of implementation quality. Start substantial UI work
-with a representative user journey and a small clickable slice; make primary
-actions clear and disclose maintenance/advanced controls in context. User
-feedback settles goals and meaningful tradeoffs, rather than replacing this
-self-review. Small layout fixes do not need a full prototype approval cycle.
+The verification skill owns the detailed UX workflow: establish a representative
+interaction before full integration, then verify behavior and usability
+separately. Basic usability is part of implementation quality.
 
 Use these files on demand, without requiring extra plugins or a global skill
 installation. Local verification and PR CI are evidence about their actual

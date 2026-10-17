@@ -7,7 +7,7 @@
 - Use hand-written synthetic inputs, isolated databases and loopback test ports. Never use personal configuration, real listings/notes or a production database for testing. See [data policy](docs/test-data-policy.md).
 - Existing rules and explainable evidence are the product baseline. Do not restore the removed candidate parser or broaden eligibility/scoring semantics without agreed scope.
 - The lead agent owns basic usability: task flow, information hierarchy, action naming and continuity. User feedback chooses goals and tradeoffs; it is not a substitute for checking ordinary UX quality before delivery.
-- Use [jobs-verify](.agents/skills/jobs-verify/SKILL.md) for implementation/acceptance and [jobs-pr-finish](.agents/skills/jobs-pr-finish/SKILL.md) for PR feedback/closeout. Read the relevant sections only. General contributor guidance is in [docs/contributing.md](docs/contributing.md).
+- Implementation or acceptance: read [jobs-verify](.agents/skills/jobs-verify/SKILL.md) and select its documentation/product branch. Existing PR feedback or handoff: read [jobs-pr-finish](.agents/skills/jobs-pr-finish/SKILL.md). General contributor guidance is in [docs/contributing.md](docs/contributing.md).
 - Delegate when independent work helps. Give implementers file ownership; give reviewers the target revision and minimal task context. Independently verify integrated results. Small edits need no agent queue; lock/persistence changes need independent review.
 - Follow the current task's authorization for push, external comments, review requests, merge, release and deployment. Checking feedback does not authorize triggering another review or continuous monitoring.
 
