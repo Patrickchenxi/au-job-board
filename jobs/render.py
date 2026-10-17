@@ -332,7 +332,8 @@ def skill_tags(row: dict,
     limit 为 None 表示不封顶：列表卡片要短（超过就收成 +N），但**详情页
     全部展开**，那里有的是空间。
     """
-    found = [str(s) for s in (row.get("skills") or []) if s]
+    labels = row.get("skill_display_names") or {}
+    found = [str(labels.get(str(s), s)) for s in (row.get("skills") or []) if s]
     if not found:
         return []
     if limit is None or len(found) <= limit:

@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml
 from jobs import RunTimeout, cli, config, db as database, demo, labels, panel_update, sources
-from jobs import panel, skills as skills_mod
+from jobs import panel, run_state, skills as skills_mod
 from jobs.sources import jobspy_source, seek
 
 
@@ -131,7 +131,7 @@ class PipelineTests(TemporaryTest):
         conn.execute("UPDATE jobs SET description=NULL, description_fetched_at=NULL WHERE source='seek'")
         conn.commit()
         conn.close()
-        with patch.object(sources, "iter_sources", return_value=[]), \
+        with patch.object(sources, "iter_sources", return_value=[("seek", lambda _cfg, _queries: [])]), \
              patch.object(seek, "fetch_detail", return_value=None):
             code, result = self.run_pipeline()
         self.assertEqual(code, 0)
@@ -146,13 +146,13 @@ class PipelineTests(TemporaryTest):
                 self.assertEqual(actual, code)
                 self.assertEqual(result["state"], expected)
                 self.assertTrue(result["finished_at"])
-                lock = cli._acquire_run_lock()
+                lock = cli._acquire_run_lock(self.cfg)
                 self.assertIsNotNone(lock)
                 if lock:
                     lock.close()
 
     def test_cli_attempt_timestamp_matches_panel_even_if_child_starts_later(self):
-        with patch.object(sources, "iter_sources", return_value=[]), \
+        with patch.object(sources, "iter_sources", return_value=[("seek", lambda _cfg, _queries: [])]), \
              patch.object(seek, "fetch_detail", return_value="Synthetic description"):
             code, result = self.run_pipeline(result_started_at="2026-10-15T23:59:59Z")
         self.assertEqual(code, 0)
@@ -160,7 +160,7 @@ class PipelineTests(TemporaryTest):
         self.assertEqual(result["state"], "success")
 
     def test_existing_scheduler_lock_skips_all_steps(self):
-        lock = cli._acquire_run_lock()
+        lock = cli._acquire_run_lock(self.cfg)
         self.assertIsNotNone(lock)
         try:
             with patch.object(cli, "cmd_fetch", side_effect=AssertionError("must not fetch")):
@@ -391,7 +391,7 @@ class ManagerTests(TemporaryTest):
         self.assertEqual(failed["error"], "start_failed")
         self.assertEqual(manager.status()["state"], "error")
         self.assertNotIn("PRIVATE-PATH", json.dumps(manager.status()))
-        manager.state_path.write_text(json.dumps(panel_update._empty("running")))
+        (manager.runtime / "latest.json").write_text(json.dumps(panel_update._empty("running")))
         self.assertEqual(self.manager().status()["state"], "interrupted")
         self.assertFalse((manager.runtime / "config.yaml").exists())
 
@@ -405,13 +405,13 @@ class ManagerTests(TemporaryTest):
                     {"state": "PRIVATE-SENTINEL"}]
         for payload in payloads:
             with self.subTest(payload=payload):
-                manager.state_path.write_text(json.dumps(payload))
+                (manager.runtime / "latest.json").write_text(json.dumps(payload))
                 result = manager.status()
                 self.assertIn(result["state"], panel_update.STATES)
                 self.assertNotIn("PRIVATE-SENTINEL", json.dumps(result))
-                self.assertEqual(result["counts"]["seen"], 0)
-        manager.state_path.write_text("{broken json")
-        self.assertEqual(manager.status()["state"], "idle")
+                self.assertTrue(result["counts"] is None or result["counts"]["seen"] == 0)
+        (manager.runtime / "latest.json").write_text("{broken json")
+        self.assertIn(manager.status()["state"], ("idle", "unknown"))
 
     def test_supervisor_timeout_stops_worker_and_preserves_failure_after_restart(self):
         manager = self.manager()
@@ -433,6 +433,84 @@ class ManagerTests(TemporaryTest):
         release.set()
         self.assertTrue(reaped.wait(2))
         self.assertEqual(self.wait_finished(manager)["state"], "error")
+
+    def test_watcher_preserves_completion_for_recovery_after_generation_write_failure(self):
+        for state in ("success", "partial"):
+            with self.subTest(state=state):
+                manager = self.manager()
+                handle = run_state.acquire_lock(self.cfg)
+                self.assertIsNotNone(handle)
+                self.addCleanup(handle.close)
+                task = "completed-" + state
+                result = {**panel_update._empty(state), "task_id": task,
+                          "completion_ready": True, "refresh_available": True}
+                manager.result_path.write_text(json.dumps(result))
+                snapshot = manager.runtime / "config.yaml"
+                snapshot.write_text("queries: [synthetic]\n")
+                original = run_state.atomic_json
+
+                def fail_generation(path, value):
+                    if Path(path).name == "generation.json":
+                        raise OSError("synthetic generation write failure")
+                    original(path, value)
+
+                class Process:
+                    def wait(self, timeout=None):
+                        return 0
+
+                with patch.object(run_state, "atomic_json", side_effect=fail_generation):
+                    manager._watch(Process(), handle, snapshot, result)
+                self.assertTrue(handle.closed)
+                self.assertFalse(snapshot.exists())
+                self.assertNotEqual(run_state.generation(self.cfg), task)
+                self.assertIs(json.loads((manager.runtime / "latest.json").read_text())["completion_ready"], True)
+                restarted = self.manager()
+                recovered = restarted.status()
+                self.assertEqual(recovered["state"], state)
+                self.assertEqual(recovered["generation"], task)
+                generation_path = manager.runtime / "generation.json"
+                stamp = generation_path.stat().st_mtime_ns
+                self.assertEqual(restarted.status()["generation"], task)
+                self.assertEqual(generation_path.stat().st_mtime_ns, stamp)
+
+    def test_start_failure_cannot_overwrite_a_run_started_after_unlock(self):
+        manager = self.manager()
+        acquire = run_state.acquire_lock
+        handle = acquire(self.cfg)
+        self.assertIsNotNone(handle)
+        contender = []
+        def cleanup():
+            handle.close()
+            for lock in contender:
+                lock.close()
+        self.addCleanup(cleanup)
+
+        class ReleasingHandle:
+            def fileno(inner):
+                return handle.fileno()
+            def close(inner):
+                handle.close()
+                newer = acquire(self.cfg)
+                self.assertIsNotNone(newer)
+                contender.append(newer)
+                run_state.publish(self.cfg, {"state": "running", "task_id": "newer-scheduled",
+                                             "kind": "run", "trigger": "scheduled"})
+
+        self.process_mock.side_effect = OSError("synthetic start failure")
+        with patch.object(run_state, "acquire_lock", return_value=ReleasingHandle()):
+            failed = manager.start()
+        self.assertFalse(failed["accepted"])
+        self.assertEqual(failed["error"], "start_failed")
+        latest = run_state.latest(self.cfg)
+        self.assertEqual(latest["task_id"], "newer-scheduled")
+        self.assertEqual(latest["state"], "running")
+        self.assertFalse((manager.runtime / "config.yaml").exists())
+
+    def test_completion_marker_requires_a_boolean_true(self):
+        for marker in (True, False, 1, "true", None):
+            with self.subTest(marker=marker):
+                safe = panel_update._safe_state({"state": "success", "completion_ready": marker})
+                self.assertIs(safe["completion_ready"], marker is True)
 
     def test_zero_exit_without_terminal_result_is_not_success(self):
         manager = self.manager()

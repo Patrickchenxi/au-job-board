@@ -1,14 +1,13 @@
 """Local panel update orchestration; adapters and CLI remain the execution path.
 
 The panel exposes only whitelisted configuration fields and bounded state codes.
-Runtime snapshots are private and scoped to the active database. A second flock
-is inherited by the child so a panel restart cannot launch a duplicate worker.
-The CLI's existing run lock also coordinates with scheduled runs.
+Runtime snapshots are private and scoped to the active database. One flock is
+inherited by the child so a panel restart cannot launch a duplicate worker.
+The CLI and configuration editor use that same database-scoped persistent lock.
 """
 from __future__ import annotations
 
 import copy
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -22,10 +21,11 @@ import yaml
 
 from .config import ROOT, db_path, read_config_root, resolve_filtering
 from .db import utcnow
+from . import run_state, db as database
 
 TIMEOUT_SECONDS = 1800
 TERMINAL_STATES = {"success", "partial", "error", "busy", "timeout", "interrupted"}
-STATES = TERMINAL_STATES | {"idle", "running", "disabled"}
+STATES = TERMINAL_STATES | {"idle", "running", "disabled", "unknown"}
 STAGES = {"fetch", "details", "analyze", "report"}
 ERRORS = {"config_invalid", "config_unavailable", "reload_required", "no_sources",
           "demo_disabled", "run_failed", "start_failed", "source_failed", "run_busy",
@@ -67,6 +67,8 @@ def _safe_state(value):
         if isinstance(item, str) and len(item) <= 40 and all(c in "0123456789-:T+. Z" for c in item):
             result[key] = item
     counts = value.get("counts")
+    if counts is None:
+        result["counts"] = None
     if isinstance(counts, dict):
         for field in result["counts"]:
             item = counts.get(field)
@@ -75,7 +77,14 @@ def _safe_state(value):
     failed_sources = value.get("failed_sources")
     if isinstance(failed_sources, list):
         result["failed_sources"] = [name for name in SOURCES if name in failed_sources]
+    for key in ("task_id", "generation"):
+        item = value.get(key)
+        if isinstance(item, str) and len(item) <= 80 and all(c.isalnum() or c == "-" for c in item):
+            result[key] = item
+    result["trigger"] = value.get("trigger") if value.get("trigger") in ("manual", "scheduled", "cli", "unknown") else "unknown"
+    result["kind"] = value.get("kind") if value.get("kind") in ("run", "fetch") else None
     result["refresh_available"] = value.get("refresh_available") is True
+    result["completion_ready"] = value.get("completion_ready") is True
     return result
 
 
@@ -164,7 +173,7 @@ class UpdateManager:
         self.runtime = active_db.parent / ("." + active_db.name + ".panel-update")
         self.state_path = self.runtime / "state.json"
         self.result_path = self.runtime / "result.json"
-        self.lock_path = self.runtime / "update.lock"
+        self.lock_path = run_state.lock_path(config)
         self._mutex = threading.RLock()
         self._process = None
 
@@ -212,67 +221,42 @@ class UpdateManager:
         except (OSError, UnicodeError):
             return {**empty, "error": "config_unavailable"}
 
-    def _lock(self):
-        handle = self.lock_path.open("a+")
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            handle.close()
-            return None
-        return handle
-
     def status(self):
         if self.demo:
             return _empty("disabled", "demo_disabled")
-        with self._mutex:
-            raw = _read_json(self.state_path)
-            if raw is None:
-                return _empty()
-            state = _safe_state(raw)
-            if state["state"] != "running":
-                return state
-            result = _read_json(self.result_path)
-            if isinstance(result, dict):
-                result = _safe_state(result)
-                # A result is bound to this attempt by its started timestamp.
-                if result["started_at"] == state["started_at"]:
-                    if result["state"] in TERMINAL_STATES:
-                        # The owning watcher also checks/reaps the child exit.
-                        # Wait for its atomic terminal state to avoid exposing
-                        # success between the CLI result write and a bad exit.
-                        if self._process is None:
-                            return result
-                        state["stage"] = result["stage"]
-                    if result["state"] == "running":
-                        state = result
+        try:
+            conn = database.connect(db_path(self.config))
             try:
-                handle = self._lock()
-            except OSError:
-                return _empty("error", "storage_unavailable")
-            if handle is not None:
-                handle.close()
-                state.update(state="interrupted", error="run_interrupted", finished_at=utcnow())
-                return state
-            return state
+                return _safe_state(run_state.latest(self.config, conn))
+            finally:
+                conn.close()
+        except (OSError, ValueError):
+            return _empty("error", "storage_unavailable")
 
     def start(self):
         if self.demo:
             return {**_empty("disabled", "demo_disabled"), "accepted": False}
         with self._mutex:
+            # Read-only preflight keeps invalid requests free of runtime writes;
+            # the authoritative read is repeated under the shared lock below.
+            preview = self.preview()
+            if not preview['ok']:
+                return {**_empty("error", preview['error']), "accepted": False}
             try:
-                config, preview = self._fresh()
-            except (ValueError, TypeError, AttributeError, yaml.YAMLError):
-                return {**_empty("error", "config_invalid"), "accepted": False}
-            except (OSError, UnicodeError):
-                return {**_empty("error", "config_unavailable"), "accepted": False}
-            if config is None:
-                return {**_empty("error", preview["error"]), "accepted": False}
-            try:
-                self.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-                os.chmod(self.runtime, 0o700)
-                handle = self._lock()
+                handle = run_state.acquire_lock(self.config)
                 if handle is None:
                     return {**self.status(), "state": "running", "accepted": False}
+                try:
+                    config, preview = self._fresh()
+                except (ValueError, TypeError, AttributeError, yaml.YAMLError):
+                    handle.close()
+                    return {**_empty("error", "config_invalid"), "accepted": False}
+                except (OSError, UnicodeError):
+                    handle.close()
+                    return {**_empty("error", "config_unavailable"), "accepted": False}
+                if config is None:
+                    handle.close()
+                    return {**_empty("error", preview["error"]), "accepted": False}
             except OSError:
                 return {**_empty("error", "storage_unavailable"), "accepted": False}
             snapshot = self.runtime / "config.yaml"
@@ -284,11 +268,14 @@ class UpdateManager:
                 self.result_path.unlink(missing_ok=True)
                 state = _empty("running")
                 state["started_at"] = utcnow()
+                state.update(task_id=uuid.uuid4().hex, trigger="manual", kind="run")
+                run_state.publish(self.config, state)
                 _atomic_json(self.state_path, state)
                 command = [sys.executable, "-m", "jobs.cli", "--config", str(snapshot),
                            "--rules", str(self.rules_path), "--skills", str(self.skills_path),
                            "run", "--timeout", str(TIMEOUT_SECONDS), "--result-file", str(self.result_path),
-                           "--result-started-at", state["started_at"]]
+                           "--result-started-at", state["started_at"], "--task-id", state["task_id"],
+                           "--trigger", "manual", "--run-lock-fd", str(handle.fileno())]
                 process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                            start_new_session=True, pass_fds=(handle.fileno(),))
@@ -299,17 +286,21 @@ class UpdateManager:
                 thread.start()
                 return {**state, "accepted": True}
             except (OSError, ValueError, RuntimeError):
-                if process is not None:
-                    self._stop(process)
-                handle.close()
-                snapshot.unlink(missing_ok=True)
-                state = _empty("error", "start_failed")
-                state["finished_at"] = utcnow()
                 try:
-                    _atomic_json(self.state_path, state)
-                except OSError:
-                    pass
-                return {**state, "accepted": False}
+                    if process is not None:
+                        self._stop(process)
+                    snapshot.unlink(missing_ok=True)
+                    state = _empty("error", "start_failed")
+                    state["finished_at"] = utcnow()
+                    try:
+                        _atomic_json(self.state_path, state)
+                        run_state.publish(self.config, state)
+                    except OSError:
+                        pass
+                    return {**state, "accepted": False}
+                finally:
+                    # Persist failure before another runner can replace latest.
+                    handle.close()
 
     @staticmethod
     def _stop(process):
@@ -328,16 +319,17 @@ class UpdateManager:
                 self._stop(process)
                 progress = _read_json(self.result_path)
                 result = _safe_state(progress) if isinstance(progress, dict) else dict(initial)
-                result.update(state="timeout", error="run_timeout", finished_at=utcnow())
+                result.update(state="timeout", error="run_timeout", finished_at=utcnow(), refresh_available=False)
             if result is None:
                 raw = _read_json(self.result_path)
                 result = _safe_state(raw) if isinstance(raw, dict) else None
                 if (result is None or result["state"] not in TERMINAL_STATES or
                         (code != 0 and result["state"] in ("success", "partial"))):
                     result = result or dict(initial)
-                    result.update(state="error", error="run_failed", finished_at=utcnow())
+                    result.update(state="error", error="run_failed", finished_at=utcnow(), refresh_available=False)
             with self._mutex:
                 _atomic_json(self.state_path, result)
+                run_state.publish(self.config, result)
         except OSError:
             # status can still reconstruct from result + the inherited lock.
             pass

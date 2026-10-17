@@ -86,6 +86,14 @@ function setDot(el, cls){
   el.addEventListener('animationend',()=>el.classList.remove('pop'),{once:true});
 }
 async function openJob(uid){
+  if(OPEN_UID && OPEN_UID!==uid){
+    if(!await allowDetailNavigation()){
+      history.replaceState(null,"",location.pathname+location.search+"#"+encodeURIComponent(OPEN_UID));
+      return;
+    }
+    if(UPDATE_PENDING){applyLatestResults("#"+encodeURIComponent(uid));return;}
+  }
+  OPEN_UID=uid;
   document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.uid===uid));
   history.replaceState(null,'','#'+encodeURIComponent(uid));
   const pane=document.getElementById('detail');
@@ -115,7 +123,8 @@ async function openJob(uid){
     d.textContent=T('js.load_failed')+e.message; pane.appendChild(d);
   }
 }
-let OPEN_SEQ=0;
+let OPEN_SEQ=0, OPEN_UID=null;
+const NOTE_REQUESTS=new Set();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -126,7 +135,14 @@ function swapIn(pane){
   if(REDUCED.matches) return;
   pane.classList.remove('swap'); void pane.offsetWidth; pane.classList.add('swap');
 }
-function closeDetail(){
+async function closeDetail(){
+  if(!await allowDetailNavigation()){
+    if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+"#"+encodeURIComponent(OPEN_UID));
+    return;
+  }
+  OPEN_UID=null;
+  history.replaceState(null,"",location.pathname+location.search);
+  if(UPDATE_PENDING){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
   const pane=document.getElementById('detail');
   if(!document.body.classList.contains('portrait') || REDUCED.matches){ pane.classList.remove('open'); return; }
@@ -146,7 +162,13 @@ async function setLabel(uid,field,value,btn){
   if(field==='eligibility' && !wasOn && value==='ineligible') toast(T('js.miss_hint'));
   else toast(wasOn ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field)+T('js.colon')+T('value.'+field+'.'+value));
 }
-async function setNote(input){
+function setNote(input){
+  const task=saveNote(input);
+  NOTE_REQUESTS.add(task);
+  task.finally(()=>NOTE_REQUESTS.delete(task));
+  return task;
+}
+async function saveNote(input){
   const uid=input.dataset.uid;
   // 落库前把界面显示值映射回 canonical：默认标签用中文原文，自定义内容原样，
   // 服务端仍走 labels.normalize_note 做最终规范化。显示值本身不入库。
@@ -594,7 +616,7 @@ function skillRender(){
   // 想打 "Amazon Web Service" 去认 AWS 时，列表会被逐字筛空，反而找不到。
   // 候选标签带上别名，扫一眼就知道是不是它。
   SKILLS.forEach(s=>{
-    rows.push({kind:'alias', label:T('js.skill_as_alias',{name:s.name}), target:s.name});
+    rows.push({kind:'alias', label:T('js.skill_as_alias',{name:s.display_name||s.name}), target:s.name});
   });
   m.innerHTML=''; m.scrollTop=0;
   if(!rows.length){
@@ -609,7 +631,7 @@ function skillRender(){
   });
   placeMenu(input,m,{minWidth:240});
 }
-let SKILL_SAVING=false;
+let SKILL_SAVING=false, SKILL_REQUEST=null, SKILL_NAV_WAITING=false;
 function skillStatus(text){
   const s=document.getElementById('skill-status');
   if(s) s.textContent=text||'';
@@ -617,7 +639,14 @@ function skillStatus(text){
 /* 失焦收起候选。点候选用的是 mousedown+preventDefault，不会触发 blur，
    所以这里只会被「点到别处 / Tab 走」触发。 */
 function skillBlur(){ skillMenuClose(); }
-async function skillPick(kind,target){
+function skillPick(kind,target){
+  if(SKILL_REQUEST)return SKILL_REQUEST;
+  const task=saveSkill(kind,target);
+  SKILL_REQUEST=task;
+  task.finally(()=>{SKILL_SAVING=false;SKILL_REQUEST=null;});
+  return task;
+}
+async function saveSkill(kind,target){
   if(SKILL_SAVING) return;          // 防重复提交：请求还没回来时连点不能再发一次
   const input=skillInput();
   if(!input) return;
@@ -630,7 +659,8 @@ async function skillPick(kind,target){
   input.value='';
   input.disabled=true;
   skillStatus(T('js.skill_saving'));
-  const verb = kind==='add' ? T('js.skill_added',{token:token}) : T('js.skill_aliased',{token:token,name:target});
+  const targetSkill=SKILLS.find(s=>s.name===target);
+  const verb = kind==='add' ? T('js.skill_added',{token:token}) : T('js.skill_aliased',{token:token,name:targetSkill?.display_name||target});
   try{
     const r=await fetch('/api/skills',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({token:token,action:(kind==='add'?'add':'alias'),target:target})});
@@ -639,7 +669,7 @@ async function skillPick(kind,target){
     skillStatus(T('js.skill_recalc'));
     toast(verb);
     // 重算 + 整页重载要点时间；先让状态和 toast 露个面，否则一刷新就看不见了
-    setTimeout(()=>location.reload(), 300);
+    if(!SKILL_NAV_WAITING)setTimeout(()=>location.reload(), 300);
   }catch(e){
     SKILL_SAVING=false;
     input.disabled=false;
@@ -693,13 +723,13 @@ function applyFilter(){
   if(s) st[view]=s; else delete st[view];
   writeFilterStore(st);
   p.set('view',view);
-  location.href='/'+ (p.toString()?'?'+p.toString():'');
+  navigatePanel('/'+ (p.toString()?'?'+p.toString():''));
 }
 /* 清除筛选 = 回到该视图的默认口径，并忘掉记住的那套 */
 function clearFilter(){
   const view=window.__VIEW__||'recommend';
   const st=filterStore(); delete st[view]; writeFilterStore(st);
-  location.href='/?view='+encodeURIComponent(view);
+  navigatePanel('/?view='+encodeURIComponent(view));
 }
 /* 点导航切换视图：套上那个视图自己记住的筛选条件。
    修饰键 / 中键点仍然走原生链接（新标签打开），所以 href 是真的能用。 */
@@ -707,13 +737,13 @@ function gotoView(view,ev){
   if(ev && (ev.metaKey||ev.ctrlKey||ev.shiftKey||ev.altKey)) return true;
   if(ev) ev.preventDefault();
   const s=filterStore()[view]||'';
-  location.href='/?view='+encodeURIComponent(view)+(s?'&'+s:'');
+  navigatePanel('/?view='+encodeURIComponent(view)+(s?'&'+s:''));
   return false;
 }
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.dots').forEach(d=>refreshDot(d.dataset.uid));
   const h=decodeURIComponent(location.hash.slice(1));
-  if(h) openJob(h);
+  if(h && document.getElementById("detail")) openJob(h);
   fitLayout();          // 应用记住的分栏宽度 / 决定是不是竖屏
   // 搜索框：请求回来之后焦点会丢，光标也回到开头。带着 q 重新聚焦、光标置尾，
   // 否则用户打字打到一半就被打断，没法连着敲。
@@ -916,7 +946,7 @@ fitLayout();   // 脚本在 body 末尾，元素已就绪，先跑一次减少�
 let UPDATE_TIMER=null, UPDATE_REQUESTING=false, UPDATE_POLLING=false, UPDATE_STOPPED=false, UPDATE_REVISION=0;
 let UPDATE_REJECTION=null, UPDATE_LAST_STARTED=null;
 const UPDATE_TEXT_PREFIX='js.update_', UPDATE_STAGE_PREFIX='js.update_stage_', FETCH_TEXT_PREFIX='set.fetch_';
-const UPDATE_STATES=['idle','running','success','partial','error','busy','timeout','interrupted','disabled'];
+const UPDATE_STATES=['idle','running','success','partial','error','busy','timeout','interrupted','disabled','unknown'];
 const UPDATE_CONFIG_ERRORS=['config_invalid','config_unavailable','reload_required','no_sources','demo_disabled','storage_unavailable'];
 function updateNode(tag, cls, text){
   const node=document.createElement(tag);
@@ -941,6 +971,59 @@ function updateTime(value){
   const date=new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(document.documentElement.lang||undefined);
 }
+let UPDATE_BASELINE=window.__RESULT_GENERATION__||'', UPDATE_PENDING=null, UPDATE_APPLYING=false;
+let UPDATE_OWN_TASK=null;
+function hasDetailDraft(){
+  return Array.from(document.querySelectorAll('.note input')).some(el=>el.dataset.noteLoaded!==undefined && el.value!==el.dataset.noteLoaded) ||
+    !!(skillInput() && skillInput().value.trim());
+}
+async function allowDetailNavigation(){
+  if(SKILL_REQUEST){
+    SKILL_NAV_WAITING=true;
+    await SKILL_REQUEST;
+    SKILL_NAV_WAITING=false;
+  }
+  if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
+  return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));
+}
+function rememberListPosition(){
+  const list=document.querySelector('.list');if(!list)return;
+  const cards=Array.from(list.querySelectorAll('.card'));
+  const boundary=list.getBoundingClientRect().top;
+  const anchor=cards.find(el=>el.getBoundingClientRect().bottom>boundary);
+  try{sessionStorage.setItem('jobs.result.position',JSON.stringify({url:location.pathname+location.search,
+    uid:anchor?anchor.dataset.uid:null,delta:anchor?anchor.getBoundingClientRect().top-boundary:0,
+    top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
+}
+function applyLatestResults(hash){
+  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && hasDetailDraft()))return;
+  UPDATE_APPLYING=true;
+  UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
+  rememberListPosition();
+  if(hash!==undefined)DETAIL_LEAVING=true;
+  // assign forces a new document even when only the hash would otherwise change.
+  const url=new URL(location.href);url.hash=hash===undefined?location.hash:hash;
+  if(url.href===location.href) location.reload();
+  else {history.replaceState(null,'',url.href);location.reload();}
+}
+function isRunStale(data){
+  const seconds=(Date.now()-new Date(data.finished_at).getTime())/1000;
+  return data.state!=='running' && !!data.finished_at && Number.isFinite(seconds)
+    && seconds>=window.__STALE_AFTER_DAYS__*86400;
+}
+function relativeRunTime(data){
+  const stamp=data.finished_at;
+  if(data.state==='running') return T('js.update_running',{stage:T('js.update_stage_'+(data.stage||'wait'))});
+  if(!stamp)return T('run.never');
+  const seconds=Math.max(0,(Date.now()-new Date(stamp).getTime())/1000);
+  if(!Number.isFinite(seconds)) return '';
+  const unit=seconds<3600?'minutes':seconds<86400?'hours':'days';
+  const n=Math.max(1,Math.floor(seconds/(unit==='minutes'?60:unit==='hours'?3600:86400)));
+  let text=T('run.ago',{ago:T('ago.'+unit,{n})});
+  if(isRunStale(data))text+=T('run.stale');
+  if(data.state!=='success')text+=' · '+T('js.update_'+data.state);
+  return text;
+}
 function renderUpdateState(data, fromPoll=false){
   const started=data.started_at||null;
   if(fromPoll && UPDATE_REJECTION){
@@ -948,35 +1031,54 @@ function renderUpdateState(data, fromPoll=false){
     else UPDATE_REJECTION=null;
   }
   if(fromPoll) UPDATE_LAST_STARTED=started;
-  const button=document.getElementById('update-start');
-  const status=document.getElementById('update-status');
-  if(!button || !status) return;
+  const button=document.getElementById('update-start'),status=document.getElementById('update-status');
+  if(!button || !status)return;
+  const settings=document.body.classList.contains('settings');
+  if(settings){
+    const generation=data.generation||'';
+    if(window.__SETTINGS_GENERATION__===undefined)window.__SETTINGS_GENERATION__=generation;
+    else if(generation && generation!==window.__SETTINGS_GENERATION__){
+      window.__SETTINGS_GENERATION__=generation;
+      document.dispatchEvent(new CustomEvent('job-results-updated'));
+    }
+  }
   const state=UPDATE_STATES.includes(data.state)?data.state:'disabled';
   const stage=['fetch','details','analyze','report'].includes(data.stage)?data.stage:'wait';
-  let message=T(UPDATE_TEXT_PREFIX+state,{stage:T(UPDATE_STAGE_PREFIX+stage)});
-  if(UPDATE_CONFIG_ERRORS.includes(data.error)) message=T(UPDATE_TEXT_PREFIX+data.error);
-  status.textContent=message;
+  let message=T('js.update_'+state,{stage:T('js.update_stage_'+stage)});
+  if(UPDATE_CONFIG_ERRORS.includes(data.error))message=T('js.update_'+data.error);
+  if(data.generation && data.generation!==UPDATE_BASELINE && !settings) UPDATE_PENDING=data.generation;
+  // Only the tab which initiated this precise attempt receives completion feedback.
+  if(UPDATE_OWN_TASK && data.task_id===UPDATE_OWN_TASK && ['success','partial','error','timeout','interrupted'].includes(state)){
+    toast(message);UPDATE_OWN_TASK=null;
+  }
+  status.textContent=settings?message:(UPDATE_PENDING?T('js.update_pending'):UPDATE_CONFIG_ERRORS.includes(data.error)?message:'');
   button.disabled=state==='running'||state==='disabled'||UPDATE_REQUESTING;
-  button.textContent=T('js.update_title');
   button.setAttribute('aria-busy',state==='running'?'true':'false');
+  document.querySelectorAll('[data-run-time]').forEach(el=>{
+    const stale=isRunStale(data);
+    el.classList.toggle('stale',stale);
+    el.dataset.runTime=data.finished_at||'';el.dataset.runState=data.state||'idle';
+    el.textContent='';
+    if(stale){const dot=document.createElement('span');dot.className='dot bad';dot.setAttribute('aria-hidden','true');el.appendChild(dot);}
+    const text=document.createElement('span');text.textContent=relativeRunTime(data);el.appendChild(text);
+  });
   const meta=[];
+  if(data.task_id)meta.push(T('js.update_task',{id:data.task_id}));
+  if(data.trigger)meta.push(T('js.update_trigger',{source:T('js.update_trigger_'+data.trigger)}));
   const startedTime=updateTime(data.started_at),finished=updateTime(data.finished_at);
-  if(startedTime) meta.push(T('js.update_started',{time:startedTime}));
-  if(finished) meta.push(T('js.update_finished',{time:finished}));
+  if(startedTime)meta.push(T('js.update_started',{time:startedTime}));
+  if(finished)meta.push(T('js.update_finished',{time:finished}));
   if(data.counts && (startedTime || finished)){
-    const counts={};
-    for(const k of ['seen','inserted','updated','details_fetched']) counts[k]=Number.isSafeInteger(data.counts[k])&&data.counts[k]>=0?data.counts[k]:0;
+    const counts={};for(const k of ['seen','inserted','updated','details_fetched'])counts[k]=Number.isSafeInteger(data.counts[k])&&data.counts[k]>=0?data.counts[k]:0;
     meta.push(T('js.update_counts',counts));
   }
-  const sourceNames={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
-  const failed=Array.isArray(data.failed_sources)?data.failed_sources.filter(s=>Object.hasOwn(sourceNames,s)):[];
-  if(failed.length) meta.push(T('js.update_failed_sources',{sources:failed.map(s=>sourceNames[s]).join(', ')}));
-  document.getElementById('update-meta').textContent=meta.join(' · ');
-  const refresh=document.getElementById('update-refresh');
-  refresh.hidden=!data.refresh_available;
-  // Preserve the current view, filters and open detail when the user opts in.
-  if(!document.body.classList.contains('settings')) refresh.href=location.pathname+location.search+location.hash;
+  const names={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
+  const failed=Array.isArray(data.failed_sources)?data.failed_sources.filter(s=>Object.hasOwn(names,s)):[];
+  if(failed.length)meta.push(T('js.update_failed_sources',{sources:failed.map(s=>names[s]).join(', ')}));
+  const detail=document.getElementById('update-meta');if(detail)detail.textContent=meta.join(' · ');
+  if(UPDATE_PENDING && !OPEN_UID)applyLatestResults();
 }
+
 function updateConnectionLost(){
   const button=document.getElementById('update-start');
   if(!button) return;
@@ -1013,66 +1115,51 @@ async function startJobUpdate(){
     if(data.accepted===false && data.state!=='running'){
       UPDATE_REJECTION={data,priorStarted:UPDATE_LAST_STARTED};
     }
+    if(data.accepted===true)UPDATE_OWN_TASK=data.task_id;
     UPDATE_REQUESTING=false;renderUpdateState(data);
   }catch(e){updateConnectionLost();}
   finally{UPDATE_REQUESTING=false;scheduleUpdatePoll(1500);}
 }
-function fetchConfigRow(list,key,value){
-  const row=updateNode('div','fetch-config-row');
-  row.append(updateNode('dt','',T(FETCH_TEXT_PREFIX+key)),updateNode('dd','',value));
-  list.append(row);
-}
-async function loadUpdateConfig(){
-  const root=document.getElementById('update-config');if(!root)return;
-  try{
-    const data=await updateJson('/api/update-config');root.textContent='';
-    if(!data.ok){
-      const key=UPDATE_CONFIG_ERRORS.includes(data.error)?'js.update_'+data.error:'js.update_config_failed';
-      root.append(updateNode('p','set-hint',T(key)));
-      if(!Array.isArray(data.sources)) return;
-    }
-    if(data.changed_since_start)root.append(updateNode('p','fetch-config-notice',T('set.fetch_changed')));
-    const queries=Array.isArray(data.queries)?data.queries.filter(v=>typeof v==='string'):[];
-    const terms=updateNode('dl','fetch-config-list');
-    fetchConfigRow(terms,'queries',queries.join(' · ')||T('set.fetch_none'));root.append(terms);
-    root.append(updateNode('h3','',T('set.fetch_sources')));
-    const names={seek:'SEEK',indeed:'Indeed',linkedin:'LinkedIn'};
-    for(const source of (Array.isArray(data.sources)?data.sources:[])){
-      if(!source || !Object.hasOwn(names,source.name)) continue;
-      const card=updateNode('section','fetch-source');
-      const title=updateNode('h4','',names[source.name]);
-      title.append(updateNode('span','fetch-source-state',T(source.enabled?'set.fetch_enabled':'set.fetch_disabled')));card.append(title);
-      const fields=updateNode('dl','fetch-config-list');
-      const locations=Array.isArray(source.locations)?source.locations.filter(v=>typeof v==='string'):[];
-      fetchConfigRow(fields,'locations',locations.join(' · ')||T('set.fetch_none'));
-      for(const key of ['pages_per_query','daterange','results_wanted']){
-        if(!Object.hasOwn(source,key))continue;
-        const value=source[key];
-        fetchConfigRow(fields,key,key==='daterange'&&(value===null||value===0)?T('set.fetch_anytime'):
-          Number.isSafeInteger(value)&&value>=0?String(value):T('set.fetch_none'));
-      }
-      if(typeof source.fetch_description==='boolean')fetchConfigRow(fields,'fetch_description',T(source.fetch_description?'set.fetch_yes':'set.fetch_no'));
-      if(typeof source.country_indeed==='string')fetchConfigRow(fields,'country_indeed',source.country_indeed);
-      card.append(fields);root.append(card);
-    }
-  }catch(e){root.textContent=T('js.update_config_failed');}
-}
 document.addEventListener('DOMContentLoaded',()=>{
   const button=document.getElementById('update-start');
   if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
-  const refresh=document.getElementById('update-refresh');
-  if(refresh)refresh.addEventListener('click',event=>{
-    if(event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if(document.body.classList.contains('settings')) return;
-    // Navigating to this same URL with a detail hash only scrolls in-page.
-    // An explicit reload fetches fresh results and retains filters/detail.
-    event.preventDefault();
-    location.reload();
-  });
-  loadUpdateConfig();
 });
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden && document.getElementById('update-start'))pollUpdateState();
 });
 window.addEventListener('pagehide',()=>{UPDATE_STOPPED=true;clearTimeout(UPDATE_TIMER);});
 window.addEventListener('pageshow',()=>{if(UPDATE_STOPPED){UPDATE_STOPPED=false;pollUpdateState();}});
+
+// Preserve the original URL for ordinary page navigation, including query/hash.
+// Modified clicks retain native browser behavior and do not disturb this tab.
+document.addEventListener('click',event=>{
+  const link=event.target.closest('a[href]');
+  if(!link || event.defaultPrevented || event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target==='_blank')return;
+  if(!NOTE_REQUESTS.size && !SKILL_REQUEST && !hasDetailDraft())return;
+  event.preventDefault();
+  allowDetailNavigation().then(allowed=>{if(allowed){DETAIL_LEAVING=true;location.href=link.href;}});
+});
+let DETAIL_LEAVING=false;
+window.addEventListener('beforeunload',event=>{
+  if(!DETAIL_LEAVING && (NOTE_REQUESTS.size || hasDetailDraft() || SKILL_SAVING)){event.preventDefault();event.returnValue='';}
+});
+window.addEventListener('hashchange',()=>{
+  if(!document.getElementById('detail'))return;
+  const uid=decodeURIComponent(location.hash.slice(1));
+  if(uid)openJob(uid);else if(OPEN_UID)closeDetail();
+});
+document.addEventListener('DOMContentLoaded',()=>{
+  let saved=null;
+  try{saved=JSON.parse(sessionStorage.getItem('jobs.result.position')||'null');sessionStorage.removeItem('jobs.result.position');}catch(e){}
+  if(saved && saved.url===location.pathname+location.search){requestAnimationFrame(()=>{
+    const list=document.querySelector('.list');
+    const anchor=Array.from(document.querySelectorAll('.card')).find(el=>el.dataset.uid===saved.uid);
+    if(list){list.scrollTop=saved.top||0;if(anchor)list.scrollTop+=anchor.getBoundingClientRect().top-list.getBoundingClientRect().top-(saved.delta||0);}
+    window.scrollTo(0,saved.windowY||0);
+  });}
+});
+
+async function navigatePanel(target){
+  if(!await allowDetailNavigation())return;
+  DETAIL_LEAVING=true;location.href=target;
+}

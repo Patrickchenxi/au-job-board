@@ -42,6 +42,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_run_state.py",
+     "unified task facts, generations and recovery", None),
+    ("tools/test_config_edit.py",
+     "settings YAML roundtrip, validation, conflicts and shared lock", None),
     ("tools/test_public_configuration.py",
      "public example configuration boundary", None),
     ("tools/test_citizenship_rules.py",

@@ -179,6 +179,7 @@ def test_profile_presets() -> None:
         "citizen": {"citizenship.exclusive", "citizenship.or_pr"},
         "permanent_resident": {"citizenship.or_pr"},
         "485": set(),
+        "whv": set(),
         "student_visa": set(),
         "custom": set(),
     }

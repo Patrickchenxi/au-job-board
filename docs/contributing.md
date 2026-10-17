@@ -29,8 +29,9 @@ about people do not.
   be regenerated. `analyze` must not touch them.
 - **Keep fetching separate from analysis.** Only `fetch`, `details` and `run` may
   use the network.
-- **Keep dependencies minimal.** The runtime depends only on `python-jobspy` and
-  `PyYAML`; the panel uses the standard library.
+- **Keep dependencies minimal.** The runtime uses `python-jobspy`,
+  `PyYAML` and `ruamel.yaml` (comment-preserving configuration edits). The HTTP
+  server uses the standard library.
 
 ## Data rules
 

@@ -9,11 +9,12 @@ English.
 | Document | What it covers |
 |---|---|
 | [install.md](install.md) | Source installation for a new machine, and the license boundary |
+| [docker.md](docker.md) | Optional Docker / Compose deployment, persistent volumes, commands and backup; macOS still prefers source |
 | [agent-install.md](agent-install.md) | The same install steps for an AI coding agent |
 | [usage.md](usage.md) | The fetch, analyze, report and panel workflow, commands, labels and notes, local data and provenance |
-| [manual-updates.md](manual-updates.md) | Read-only fetch settings, background updates, configuration timing and failure states |
+| [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |
 | [public-configuration.md](public-configuration.md) | The configuration file, paths, sources and which files stay private |
-| [legacy-rule-profiles.md](legacy-rule-profiles.md) | The five rule profiles, per-rule switches and how to apply a change |
+| [legacy-rule-profiles.md](legacy-rule-profiles.md) | The six rule profiles, per-rule switches and how to apply a change |
 | [eligibility-profiles.md](eligibility-profiles.md) | The separate, read-only `eligibility` section and command |
 | [safety-and-sources.md](safety-and-sources.md) | Panel exposure, how listings are collected, platform terms and redistribution |
 | [demo.md](demo.md) | The offline synthetic demo |

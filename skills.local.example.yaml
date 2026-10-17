@@ -4,3 +4,6 @@ version: 1
 add: []
 alias: {}
 remove: []
+# Presentation only; keys remain canonical skill names and values must be that
+# skill's name or an existing alias. Example: {Kubernetes: K8s}
+display_names: {}

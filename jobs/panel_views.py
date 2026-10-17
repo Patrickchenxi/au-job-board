@@ -24,7 +24,6 @@ from pathlib import Path
 from . import db as database
 from . import i18n
 from . import labels as labels_mod
-from . import report as report_mod
 from . import skills as skills_mod
 from .panel_data import (
     FILTER_KEYS, FRESH_KEY, NONE_TOKEN, PRIORITY_KEY,
@@ -111,22 +110,16 @@ def _js(value) -> str:
 
 
 def _update_widget(lang: str, *, compact: bool = False) -> str:
-    """One update controller per page; state is fetched without refreshing edits."""
-    T = lambda k: i18n.t(lang, k)  # noqa: E731
-    return "".join([
-        f'<section class="update-widget{" update-compact" if compact else ""}" '
-        f'aria-label="{_e(T("js.update_title"))}">',
-        '<div class="update-controls">',
-        f'<button type="button" class="btn" id="update-start" title="{_e(T("set.update_hint"))}" disabled>{_e(T("js.update_title"))}</button>',
-        f'<a id="update-refresh" class="iconbtn" href="/" '
-        f'title="{_e(T("js.update_refresh"))}" aria-label="{_e(T("js.update_refresh"))}" hidden>'
-        f'{ICON_REFRESH}</a>',
-        '</div><div class="update-feedback">',
-        f'<p id="update-status" role="status" aria-live="polite" aria-atomic="true">{_e(T("js.update_checking"))}</p>',
-        '<p id="update-meta" class="muted"></p>',
-        '</div>',
-        f'<noscript><p>{_e(T("js.update_nojs"))}</p></noscript>',
-        '</section>',
+    T = lambda key: i18n.t(lang, key)
+    icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg>'
+    return ''.join([
+        '<span class="update-widget update-compact">' if compact else '<section class="update-widget">',
+        f'<button type="button" class="{"iconbtn" if compact else "btn"}" id="update-start" '
+        f'title="{_e(T("set.update_hint"))}" aria-label="{_e(T("js.update_title"))}" disabled>',
+        icon if compact else _e(T("js.update_title")), '</button>',
+        '<span class="update-feedback"><span id="update-status" role="status" aria-live="polite" aria-atomic="true"></span>',
+        '' if compact else '<span id="update-meta" class="muted"></span>',
+        '</span>', '</span>' if compact else '</section>',
     ])
 
 
@@ -371,30 +364,38 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
 STALE_AFTER_DAYS = 2
 
 
-def _last_run_note(conn, lang: str = "zh") -> str:
-    """「上次抓取」提示。
-
-    存在的意义：定时任务**静默死掉是没有任何反馈的** —— 页面照常打开、
-    数据照常存在，只是不再更新。把时间摆出来，超过 STALE_AFTER_DAYS 变红。
-    """
-    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
-    stamp = database.last_run_at(conn, "run") or database.last_run_at(conn)
-    if not stamp:
-        return f'<span class="run">{_e(T("run.never"))}</span>'
-    try:
-        then = datetime.fromisoformat(stamp)
-    except ValueError:
-        return f'<span class="run">{_e(T("run.at", stamp=stamp))}</span>'
-    seconds = (datetime.now(timezone.utc) - then).total_seconds()
-    if seconds < 3600:
-        ago = T("ago.minutes", n=max(1, int(seconds // 60)))
-    elif seconds < 86400:
-        ago = T("ago.hours", n=int(seconds // 3600))
+def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
+    """Latest fetch/run fact; analyze and report never make data look fresh."""
+    from . import run_state
+    T = lambda key, **kw: i18n.t(lang, key, **kw)
+    if config is None:
+        config = {"db_path": conn.execute("PRAGMA database_list").fetchone()[2]}
+    fact = run_state.latest(config, conn)
+    stamp = fact.get("finished_at")
+    state = fact.get("state", "idle")
+    stale = False
+    if state == "running":
+        text = T("js.update_running", stage=T("js.update_stage_" + (fact.get("stage") or "wait")))
+    elif not stamp:
+        text = T("run.never")
     else:
-        ago = T("ago.days", n=int(seconds // 86400))
-    stale = seconds > STALE_AFTER_DAYS * 86400
-    return (f'<span class="run{" stale" if stale else ""}"><span class="dot {"bad" if stale else "good"}"></span>'
-            f'{_e(T("run.ago", ago=ago))}{_e(T("run.stale")) if stale else ""}</span>')
+        try:
+            then = datetime.fromisoformat(stamp)
+            if then.tzinfo is None:
+                then = then.replace(tzinfo=timezone.utc)
+            seconds = max(0, (datetime.now(timezone.utc) - then).total_seconds())
+            unit, n = ("minutes", max(1, int(seconds // 60))) if seconds < 3600 else (("hours", int(seconds // 3600)) if seconds < 86400 else ("days", int(seconds // 86400)))
+            text = T("run.ago", ago=T("ago." + unit, n=n))
+            stale = seconds >= STALE_AFTER_DAYS * 86400
+            if stale:
+                text += T("run.stale")
+        except ValueError:
+            text = T("run.at", stamp=stamp)
+        if state != "success":
+            text += " · " + T("js.update_" + state)
+    dot = '<span class="dot bad" aria-hidden="true"></span>' if stale else ""
+    return (f'<span class="run{" stale" if stale else ""}" data-run-time="{_e(stamp or "")}" '
+            f'data-run-state="{_e(state)}">{dot}<span>{_e(text)}</span></span>')
 
 
 def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
@@ -428,12 +429,13 @@ def _toggle(key: str, label: str, checked: bool) -> str:
             f'onchange="applyFilter()"> {_e(label)}</label>')
 
 
-def _skill_picker(filters: dict, counts: dict, lang: str = "zh") -> str:
+def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=None) -> str:
     """技能多选。**默认一个都不勾、面板收起** —— 相当一部分岗位一个技术词
     都没有，默认开启会静默藏掉它们。按实际命中数降序，只露头部
     （SKILL_PICK_TOP），长尾交给搜索框。已选中的一定出现，否则取消不掉。"""
     if not counts:
         return ""
+    skill_labels = skill_labels or {}
     selected = list(filters.get(SKILL_KEY) or [])
     ordered = [name for name, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
     shown = [s for s in ordered if s in selected]
@@ -446,10 +448,10 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh") -> str:
             f'<label class="skillopt">'
             f'<input type="checkbox" data-fkey="{SKILL_KEY}" value="{_e(name)}"{checked} '
             f'onchange="applyFilter()">'
-            f'<span>{_e(name)}</span>'
+            f'<span>{_e(skill_labels.get(name, name))}</span>'
             f'<span class="skc">{counts.get(name, 0)}</span></label>')
     title = i18n.t(lang, "filter.skill")
-    value = ", ".join(selected) if selected else i18n.t(lang, "filter.any")
+    value = ", ".join(skill_labels.get(name, name) for name in selected) if selected else i18n.t(lang, "filter.any")
     return (f'<div class="skillpick" id="skillpick">'
             f'<button type="button" class="ctl{" on" if selected else ""}" aria-haspopup="true" '
             f'title="{_e(i18n.t(lang, "filter.skill_hint"))}" onclick="skillToggle(event)">'
@@ -464,7 +466,7 @@ def _tier_select(filters: dict, lang: str = "zh") -> str:
     return _select(TIER_KEY, i18n.t(lang, "filter.tier"), options, filters.get(TIER_KEY, ""))
 
 
-def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
+def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     if key in FILTER_KEYS:
         options = ([("", T("filter.any"))]
@@ -478,7 +480,7 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
     if key == PRIORITY_KEY:
         return _toggle(PRIORITY_KEY, T("filter.priority"), bool(filters.get(PRIORITY_KEY)))
     if key == SKILL_KEY:
-        return _skill_picker(filters, skill_counts, lang)
+        return _skill_picker(filters, skill_counts, lang, skill_labels)
     if key == TIER_KEY:
         return _tier_select(filters, lang)
     if key == "labeled":
@@ -488,7 +490,7 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str) -> str:
     return ""
 
 
-def _chip_text(key: str, filters: dict, lang: str) -> str:
+def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     colon = T("js.colon")
     value = filters.get(key)
@@ -506,11 +508,11 @@ def _chip_text(key: str, filters: dict, lang: str) -> str:
     if key == TIER_KEY:
         return T("filter.tier") + colon + str(value)
     if key == SKILL_KEY:
-        return T("filter.skill") + colon + ", ".join(value or [])
+        return T("filter.skill") + colon + ", ".join((skill_labels or {}).get(name, name) for name in value or [])
     return key
 
 
-def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") -> str:
+def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", skill_labels=None) -> str:
     """工具栏 + 「更多筛选」面板 + 生效条件。
 
     **搜索和筛选是同一套机制**：同一个 `data-fkey` + `applyFilter()`，
@@ -540,7 +542,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
             f'oncompositionend="searchEnd(event)" '
             f'autocomplete="off" spellcheck="false"></label>')
     out.append('<span id="primary-home" hidden></span><div class="filter-group" id="primary-filters">')
-    out.extend(_control(k, filters, skill_counts, lang) for k in primary)
+    out.extend(_control(k, filters, skill_counts, lang, skill_labels) for k in primary)
     out.append("</div>")
     if hidden_keys:
         badge = f'<span class="badge">{len(hidden_active)}</span>' if hidden_active else ""
@@ -578,7 +580,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
         out.append(f'<fieldset class="fgroup"><legend>{_e(T("filter.group." + group))} '
                    f'<span>· {_e(T("filter.group." + group + "_hint"))}</span></legend>'
                    f'<div class="filter-group">'
-                   + "".join(_control(k, filters, skill_counts, lang) for k in keys)
+                   + "".join(_control(k, filters, skill_counts, lang, skill_labels) for k in keys)
                    + "</div></fieldset>")
     clear_hidden = (f'<button type="button" class="linkbtn" onclick="clearHidden()">'
                     f'{_e(T("filter.clear_hidden"))}</button>') if hidden_keys else ""
@@ -588,8 +590,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh") 
 
     if hidden_active:
         chips = "".join(
-            f'<span class="achip">{_e(_chip_text(k, filters, lang))}'
-            f'<button type="button" aria-label="{_e(T("filter.remove"))}: {_e(_chip_text(k, filters, lang))}" '
+            f'<span class="achip">{_e(_chip_text(k, filters, lang, skill_labels))}'
+            f'<button type="button" aria-label="{_e(T("filter.remove"))}: {_e(_chip_text(k, filters, lang, skill_labels))}" '
             f'onclick="removeFilter(\'{k}\')">×</button></span>'
             for k in hidden_active)
         out.append(f'<div class="chips" id="active-chips"><span class="chips-label">'
@@ -673,7 +675,8 @@ def _lang_button(lang: str) -> str:
 
 
 def _scripts(lang: str, extra: dict | None = None) -> str:
-    data = {"__I18N__": i18n.js_strings(lang), "__LANG__": lang}
+    data = {"__I18N__": i18n.js_strings(lang), "__LANG__": lang,
+            "__STALE_AFTER_DAYS__": STALE_AFTER_DAYS}
     data.update(extra or {})
     return "".join(f"<script>window.{k}={_js(v)};</script>" for k, v in data.items())
 
@@ -701,12 +704,19 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     data/panel.log 的耗时都靠它。删掉参数容易让人顺手把计时链路一起删了。
     """
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    from . import run_state
+    result_generation = run_state.generation(config)
     filters = filters or {}
     since = _resolve_since(conn, view, filters)
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
     page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
+    # A new batch can shrink the filtered result set. Stay in this view and
+    # use its last available page instead of showing an empty stale offset.
+    if total and offset >= total:
+        offset = ((total - 1) // limit) * limit
+        page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
     stats = labels_mod.summary(conn)
     skill_counts = database.skill_counts(conn)
 
@@ -728,7 +738,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
     note_tags = labels_mod.note_tag_candidates(conn)
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
-    skill_embed = [{"name": e.get("name"), "aliases": e.get("aliases") or []}
+    skill_embed = [{"name": e.get("name"), "display_name": skills_mod.display_name(e), "aliases": e.get("aliases") or []}
                    for e in sorted(skills_cfg.get("skills") or [],
                                    key=lambda e: str(e.get("name") or "").lower())]
 
@@ -743,7 +753,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
     stat_items = _stats(view, stats, total, lang)
     stats_html = "".join(f'<span>{_e(name)} <b>{_e(n)}</b></span>' for name, n in stat_items)
-    run_note = _last_run_note(conn, lang)
+    run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
     if page:
         cards = "".join(_card(r, since, lang) for r in page)
@@ -785,7 +795,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<a class="iconbtn setlink" href="/settings" title="{_e(T("nav.settings"))}">'
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
         "</div></div>",
-        _filter_bar(view, filters, skill_counts, lang),
+        _filter_bar(view, filters, skill_counts, lang, skills_mod.display_names(skills_cfg)),
         "</header>",
         '<div class="ctxbar">',
         f'<div class="ctx-desc">{ICON_INFO}<div><span class="ctx-text">'
@@ -793,9 +803,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'{_search_explanation(filters, skills_cfg, total, lang)}</div></div>',
         f'<div class="ctx-stats">{stats_html}'
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span>'
-        f'{run_note}</div>',
+        f'<span class="run-controls">{run_note}{_update_widget(lang, compact=True)}</span></div>',
         "</div>",
-        _update_widget(lang, compact=True),
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
@@ -831,7 +840,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         '<div class="note-menu" id="note-menu"></div>',
         _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
-                        "__SKILLS__": skill_embed}),
+                        "__SKILLS__": skill_embed, "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
         "</body></html>",
     ])
@@ -842,22 +851,6 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # ---------------------------------------------------------------------------
 
 SETTINGS_SECTIONS = ("skills", "fetch", "display")
-
-_PROFILE_NAMES = ("citizen", "permanent_resident", "485", "student_visa", "custom")
-
-
-def _profile_display(conn, T) -> str:
-    """最近一次成功 analyze 记录的 profile 显示名；只读库，不读配置。"""
-    info = report_mod.latest_rule_profile(conn)
-    if info.get("status") != "recorded":
-        return T("set.profile_unrecorded")
-    profile = info.get("profile")
-    if profile is None:
-        return T("set.profile_default")
-    if profile in _PROFILE_NAMES:
-        return T("set.profile_" + profile)
-    return T("set.profile_unknown")
-
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
                     section: str = "skills", lang_pref: str = "auto") -> str:
@@ -899,17 +892,12 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         extra = {"__SKILL_TREE__": tree}
     elif section == "fetch":
         pane = "".join([
-            f'<h2>{_e(T("set.fetch_title"))}</h2>',
-            f'<p class="set-hint">{_e(T("set.fetch_hint"))}</p>',
-            '<div id="update-config" class="fetch-config" aria-live="polite">'
-            f'<p class="muted">{_e(T("js.loading"))}</p></div>',
-            f'<p class="set-foot">{_e(T("set.fetch_readonly"))}</p>',
+            '<div class="config-title-line">'
+            f'<h2>{_e(T("set.fetch_title"))}</h2><span id="config-actions"></span></div>',
+            '<div id="config-editor"></div>',
             f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
             f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
             _update_widget(lang),
-            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
-            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
-            f'<br>{_e(T("set.profile_used"))}</p>',
         ])
         extra = {}
     else:
@@ -930,14 +918,13 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             radios("theme", theme or "auto", [("auto", T("set.theme_auto"), "prefers-color-scheme"),
                                               ("light", T("set.theme_light"), ""),
                                               ("dark", T("set.theme_dark"), "")], "setTheme"),
-            f'<h2 class="h2-gap">{_e(T("set.profile_title"))}</h2>',
-            f'<p class="set-hint"><b>{_e(T("set.profile_label", name=_profile_display(conn, T)))}</b>'
-            f'<br>{_e(T("set.profile_used"))}</p>',
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
             f'<li>{_e(T("set.keep1"))}</li><li>{_e(T("set.keep2"))}</li><li>{_e(T("set.keep3"))}</li></ul></div>',
         ])
         extra = {}
 
+    from . import run_state
+    extra["__SETTINGS_GENERATION__"] = run_state.generation(config)
     return "".join([
         _head(lang, theme, f'{T("settings.title")} · {T("app.title")}'
               + _demo_suffix(config, lang), "settings"),
@@ -953,6 +940,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         f'<section class="set-pane{" set-pane-scroll" if section != "skills" else ""}">{pane}</section>',
         "</main>",
         '<div class="modal" id="sk-modal" hidden></div>',
+        '<div class="modal" id="config-modal" hidden></div>',
+        '<div class="modal config-confirm" id="config-confirm" hidden></div>',
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         _scripts(lang, extra),
         f"<script>{asset('panel.js')}</script>",

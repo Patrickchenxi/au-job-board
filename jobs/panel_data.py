@@ -257,6 +257,9 @@ def _search_text(row: dict, label: dict) -> str:
     parts = [row.get("title"), row.get("company"), row.get("location"),
              row.get("salary"), (label or {}).get("note"), row.get("description")]
     parts += [text for _, text in tags_for(row)]
+    # A display alias never removes the canonical identity from search.
+    parts += [text for kind, text in tags_for(dict(row, skill_display_names={}))
+              if kind == "skill"]
     return " ".join(str(p) for p in parts if p).lower()
 
 
@@ -383,11 +386,15 @@ def skill_tree(conn, skills_path: str | None = None) -> dict:
         own = seed_aliases.get(name, set())
         alias_origins = {a: ("seed" if is_seed and a.lower() in own else "local")
                          for a in aliases}
+        display_override = skills_mod._valid_display_name(
+            entry, (local.get("display_names") or {}).get(name))
         # 种子条目在补充层里被改过（加了本地别名，或抑制了种子别名）= 种子 + 本地
         edited = is_seed and (any(v == "local" for v in alias_origins.values())
-                              or bool(own & removed))
+                              or bool(own & removed) or bool(display_override))
         out.append({
             "name": name,
+            "display_name": skills_mod.display_name(entry),
+            "display_name_origin": "local" if display_override else ("seed" if is_seed else "local"),
             "hits": counts.get(name, 0),
             "origin": "seed" if is_seed else "local",
             "source": ("mixed" if edited else "seed") if is_seed else "local",

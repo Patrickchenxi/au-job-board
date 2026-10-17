@@ -3,15 +3,18 @@
 This guide sets up the pipeline from source for a **new** installation. Run the
 commands from the project root: the directory that contains `requirements.txt`
 and the `jobs/` package. It does not overwrite an existing configuration or
-database.
+database. **Source installation is recommended on macOS.**
+[Docker / Compose](docker.md) is an optional alternative that keeps configuration
+and data in persistent volumes; it does not change this source workflow.
 
 ## Tested environment
 
 - **Python 3.12** (3.12.4 in the 2026-10-08 verification).
 - **macOS 15** (15.8, arm64, in the 2026-10-08 local verification; the GitHub
   Actions runner was macOS 15.7.9 with Python 3.12.10 and Node 24.21.0).
-- Linux, Windows, other macOS versions, other Python versions and other machines
-  are **not** verified. See [installation-verification.md](installation-verification.md).
+- Native Linux/Windows source installs, other macOS versions, other Python
+  versions and other machines are **not** verified. Optional Linux-container
+  verification is recorded separately in [docker.md](docker.md). See [installation-verification.md](installation-verification.md).
 
 Getting the source (step 1) and installing dependencies (step 3) may both use
 the network. The offline checks and the synthetic demo in step 6 do not fetch
@@ -58,7 +61,7 @@ This step uses the network to download packages.
 
 ```bash
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip list | grep -E "python-jobspy|PyYAML"
+.venv/bin/python -m pip list | grep -E "python-jobspy|PyYAML|ruamel.yaml"
 ```
 
 `requirements.txt` pins no exact versions. The 2026-10-08 verification resolved
@@ -94,6 +97,13 @@ pre-seed your own additions, aliases or removals, copy
 exist); the panel and the `skills` command also write that overlay. Never
 overwrite an existing overlay.
 
+Settings can choose a skill's primary display name from its canonical name and
+existing aliases. This saves a `display_names` mapping in the local overlay, for
+example `display_names: {Kubernetes: K8s}`. A seed skill record may also provide
+an optional `display_name: K8s`. Omitted, invalid or removed display aliases
+fall back to the canonical name. Changing the label applies on refresh and does
+not re-analyze jobs or change matching, stored skill names, or filter URL values.
+
 Paths in the configuration are relative to the project root, not to the
 directory containing the config file. `--config` is a global option and goes
 **before** the subcommand.
@@ -101,7 +111,7 @@ directory containing the config file. `--config` is a global option and goes
 ## 5. Choose a rule profile
 
 `legacy_rule_profile.profile` is one of `citizen`, `permanent_resident`,
-`485`, `student_visa` or `custom`. It only selects which existing rules run.
+`485`, `whv`, `student_visa` or `custom`. It only selects which existing rules run.
 
 - It is a **software rule switch, not a legal eligibility determination**.
 - Changing it **does not update stored results by itself**. Re-run `analyze`
@@ -187,7 +197,7 @@ private to your machine. Do not commit or share them. See
 
 This project is released under the MIT License; see [LICENSE](../LICENSE)
 (Copyright (c) 2026 SkywingJam). Third-party dependencies such as
-`python-jobspy` and `PyYAML` keep their own licenses, and job listing text
+`python-jobspy`, `PyYAML` and `ruamel.yaml` keep their own licenses, and job listing text
 belongs to the platforms and advertisers that published it. The MIT license
 covers this project's own code and documentation, not third-party packages or
 listing data. The install does not depend on the video-production project under

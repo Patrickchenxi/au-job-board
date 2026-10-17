@@ -26,6 +26,8 @@
         <string>--config</string>
         <string>__CONFIG_PATH__</string>
         <string>run</string>
+        <string>--trigger</string>
+        <string>scheduled</string>
     </array>
 
     <key>WorkingDirectory</key>

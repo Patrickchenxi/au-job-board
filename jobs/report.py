@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import db as database
 from . import labels as labels_mod
+from . import skills as skills_mod
 from .render import eligibility_snippet, render_job_lines, tag_texts
 
 COLUMNS = ["score", "tier", "tags", "eligibility_cue", "eligibility_snippet",
@@ -124,8 +125,10 @@ def load(conn, config: dict):
     # 技能命中结果直接挂在行上（一次查询，避免逐行 N+1）。它是 tag、
     # 筛选和搜索共用的输入，所以要在装饰之前就能读到 —— 筛选不跑 decorate。
     skill_hits = database.skills_map(conn)
+    skill_labels = skills_mod.display_names(skills_mod.load_skills(config.get("skills_path")))
     for row in rows:
         row["skills"] = skill_hits.get(row["uid"], [])
+        row["skill_display_names"] = skill_labels
 
     kept = _best_per_group([r for r in rows if not r["is_excluded"]])
     kept.sort(key=_sort_key)

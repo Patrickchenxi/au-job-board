@@ -69,7 +69,7 @@ Reading the configuration or starting the panel never fetches anything. Only
 Two sections mention profiles and they do different things:
 
 - `legacy_rule_profile` is the one that matters. `profile` is `citizen`,
-  `permanent_resident`, `485`, `student_visa` or `custom`, and the optional
+  `permanent_resident`, `485`, `whv`, `student_visa` or `custom`, and the optional
   `exclude` / `overrides` mappings switch individual rule ids on or off. A missing
   section keeps every rule on. The example uses `profile: "485"` (all rules on).
   `citizenship.requirement` is a mixed rule that stays on for every preset, so
@@ -117,3 +117,12 @@ Keep these out of anything you share or publish:
 Ignoring a path in Git does not remove content that was already committed, and it
 does not erase it from existing history. Which files a public release will ship
 is decided separately and is not defined by this page.
+
+### Optional skill display labels
+
+A `skills.yaml` entry may have `display_name`, selecting its canonical name or
+one of its existing aliases. The skill editor saves that choice in the sibling
+`skills.local.yaml` `display_names` mapping. Missing, invalid or removed names
+fall back to the canonical name. Labels on cards, details, filters and search
+explanations change without changing DB identities, matching, scoring, existing
+filter URLs or the seed file.

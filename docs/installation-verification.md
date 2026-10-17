@@ -4,6 +4,68 @@ This records dated verifications of AU Job Board's source installation, and what
 each does and does not show. Each entry is a historical fact about the named run
 and commit; it is not re-run when later changes are made.
 
+## v1.2 local source and Docker mock verification (2026-10-17)
+
+The development candidate was based on public `dev` / v1.1 commit `6c4a0ed`.
+A separate source environment with Python 3.12 ran the full public offline entry:
+**20 passed, 0 failed, 0 not applicable**. This includes YAML/CLI roundtrip
+semantics, conflict protection, shared execution locks, orphan-worker recovery,
+manual data preservation and the existing synthetic regressions.
+
+Docker Engine 28.3.2 on an Apple Silicon host built the Python 3.12 image as
+**linux/arm64**. `tools/test_docker.py` passed after rebuilding the final product
+layer; an independent `--no-build` run passed against that image. Every test
+runtime container used `--network none`, with source adapters replaced through a
+read-only test mount excluded from the image. Actual checks included:
+
+- Non-root runtime and absence of personal configuration, DBs and test fixtures
+  in the image.
+- Real CLI and panel subprocess pipelines using fictional jobs.
+- Settings YAML save/readback and editable mounted configuration.
+- Manual note, skill overlay, DB/WAL and task-state persistence across recreation.
+- Cross-container shared-lock rejection and stop-signal lock release.
+
+Browser verification used the normal panel with synthetic data and mock sources.
+It covered configuration preview/cancel/save, stale-form conflicts, saved versus
+analyzed WHV, A→B navigation and closing details with pending results, automatic
+list refresh, note drafts and complete settings target URLs. The empty update
+state was measured at 1280px English/light and 390px Chinese/dark: button and
+status text vertical centers differed by less than 1 CSS pixel, with no horizontal
+overflow. Display settings no longer duplicated the analysis profile.
+
+Limits: this verifies one Linux container architecture and local synthetic flows.
+It does not establish Linux/amd64 or Windows support, real source availability,
+cloud deployment, image publication, or a production update. Source installation
+remains available and is the recommended macOS deployment. The older entries
+below retain their original source-installation and CI evidence.
+
+## v1.2 configuration-dialog follow-up (2026-10-17)
+
+The follow-up to candidate `99bb6fe` replaced the always-open settings form with
+read-only regions, pencil edit dialogs and a separate save confirmation using
+the existing skill-editor motion. Current settings remain first with a solid
+outline; saved next-run settings follow with a dashed outline. Repeated edits,
+page reload and reverting to current values were verified, including an actual
+legacy database with no historical configuration snapshot. The UI explicitly
+labels its fallback as the file before editing. A real mocked full run advanced
+current values and removed the consumed next-run region.
+
+The public offline entry again passed **20/20** locally; the configuration suite
+now contains **26** tests. Independent review reproduced and verified fixes for
+reload/edit races, legacy baseline persistence and name selection during a skill
+save. Browser checks also covered save-conflict input retention, the advanced
+rule switches, skill display-name save/reload with unchanged canonical filters,
+English/light mobile, Chinese/dark desktop, keyboard focus and reduced motion.
+The homepage timestamp/icon gap measured **12 CSS pixels**; the left description,
+info icon, right statistics and action had the same vertical center. The reload icon was
+right-aligned and the tested 390px dialogs had no horizontal overflow.
+
+The rebuilt **linux/arm64** image passed the independent no-build Docker smoke
+and retained configuration/data/state across recreation. Hashes of the dialog
+assets, configuration editor, CLI and skill code matched the source candidate.
+The local Compose mock was recreated from that image; no production deployment
+or real source fetching was part of this verification.
+
 ## Local fresh clone and new environment (2026-10-08)
 
 The subject was the public candidate tree: 296 files under the MIT license,

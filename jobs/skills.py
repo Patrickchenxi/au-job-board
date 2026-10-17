@@ -68,6 +68,8 @@ def load_local(path: str | Path | None = None) -> dict:
         "alias": {k: list(v or []) for k, v in (cfg.get("alias") or {}).items()},
         # 删除是「相对种子的差异」，必须记在补充层，绝不能回头改种子文件
         "remove": [str(r) for r in (cfg.get("remove") or [])],
+        "display_names": dict(cfg["display_names"])
+        if isinstance(cfg.get("display_names"), dict) else {},
     }
 
 
@@ -77,8 +79,10 @@ def merge(base: dict, local: dict) -> dict:
     - `add`：追加新技能条目（同名条目存在则跳过，避免重复）
     - `alias`：给已有技能追加别名；找不到目标就跳过（写入口已经校验过，
       手改出错时宁可静默跳过，也不要让整个词表加载失败）
+    - `display_names`：展示覆盖层；只接受仍属于该条目的 token，不改规范名
     """
-    entries = [dict(e) for e in (base.get("skills") or []) if e.get("name")]
+    entries = [dict(e, aliases=list(e.get("aliases") or []))
+               for e in (base.get("skills") or []) if e.get("name")]
     by_name = {e["name"]: e for e in entries}
 
     for raw in local.get("add") or []:
@@ -89,6 +93,8 @@ def merge(base: dict, local: dict) -> dict:
                  "not": [str(n) for n in (raw.get("not") or [])]}
         if raw.get("ambiguous"):
             entry["ambiguous"] = True
+        if "display_name" in raw:
+            entry["display_name"] = raw["display_name"]
         entries.append(entry)
         by_name[name] = entry
 
@@ -116,6 +122,13 @@ def merge(base: dict, local: dict) -> dict:
             kept.append(entry)
         entries = kept
 
+    overrides = local.get("display_names")
+    if isinstance(overrides, dict):
+        for entry in entries:
+            chosen = _valid_display_name(entry, overrides.get(entry["name"]))
+            if chosen:
+                entry["display_name"] = chosen
+
     return {"version": base.get("version", 1), "skills": entries}
 
 
@@ -132,6 +145,7 @@ def save_local(local: dict, path: str | Path | None = None) -> Path:
         "add": list(local.get("add") or []),
         "alias": {k: list(v or []) for k, v in (local.get("alias") or {}).items()},
         "remove": [str(r) for r in (local.get("remove") or [])],
+        "display_names": dict(local.get("display_names") or {}),
     }
     target.write_text(
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False,
@@ -239,6 +253,25 @@ def extract(text: str | None, cfg: dict) -> list[str]:
 # 搜索词编译
 # ---------------------------------------------------------------------------
 
+def _valid_display_name(entry: dict, value) -> str | None:
+    """A label must still be a canonical token or one of this skill's aliases."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    for token in [entry.get("name")] + list(entry.get("aliases") or []):
+        if isinstance(token, str) and token.strip().lower() == value:
+            return token
+    return None
+
+
+def display_name(entry: dict) -> str:
+    """Optional, presentation-only label; old and stale configs retain the name."""
+    return _valid_display_name(entry, entry.get("display_name")) or str(entry.get("name") or "")
+
+
+def display_names(cfg: dict) -> dict[str, str]:
+    return {str(e["name"]): display_name(e) for e in cfg.get("skills") or [] if e.get("name")}
+
 def term_matcher(term: str, cfg: dict) -> tuple[re.Pattern, str, str]:
     r"""把一个搜索词编译成匹配器。
 
@@ -255,7 +288,7 @@ def term_matcher(term: str, cfg: dict) -> tuple[re.Pattern, str, str]:
     tokens = canonical_tokens(cfg)
     owner = tokens.get(term.lower())
     if owner:
-        return _token_pattern(term), "skill", owner
+        return _token_pattern(term), "skill", display_names(cfg).get(owner, owner)
     if len(term) >= 3:
         return _token_pattern(term, prefix=True), "prefix", term
     return _token_pattern(term), "word", term
@@ -356,6 +389,17 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
     tokens = canonical_tokens(merged)
     owner = tokens.get(token.lower())
 
+    if action == "display_name":
+        target = _clean(target)
+        entry = next((e for e in merged.get("skills") or [] if e.get("name") == target), None)
+        if entry is None:
+            raise ValueError(f"没有名为「{target}」的已有技能")
+        chosen = _valid_display_name(entry, token)
+        if chosen is None:
+            raise ValueError("展示名必须是该技能的规范名或现有别名")
+        local.setdefault("display_names", {})[target] = chosen
+        return {"kind": "display_name", "skill": target, "token": chosen}
+
     if action == "add":
         if owner:
             raise ValueError(f"「{token}」已经属于「{owner}」，不能再加一个新技能")
@@ -379,6 +423,10 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
     if action == "remove":
         if not owner:
             raise ValueError(f"词表里没有「{token}」，无需移除")
+        display_overrides = local.get("display_names") or {}
+        if (token.lower() == owner.lower()
+                or _clean(display_overrides.get(owner)).lower() == token.lower()):
+            display_overrides.pop(owner, None)
         # 优先从补充层直接删，让它只记「相对种子的差异」；只有种子里的词
         # 才写进 remove 抑制列表。这样补充层始终可读、可整体丢弃。
         for entry in list(local.get("add") or []):
@@ -397,7 +445,7 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
             removed.append(token)
         return {"kind": "remove", "skill": owner, "token": token}
 
-    raise ValueError("action 只能是 add / alias / remove")
+    raise ValueError("action 只能是 add / alias / remove / display_name")
 
 
 def skill_names(cfg: dict) -> list[str]:

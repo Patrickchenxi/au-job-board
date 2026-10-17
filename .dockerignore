@@ -1,0 +1,17 @@
+# Allow only product source and public seeds into the build context.
+**
+!Dockerfile
+!requirements.txt
+!LICENSE
+!config.example.yaml
+!rules.yaml
+!skills.yaml
+!jobs/
+!jobs/*.py
+!jobs/sources/
+!jobs/sources/*.py
+!jobs/panel_assets/
+!jobs/panel_assets/*.js
+!jobs/panel_assets/*.css
+!tools/
+!tools/docker-entrypoint.py

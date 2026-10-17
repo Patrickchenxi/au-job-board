@@ -68,9 +68,11 @@
 
 ## 安装
 
-工具以源码方式安装到独立虚拟环境中。步骤见[安装指南](docs/install.md)（英文）。
-目前只在一台机器上实测了 Python 3.12 + macOS 15，其他版本和平台未验证。获取源码和安装依赖都可能需要联网；
-离线检查与合成演示不联网。
+**macOS 优先推荐源码部署**：安装到独立虚拟环境中，步骤见[安装指南](docs/install.md)（英文），
+已验证 Python 3.12 + macOS 15。另提供可选的 [Docker / Compose 部署](docs/docker.md)（英文），
+持久化配置、数据库、个人词表与报告；保留源码部署，不新增调度器。实际验证的平台和容器架构见
+[验证记录](docs/installation-verification.md)，不将容器验证当作其他平台源码安装的证明。
+获取源码、构建镜像和安装依赖可能联网；离线检查与合成演示不联网。
 
 从 `https://github.com/SkywingJam/au-job-board` 获取源码。如果你已经有源码（下载或他人提供的副本），直接使用那个目录。
 否则克隆到新目录：
@@ -115,7 +117,7 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 
 - **不是对候选人的评估**：规则是对英文文本的关键词和模式匹配，可能误排除，也可能误保留，
   所以才有「被排除」视图和审计报告。
-- **Profile 是规则开关，不是法律结论**：`citizen`、`permanent_resident`、`485`、`student_visa`、
+- **Profile 是规则开关，不是法律结论**：`citizen`、`permanent_resident`、`485`、`whv`、`student_visa`、
   `custom` 只决定运行哪些既有规则。混合和重叠的规则仍有已知局限。详见
   [规则 profile](docs/legacy-rule-profiles.md)（英文）。
 - **改 profile 不会自动更新历史结果**：设置页只显示最近一次成功分析所用的 profile，没有切换开关。
@@ -153,9 +155,9 @@ AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-jo
 | [安装指南](docs/install.md) | 全新机器的源码安装 |
 | [Agent 辅助安装](docs/agent-install.md) | 供 AI Agent 使用的同一套步骤 |
 | [使用指南](docs/usage.md) | 流程、命令、本地数据、备注、语言 |
-| [抓取设置与更新](docs/manual-updates.md) | 只读配置、面板后台更新、失败与并发限制（英文） |
+| [抓取设置与更新](docs/manual-updates.md) | 下次运行配置编辑、面板后台更新、失败与并发限制（英文） |
 | [配置说明](docs/public-configuration.md) | 配置文件、路径、来源、面板设置 |
-| [规则 profile](docs/legacy-rule-profiles.md) | 五个 profile、逐条规则开关、如何让改动生效 |
+| [规则 profile](docs/legacy-rule-profiles.md) | 六个 profile、逐条规则开关、如何让改动生效 |
 | [资格快照](docs/eligibility-profiles.md) | 独立的只读 `eligibility` 配置段 |
 | [安全与来源](docs/safety-and-sources.md) | 面板暴露、平台条款、数据再分发 |
 | [演示](docs/demo.md) | 离线合成演示 |

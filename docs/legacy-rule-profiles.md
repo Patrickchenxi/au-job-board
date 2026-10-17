@@ -27,7 +27,7 @@ The section is called `legacy_rule_profile` and is independent of the older
 
 ```yaml
 legacy_rule_profile:
-  profile: "485"        # citizen / permanent_resident / 485 / student_visa / custom
+  profile: "485"        # citizen / permanent_resident / 485 / whv / student_visa / custom
   exclude:              # optional; overrides the preset by rule id; true = rule runs
     citizenship.requirement: true
   overrides:            # optional; true = the override is considered
@@ -58,6 +58,7 @@ stays on.
 | `citizen` | `citizenship.exclusive`, `citizenship.or_pr` | none |
 | `permanent_resident` | `citizenship.or_pr` | none |
 | `485` | none | none |
+| `whv` | none | none |
 | `student_visa` | none | none |
 | `custom` | none; you adjust rule by rule | none; you adjust rule by rule |
 
@@ -130,10 +131,12 @@ legacy_rule_profile:
    derived decisions, scores, salary, de-duplication and skill tables, **does not
    fetch** anything, and **keeps your labels and notes**. Scheduled `run` jobs
    also analyse, so later scheduled runs read the new profile.
-3. **Check the result.** Settings → language and display shows the profile used by
-   the last successful analysis. It is read-only: there is no switch and no
-   automatic recalculation. Reports show the same recorded profile, and an older
-   analysis that recorded none is shown as "not recorded". The jobs panel itself
+3. **Check the result.** In Settings → Fetching & updates, the legacy rule-switch
+   region shows current values first and saved next-run changes after them.
+   Current values come from the last successful analysis snapshot; older records
+   without a snapshot are explicitly labeled (see [fetch settings](manual-updates.md)).
+   Saving settings never triggers automatic recalculation. Reports show the
+   recorded profile, or "not recorded" when an older analysis recorded none. The jobs panel itself
    does not display the per-rule switch summary.
 
 `analyze` validates the section before it opens the database, so an invalid
@@ -172,3 +175,7 @@ does not normalise `text` beyond what that engine does.
   false negatives in `rules.yaml`.
 - Presets do not infer a held clearance, an hours cap or other work-rights
   detail from an identity.
+
+WHV uses the same existing rule switches as 485. It does not assert equivalent
+legal work rights or automatically exclude permanent roles, contracts, or
+six-month employer restrictions. Check those conditions with the employer.
