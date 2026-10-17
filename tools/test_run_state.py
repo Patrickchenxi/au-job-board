@@ -56,16 +56,61 @@ class SharedFacts(TemporaryTest):
             self.assertEqual(cli.cmd_report(self.args()), 0)
         self.assertEqual(run_state.latest(self.cfg), before)
 
-    def test_source_failure_without_usable_results_does_not_publish_generation(self):
+    def test_fetch_only_source_failure_without_results_does_not_publish_generation(self):
         def fail(*_):
             raise ValueError('private failure')
         with patch.object(sources, 'iter_sources', return_value=[('seek', fail)]), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(cli.cmd_run(self.args()), 0)
+            self.assertEqual(cli.cmd_fetch(self.args()), 0)
         fact = run_state.latest(self.cfg)
         self.assertEqual(fact['state'], 'partial')
         self.assertFalse(fact['refresh_available'])
         self.assertEqual(fact['generation'], '')
         self.assertNotIn('private failure', json.dumps(fact))
+
+    def test_partial_full_run_publishes_applied_config_with_no_new_listings(self):
+        self.cfg['legacy_rule_profile'] = {'profile': 'citizen'}
+        self.write(self.cfg)
+        def fail(*_):
+            raise ValueError('synthetic source failure')
+        with patch.object(sources, 'iter_sources', return_value=[('seek', fail)]), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.cmd_run(self.args()), 0)
+        fact = run_state.latest(self.cfg)
+        self.assertEqual(fact['state'], 'partial')
+        self.assertEqual(fact['counts']['seen'], 0)
+        self.assertTrue(fact['refresh_available'])
+        self.assertEqual(fact['generation'], fact['task_id'])
+        conn = db.connect(self.cfg['db_path'])
+        recorded = conn.execute("SELECT stats FROM runs WHERE kind='analyze' ORDER BY run_id DESC LIMIT 1").fetchone()
+        self.assertEqual(json.loads(recorded['stats'])['config_snapshot']['values']['legacy_rule_profile.profile'], 'citizen')
+        conn.close()
+
+    def test_kill_during_final_logging_cannot_leave_terminal_success(self):
+        run_state.publish(self.cfg, {'task_id': 'previous', 'state': 'success', 'refresh_available': True})
+        script = """
+import argparse, os
+from unittest.mock import patch
+from jobs import cli, db, sources
+args = argparse.Namespace(config=CONFIG, rules=RULES, skills=SKILLS, timeout=0)
+original = db.log_run
+def kill_before_summary(conn, kind, started, stats):
+    if kind == 'run':
+        os._exit(23)
+    return original(conn, kind, started, stats)
+with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])]), patch.object(db, 'log_run', kill_before_summary):
+    cli.cmd_run(args)
+"""
+        for name, value in {'CONFIG': str(self.path), 'RULES': str(self.path.parent / 'rules.yaml'),
+                            'SKILLS': str(self.path.parent / 'skills.yaml')}.items():
+            script = script.replace(name, repr(value))
+        child = subprocess.run([sys.executable, '-c', script], cwd=ROOT,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+        self.assertEqual(child.returncode, 23, child.stderr.decode())
+        persisted = run_state.read_json(run_state.runtime_path(self.cfg) / 'latest.json')
+        self.assertEqual(persisted['state'], 'running')
+        observed = run_state.latest(self.cfg)
+        self.assertEqual(observed['state'], 'interrupted')
+        self.assertEqual(observed['generation'], 'previous')
+        self.assertFalse(observed['refresh_available'])
 
     def test_external_config_edit_during_fetch_cannot_change_current_analysis(self):
         self.cfg['legacy_rule_profile'] = {'profile': '485'}

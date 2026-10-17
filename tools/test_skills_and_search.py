@@ -455,6 +455,48 @@ def test_primary_display_names() -> None:
         conn.close()
 
 
+def test_cli_report_vocabulary() -> None:
+    """CLI report labels follow the vocabulary selected for CLI analysis."""
+    import csv
+    import tempfile
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import yaml
+    from jobs import cli, db as database
+
+    print("\n== CLI 报告沿用分析词表 ==")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        selected = root / "selected.yaml"
+        configured = root / "configured.yaml"
+        default = root / "default.yaml"
+        for path, label in ((selected, "CLI label"), (configured, "Config label"),
+                            (default, "Default label")):
+            path.write_text(yaml.safe_dump({"skills": [
+                {"name": "SyntheticSkill", "aliases": [label], "display_name": label}]}),
+                encoding="utf-8")
+        conn = database.connect(root / "test.db")
+        database.upsert_job(conn, {"source": "synthetic", "source_id": "report",
+                                   "title": "SyntheticSkill developer"})
+        database.replace_score(conn, "synthetic:report", "T1", 10, 0, 0, 10, [], "test")
+        conn.commit()
+        config = {"skills_path": str(configured), "report": {"out_dir": str(root / "out")}}
+        for path, label in ((str(selected), "CLI label"), (None, "Default label")):
+            skills.sync(conn, skills.load_skills(path or default))
+            with patch.object(cli, "_open", return_value=(dict(config), conn)), \
+                 patch.object(skills, "DEFAULT_PATH", default), \
+                 patch.object(skills, "LOCAL_PATH", root / "skills.local.yaml"):
+                result = cli.cmd_report(SimpleNamespace(skills=path))
+            csv_path = next((root / "out").glob("*-scored.csv"))
+            with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            markdown = next((root / "out").glob("*-top.md")).read_text(encoding="utf-8")
+            check(f"报告使用 {label}，不读取 config 词表", result == 0
+                  and row["tags"] == label and f"`{label}`" in markdown
+                  and "Config label" not in markdown)
+        conn.close()
+
+
 def main() -> int:
     test_extract()
     test_term_matcher()
@@ -467,6 +509,7 @@ def main() -> int:
     test_remove_edit()
     test_incremental_sync()
     test_primary_display_names()
+    test_cli_report_vocabulary()
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")

@@ -357,6 +357,9 @@ def cmd_report(args) -> int:
     from .report import write_audit_summary, write_report
 
     config, conn = _open(args)
+    # CLI analysis uses --skills (or the default vocabulary), so report labels
+    # must use that same vocabulary rather than a panel-only config path.
+    config["skills_path"] = args.skills
     if not (config.get("report")):
         config["report"] = {}
     info = write_report(conn, config)
@@ -723,7 +726,7 @@ def _acquire_run_lock(config=None):
     return run_state.acquire_lock(config or load_config())
 
 
-def _write_run_result(args, state, stage=None, error=None):
+def _write_run_result(args, state, stage=None, error=None, *, persist=True):
     """Durable bounded progress, including runs launched outside the panel."""
     result = {
         "task_id": args._task_id, "kind": args._task_kind,
@@ -733,9 +736,14 @@ def _write_run_result(args, state, stage=None, error=None):
         "finished_at": None if state == "running" else database.utcnow(),
         "counts": dict(args._run_counts),
         "failed_sources": sorted(args._run_failed_sources), "error": error,
+        # A full partial run still completed analysis/report on existing jobs.
         "refresh_available": state == "success" or
-                             (state == "partial" and bool(args._run_counts.get("seen"))),
+                             (state == "partial" and (args._task_kind == "run" or
+                              bool(args._run_counts.get("seen")))),
     }
+    # Build the terminal summary without exposing it before DB logging succeeds.
+    if not persist:
+        return result
     # Rejected competing attempts must never replace the current execution.
     if state != "busy":
         run_state.publish(args._config_snapshot, result, apply_generation=False)
@@ -807,7 +815,7 @@ def _execute_pipeline(args, *, fetch_only=False):
             signal.signal(signal.SIGTERM, previous_term)
         try:
             if getattr(args, "_config_snapshot", None) is not None:
-                result = _write_run_result(args, state, stage, error)
+                result = _write_run_result(args, state, stage, error, persist=False)
                 if not fetch_only:
                     _, conn = _open(args)
                     database.log_run(conn, "run", args._run_started, result)
