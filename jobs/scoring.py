@@ -142,20 +142,19 @@ def score_experience(title: str, body: str, rules: dict) -> tuple[int, list[str]
     for m in _EXP_NUM.finditer(title or ""):
         years = max(years, lower_bound(m))
 
-    if not years:
-        for m in _EXP_NUM.finditer(body or ""):
-            start, end = m.start(), m.end()
-            before = body[max(0, start - lookback):start]
-            after = body[end:end + lookahead]
-            is_requirement = (_EXP_WORD.search(after) or _EXP_REQ_AFTER.match(after)
-                              or _EXP_WORD.search(before)
-                              or (cue and cue.search(before)))
-            if not is_requirement:
-                continue
-            window = body[max(0, start - lookback):end + lookahead]
-            if deny and deny.search(window):
-                continue
-            years = max(years, lower_bound(m))
+    for m in _EXP_NUM.finditer(body or ""):
+        start, end = m.start(), m.end()
+        before = body[max(0, start - lookback):start]
+        after = body[end:end + lookahead]
+        is_requirement = (_EXP_WORD.search(after) or _EXP_REQ_AFTER.match(after)
+                          or _EXP_WORD.search(before)
+                          or (cue and cue.search(before)))
+        if not is_requirement:
+            continue
+        window = body[max(0, start - lookback):end + lookahead]
+        if deny and deny.search(window):
+            continue
+        years = max(years, lower_bound(m))
 
     for min_years, delta in buckets:
         if years >= min_years:

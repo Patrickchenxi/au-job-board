@@ -296,6 +296,14 @@ def test_remove_edit() -> None:
     check("删种子别名只摘别名，技能还在",
           skills.skill_names(m2) == ["Kubernetes"] and m2["skills"][0]["aliases"] == [])
     check("种子别名靠 remove 抑制", local2["remove"] == ["K8s"])
+    skills.apply_edit(local2, skills.merge(base2, local2), "k8s", "alias", "Kubernetes")
+    check("恢复种子别名清除大小写不敏感的抑制",
+          skills.extract("K8s", skills.merge(base2, local2)) == ["Kubernetes"]
+          and not local2["remove"])
+    skills.apply_edit(local, skills.merge(base, local), "Agile", "add", base=base)
+    check("恢复种子技能及原有别名",
+          skills.extract("Scrum", skills.merge(base, local)) == ["Agile"]
+          and not local["remove"] and not local["add"])
 
     local3 = {"version": 1, "add": [{"name": "Podman", "aliases": [], "not": []}],
               "alias": {}, "remove": []}

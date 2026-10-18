@@ -908,9 +908,41 @@ async function testUpdateRefreshWithDetailHash() {
   }
 }
 
+async function testPendingNoteEdits() {
+  console.log("\n-- delayed note responses preserve later drafts --");
+  const panel=loadPanel("en", [], {});
+  const input=inputOf("synthetic:pending", "");
+  panel.api.noteAdopt(input,"Original；");
+  const requests=[];
+  panel.sandbox.fetch=(url,opts)=>new Promise(resolve=>{
+    requests.push({body:JSON.parse(opts.body),resolve});
+  });
+  input.value="First edit";
+  const first=panel.api.setNote(input);
+  input.value="Second draft";
+  requests[0].resolve({ok:true,json:async()=>({value:"First edit；"})});
+  await first;
+  eq("old response preserves newer unsaved draft",input.value,"Second draft");
+  eq("acknowledged baseline remains accurate",input.dataset.noteStored,"First edit；");
+  input.value="Second edit";
+  const second=panel.api.setNote(input);
+  input.value="Third edit";
+  const third=panel.api.setNote(input);
+  eq("same UID writes are serialized",requests.length,2);
+  requests[1].resolve({ok:true,json:async()=>({value:"Second edit；"})});
+  await second; await tick();
+  eq("queued request keeps its original payload",requests[2].body.value,"Third edit");
+  eq("older response preserves queued edit",input.value,"Third edit");
+  requests[2].resolve({ok:true,json:async()=>({value:"Third edit；"})});
+  await third;
+  eq("latest acknowledged edit adopted",input.value,"Third edit;");
+  eq("latest canonical value retained",panel.api.LABELS["synthetic:pending"].note,"Third edit；");
+}
+
 async function main() {
   console.log("== 备注分隔符 / 默认标签本地化 JS 交互（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
+  await testPendingNoteEdits();
   await testChinese();
   await testEnglish();
   await testLocalizedDefaults();

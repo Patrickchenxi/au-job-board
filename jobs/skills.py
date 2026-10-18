@@ -21,7 +21,11 @@ r"""技能词表（skills.yaml）的加载、抽取、落库与编辑。
 
 from __future__ import annotations
 
+import fcntl
+import os
 import re
+import stat
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -139,7 +143,8 @@ def load_skills(path: str | Path | None = None) -> dict:
 
 def save_local(local: dict, path: str | Path | None = None) -> Path:
     """写回补充层。**整体覆盖** —— 所以它刻意是机器管理的、不放注释。"""
-    target = local_path_for(path)
+    selected = local_path_for(path)
+    target = selected.resolve()
     payload = {
         "version": local.get("version", 1),
         "add": list(local.get("add") or []),
@@ -147,11 +152,24 @@ def save_local(local: dict, path: str | Path | None = None) -> Path:
         "remove": [str(r) for r in (local.get("remove") or [])],
         "display_names": dict(local.get("display_names") or {}),
     }
-    target.write_text(
-        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False,
-                       default_flow_style=False),
-        encoding="utf-8")
-    return target
+    encoded = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False,
+                             default_flow_style=False).encode("utf-8")
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix="." + target.name + ".",
+                                         suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            os.fchmod(handle.fileno(), mode)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -374,11 +392,13 @@ def _clean(token: str | None) -> str:
 
 
 def apply_edit(local: dict, merged: dict, token: str, action: str,
-               target: str | None = None) -> dict:
+               target: str | None = None, *, base: dict | None = None) -> dict:
     """在**补充层**上做一次编辑。校验基于合并后的词表，写回只写补充层。
 
     返回 `{"kind": "skill"|"alias", "skill": ..., "token": ...}`。
     校验失败抛 ValueError，由调用方翻译成 400。
+    传入 base 可在恢复种子技能时保留原规范名，且不产生遮蔽的本地 add；
+    持久化编辑统一由 edit_and_sync 读取 base 并传入。
     """
     token = _clean(token)
     if not token:
@@ -403,6 +423,17 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
     if action == "add":
         if owner:
             raise ValueError(f"「{token}」已经属于「{owner}」，不能再加一个新技能")
+        suppressed = {str(t).strip().lower() for t in local.get("remove") or []}
+        seed = next((e for e in (base or {}).get("skills") or []
+                     if str(e.get("name") or "").lower() == token.lower()), None)
+        local["remove"] = [t for t in local.get("remove") or []
+                           if str(t).strip().lower() != token.lower()]
+        if seed is not None and token.lower() in suppressed:
+            # Restore the seed identity and all its aliases, without a shadow add.
+            token = seed["name"]
+            local["add"] = [e for e in local.get("add") or []
+                            if str(e.get("name") or "").lower() != token.lower()]
+            return {"kind": "skill", "skill": token, "token": token}
         local.setdefault("add", []).append({"name": token, "aliases": [], "not": []})
         return {"kind": "skill", "skill": token, "token": token}
 
@@ -415,6 +446,8 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
             raise ValueError(f"「{token}」已经是「{target}」的词")
         if owner:
             raise ValueError(f"「{token}」已属于「{owner}」，先从那里移除")
+        local["remove"] = [t for t in local.get("remove") or []
+                           if str(t).strip().lower() != token.lower()]
         aliases = local.setdefault("alias", {}).setdefault(target, [])
         if token not in aliases:
             aliases.append(token)
@@ -450,3 +483,65 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
 
 def skill_names(cfg: dict) -> list[str]:
     return [str(e.get("name")) for e in cfg.get("skills") or [] if e.get("name")]
+
+
+def edit_and_sync(conn, path, token, action, target=None) -> dict:
+    """Serialize a complete edit by overlay identity, across DBs and processes.
+
+    Callers must use this entry instead of loading and saving a stale local copy.
+    The persistent sidecar lock is never unlinked (replacing its inode would let
+    later writers bypass an existing waiter). File errors propagate as OSError;
+    edit validation retains ValueError. Full rebuilds return counts, other edits
+    return counts=None; docs is the number of jobs recomputed.
+    """
+    overlay = local_path_for(path).resolve()
+    lock_path = overlay.with_name("." + overlay.name + ".lock")
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        base = load_base(path)
+        local = load_local(path)
+        merged = merge(base, local)
+        removed = {str(t).strip().lower() for t in local.get("remove") or []}
+        restoring_seed = action == "add" and _clean(token).lower() in removed and any(
+            str(e.get("name") or "").lower() == _clean(token).lower()
+            for e in base.get("skills") or [])
+        info = apply_edit(local, merged, token, action, target, base=base)
+        previous = overlay.read_bytes() if overlay.exists() else None
+        previous_mode = stat.S_IMODE(overlay.stat().st_mode) if overlay.exists() else 0o600
+        published = False
+        try:
+            if info["kind"] != "display_name" and not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            save_local(local, path)
+            published = True
+            fresh = merge(base, local)
+            counts = None
+            if info["kind"] == "display_name":
+                docs = 0
+            elif info["kind"] == "remove" or restoring_seed:
+                docs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                counts = sync(conn, fresh)
+            else:
+                docs = sync_incremental(conn, fresh, [info["token"]])
+            return {**info, "docs": docs, "counts": counts}
+        except BaseException:
+            conn.rollback()
+            if published:
+                if previous is None:
+                    overlay.unlink(missing_ok=True)
+                else:
+                    temporary = None
+                    try:
+                        with tempfile.NamedTemporaryFile(dir=overlay.parent, prefix="." + overlay.name + ".",
+                                                         suffix=".tmp", delete=False) as stream:
+                            temporary = Path(stream.name)
+                            os.fchmod(stream.fileno(), previous_mode)
+                            stream.write(previous)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        os.replace(temporary, overlay)
+                    finally:
+                        if temporary is not None:
+                            temporary.unlink(missing_ok=True)
+            raise

@@ -69,16 +69,19 @@ default) or is one of the hand-written inputs under `demo/`:
 | `<root>/jobs.db` | Demo-only SQLite DB (labels, applied status) |
 | `<root>/rules.yaml`, `skills.yaml` | Copies of the demo rules / vocabulary |
 | `<root>/skills.local.yaml` | Created when you add a skill or alias in Settings |
+| `<root>/.jobs.db.panel-update/` | Database-scoped analysis lock/state directory |
+| `<root>/.skills.local.yaml.lock` | Persistent vocabulary editing lock |
 | `<root>/reports/` | Demo report directory (unused by the panel) |
 | `<root>/demo-manifest.json` | Written last; a directory without it is not a demo |
 
 Every file the panel reads or writes inside the root (`demo-manifest.json`,
 `config.yaml`, `rules.yaml`, `skills.yaml`, `jobs.db`, its `-wal` / `-shm` /
-`-journal` files and `skills.local.yaml`) must be a plain, single-link file in
+`-journal` files, `skills.local.yaml`, its lock and named runtime state files) must be a plain, single-link file in
 that root. A symbolic link (including a dangling one), a non-regular file or a
 hard link to a file elsewhere is refused. The check runs when the server starts
 **and before every request**, so a link added later makes requests fail with
 HTTP 403 (`demo data check failed: ...`) without reading or writing the target.
+The runtime state directory must also be an ordinary directory.
 A valid manifest does not authorize files outside the root. This protects
 against mistakes and links that already exist when a request arrives; it is not
 a defense against a deliberately racing local attacker.

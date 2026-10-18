@@ -141,7 +141,8 @@ def render_jd_html(text: str | None, empty: str = "（这份 JD 没有抓到正�
     # 招聘网站转出来的正文常有成片的 "  \n  \n\n"，先压成单个空行
     body = _TRAILING_WS.sub("", body)
     body = _BLANK_RUN.sub("\n\n", body)
-    body = html.escape(body, quote=False)
+    # Markdown URLs later enter quoted href attributes, so escape quotes too.
+    body = html.escape(body, quote=True)
 
     out: list[str] = []
     para: list[str] = []

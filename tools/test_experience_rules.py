@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from jobs.config import load_rules                    # noqa: E402
 from jobs.filters import normalize_text               # noqa: E402
-from jobs.scoring import score_experience             # noqa: E402
+from jobs.scoring import score_experience, score_job  # noqa: E402
 
 # (合成 ID, 场景标签, 正文片段, 期望分数)
 PENALTY = [
@@ -126,6 +126,21 @@ TITLE = [
 ]
 
 
+# 标题与正文都保留既有守卫，取有效要求的最大值。
+COMBINED = [
+    ("body_higher", "Engineer (2 years Python experience)",
+     "Minimum 5 years of software engineering experience required.", -3, 5),
+    ("title_higher", "Engineer (5 years experience)",
+     "Minimum 2 years of Python experience required.", -3, 5),
+    ("body_denied", "Engineer (2 years experience)",
+     "Our team has over 30 years of experience delivering services.", -1, 2),
+    ("body_unrelated", "Engineer (2 years experience)",
+     "The equipment warranty lasts 5 years.", -1, 2),
+    ("body_range", "Engineer (1 year Python experience)",
+     "Minimum 3 to 5 years of software engineering experience required.", -2, 3),
+]
+
+
 def main() -> int:
     rules = load_rules()
     failures: list[str] = []
@@ -158,6 +173,20 @@ def main() -> int:
         if not ok:
             failures.append(f"{cid} {label}: 期望 {want:+d}，实际 {got:+d}")
 
+    print("\n== 标题与正文的有效最大要求（COMBINED）==")
+    for cid, title, body, want, years in COMBINED:
+        got, reasons = score_experience(title, body, rules)
+        job = {"title": title, "description": body, "classification": "",
+               "job_level": "", "location": ""}
+        scored = score_job(job, rules)
+        expected_reason = f"experience:{years}y {want:+d}"
+        ok = (got == want and reasons == [expected_reason]
+              and scored["level_score"] == want
+              and expected_reason in scored["reasons"])
+        print(f"  [{'PASS' if ok else 'FAIL'}] {cid}: {got:+d} {reasons}")
+        if not ok:
+            failures.append(f"{cid}: expected {want} / {expected_reason}, got {scored}")
+
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")
@@ -165,7 +194,7 @@ def main() -> int:
             print(f"  - {item}")
         return 2
     print(f"全部通过（{len(PENALTY)} 条必须扣分 + {len(NO_PENALTY)} 条必须不扣分 "
-          f"+ {len(TITLE)} 条标题）")
+          f"+ {len(TITLE)} 条标题 + {len(COMBINED)} 条组合）")
     return 0
 
 

@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import copy
 import uuid
 import json
+import sqlite3
 import os
 import signal
 import sys
@@ -65,97 +67,98 @@ def _cmd_fetch(args) -> int:
     from .sources import iter_sources
 
     config, conn = _open(args)
-    queries = config.get("queries") or []
-    config["_run_source_failures"] = {}
-    if not queries:
-        print("config.yaml 里没有 queries", file=sys.stderr)
-        conn.close()
-        return 1
+    # Closing also rolls back any uncommitted batch before outer finalization.
+    with closing(conn):
+        queries = config.get("queries") or []
+        config["_run_source_failures"] = {}
+        if not queries:
+            print("config.yaml 里没有 queries", file=sys.stderr)
+            return 1
 
-    started = database.utcnow()
-    stats = {}
-    only = getattr(args, "only", None)
-    source_count = 0
-    for name, fetch_fn in iter_sources(config):
-        if only and name != only:
-            continue
-        source_count += 1
-        print(f"[fetch] {name} ...", flush=True)
-        try:
-            jobs = fetch_fn(config, queries)
-        except RunTimeout:
-            raise                # 超时必须向上传播，否则会被当成「这个来源失败」吞掉
-        except Exception as exc:                       # noqa: BLE001
-            print(f"  [{name}] 失败: {type(exc).__name__}: {exc}")
-            stats[name] = {"error": str(exc)}
-            if hasattr(args, "_run_failed_sources"):
-                args._run_failed_sources.add(name)
-            continue
-        inserted = updated = 0
-        for job in jobs:
-            result = database.upsert_job(conn, job)
-            inserted += result == "inserted"
-            updated += result == "updated"
-        conn.commit()
-        stats[name] = {"seen": len(jobs), "inserted": inserted, "updated": updated}
+        started = database.utcnow()
+        stats = {}
+        only = getattr(args, "only", None)
+        source_count = 0
+        for name, fetch_fn in iter_sources(config):
+            if only and name != only:
+                continue
+            source_count += 1
+            print(f"[fetch] {name} ...", flush=True)
+            try:
+                jobs = fetch_fn(config, queries)
+            except RunTimeout:
+                raise                # 超时必须向上传播，否则会被当成「这个来源失败」吞掉
+            except Exception as exc:                       # noqa: BLE001
+                print(f"  [{name}] 失败: {type(exc).__name__}: {exc}")
+                stats[name] = {"error": str(exc)}
+                if hasattr(args, "_run_failed_sources"):
+                    args._run_failed_sources.add(name)
+                continue
+            inserted = updated = 0
+            for job in jobs:
+                result = database.upsert_job(conn, job)
+                inserted += result == "inserted"
+                updated += result == "updated"
+            conn.commit()
+            stats[name] = {"seen": len(jobs), "inserted": inserted, "updated": updated}
+            if hasattr(args, "_run_counts"):
+                for field in ("seen", "inserted", "updated"):
+                    args._run_counts[field] += stats[name][field]
+            print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
+
+        if not source_count:
+            return 1
         if hasattr(args, "_run_counts"):
-            for field in ("seen", "inserted", "updated"):
-                args._run_counts[field] += stats[name][field]
-        print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
-
-    if not source_count:
-        conn.close()
-        return 1
-    if hasattr(args, "_run_counts"):
-        args._run_failed_sources.update(config.get("_run_source_failures", {}))
-    database.log_run(conn, "fetch", started, stats)
-    conn.commit()
-    print(f"[fetch] 完成 -> {database.counts(conn)}")
-    conn.close()
-    return 0
+            args._run_failed_sources.update(config.get("_run_source_failures", {}))
+        database.log_run(conn, "fetch", started, stats)
+        conn.commit()
+        print(f"[fetch] 完成 -> {database.counts(conn)}")
+        return 0
 
 
 def cmd_details(args) -> int:
     config, conn = _open(args)
-    started = database.utcnow()
-    stats = {}
+    # Closing also rolls back any uncommitted batch before outer finalization.
+    with closing(conn):
+        started = database.utcnow()
+        stats = {}
 
-    for source, path in DETAIL_FETCHERS.items():
-        # 用 getattr：cmd_run 会复用本函数，而 `run` 子命令并没有 --limit 参数。
-        # 直接取 args.limit 会让每天定时的 run 在 fetch 之后崩掉。
-        pending = database.jobs_missing_detail(conn, source, getattr(args, "limit", None))
-        if not pending:
-            continue
-        fetch_detail = _resolve(path)
-        sleep = float((config.get("seek") or {}).get("detail_sleep", 0.25))
-        ok = 0
-        print(f"[details] {source}: 队列 {len(pending)} 条", flush=True)
-        for row in pending:
-            text = fetch_detail(row["source_id"])
-            if text:
-                database.set_description(conn, row["uid"], text)
-                ok += 1
-            time.sleep(sleep)
-            if ok and ok % 25 == 0:
-                conn.commit()
-                print(f"  ... 已补 {ok}/{len(pending)}", flush=True)
+        for source, path in DETAIL_FETCHERS.items():
+            # 用 getattr：cmd_run 会复用本函数，而 `run` 子命令并没有 --limit 参数。
+            # 直接取 args.limit 会让每天定时的 run 在 fetch 之后崩掉。
+            pending = database.jobs_missing_detail(conn, source, getattr(args, "limit", None))
+            if not pending:
+                continue
+            fetch_detail = _resolve(path)
+            sleep = float((config.get("seek") or {}).get("detail_sleep", 0.25))
+            ok = 0
+            print(f"[details] {source}: 队列 {len(pending)} 条", flush=True)
+            for row in pending:
+                text = fetch_detail(row["source_id"])
+                if text:
+                    database.set_description(conn, row["uid"], text)
+                    ok += 1
+                time.sleep(sleep)
+                if ok and ok % 25 == 0:
+                    conn.commit()
+                    print(f"  ... 已补 {ok}/{len(pending)}", flush=True)
+            conn.commit()
+            stats[source] = {"queued": len(pending), "fetched": ok}
+            if hasattr(args, "_run_counts"):
+                args._run_counts["details_fetched"] += ok
+                args._run_details_incomplete |= ok < len(pending)
+            print(f"  {source}: 成功 {ok}/{len(pending)}")
+
+        # jobspy 来源没有独立详情步骤，提示一下未落正文的数量
+        for source in ("indeed", "linkedin"):
+            n = len(database.jobs_missing_detail(conn, source))
+            if n:
+                print(f"  [提示] {source} 有 {n} 条无正文"
+                      f"（正文随列表返回；若需正文请开启对应 fetch_description 后重抓）")
+
+        database.log_run(conn, "details", started, stats)
         conn.commit()
-        stats[source] = {"queued": len(pending), "fetched": ok}
-        if hasattr(args, "_run_counts"):
-            args._run_counts["details_fetched"] += ok
-            args._run_details_incomplete |= ok < len(pending)
-        print(f"  {source}: 成功 {ok}/{len(pending)}")
-
-    # jobspy 来源没有独立详情步骤，提示一下未落正文的数量
-    for source in ("indeed", "linkedin"):
-        n = len(database.jobs_missing_detail(conn, source))
-        if n:
-            print(f"  [提示] {source} 有 {n} 条无正文"
-                  f"（正文随列表返回；若需正文请开启对应 fetch_description 后重抓）")
-
-    database.log_run(conn, "details", started, stats)
-    conn.commit()
-    return 0
+        return 0
 
 
 # --------------------------------------------------------------------------
@@ -285,6 +288,42 @@ def _analyze_legacy(args, config: dict, rules: dict, selected_rules: dict,
 
 
 def cmd_analyze(args) -> int:
+    # Full runs already own the database lock through report and finalization.
+    if getattr(args, "_pipeline_active", False):
+        return _cmd_analyze(args)
+    raw, error = _read_config_root_checked(getattr(args, "config", None))
+    if error is not None:
+        print(f"[analyze] {error}", file=sys.stderr)
+        return 1
+    config = raw if isinstance(raw, dict) else {}
+    try:
+        resolve_filtering(config)
+    except ValueError as exc:
+        print(f"[analyze] filtering 配置无效：{exc}", file=sys.stderr)
+        return 1
+    lock = run_state.acquire_lock(config)
+    if lock is None:
+        print("[analyze] another update is running", file=sys.stderr)
+        return 4
+    previous_snapshot = getattr(args, "_config_snapshot", None)
+    try:
+        # Re-read under ownership: a settings save may have completed since preflight.
+        raw, error = _read_config_root_checked(getattr(args, "config", None))
+        if error is not None:
+            print(f"[analyze] {error}", file=sys.stderr)
+            return 1
+        fresh = raw if isinstance(raw, dict) else {}
+        if db_path(config).resolve() != db_path(fresh).resolve():
+            print("[analyze] database changed; retry with the current configuration", file=sys.stderr)
+            return 1
+        args._config_snapshot = fresh
+        return _cmd_analyze(args)
+    finally:
+        args._config_snapshot = previous_snapshot
+        lock.close()
+
+
+def _cmd_analyze(args) -> int:
     """过滤 + 打分 + 去重（不联网）。
 
     过滤模式只允许 legacy：既有折叠文本 + filters.evaluate，行为不变。
@@ -667,32 +706,24 @@ def cmd_skills(args) -> int:
         conn.close()
         return 0
 
-    merged = skills_mod.load_skills(path)
-    local = skills_mod.load_local(path)
     try:
         if action == "add":
-            info = skills_mod.apply_edit(local, merged, args.name, "add")
+            info = skills_mod.edit_and_sync(conn, path, args.name, "add")
         elif action == "alias":
-            info = skills_mod.apply_edit(local, merged, args.token, "alias", args.to)
+            info = skills_mod.edit_and_sync(conn, path, args.token, "alias", args.to)
         elif action == "remove":
-            info = skills_mod.apply_edit(local, merged, args.token, "remove")
+            info = skills_mod.edit_and_sync(conn, path, args.token, "remove")
         else:
             print("skills 的子命令：list / add / alias / remove", file=sys.stderr)
             return 1
-    except ValueError as exc:
+        counts = info.pop("counts")
+        note = (f"全量重算，技能 {len(counts)} 个" if counts is not None
+                else f"增量重算，更新 {info['docs']} 篇")
+    except (ValueError, OSError, sqlite3.Error) as exc:
         print(f"[skills] 编辑失败：{exc}", file=sys.stderr)
         return 1
-
-    skills_mod.save_local(local, path)
-    fresh = skills_mod.load_skills(path)
-    if action == "remove":
-        # 删除会波及所有含旧 token 的岗位，走全量重建
-        counts = skills_mod.sync(conn, fresh)
-        note = f"全量重算，技能 {len(counts)} 个"
-    else:
-        n = skills_mod.sync_incremental(conn, fresh, [info.get("token")])
-        note = f"增量重算，更新 {n} 篇"
-    conn.close()
+    finally:
+        conn.close()
     print(f"[skills] {action} {info} -> {note}")
     return 0
 

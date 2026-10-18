@@ -85,7 +85,12 @@ def _decorate(rows: list[dict], labels: dict[str, dict],
 
 
 def _sort_key(row: dict):
-    return (-(row.get("total_score") or -999), row.get("title") or "")
+    return (-score_value(row), row.get("title") or "")
+
+
+def score_value(row: dict):
+    value = row.get("total_score")
+    return value if value is not None else -999
 
 
 def _best_per_group(rows: list[dict]) -> list[dict]:
@@ -121,7 +126,7 @@ def load(conn, config: dict):
     """
     rows = _rows(conn)
     index = _group_index(rows)
-    labels = labels_mod.get_labels(conn)
+    labels = labels_mod.get_labels(conn, with_events=True)
     # 技能命中结果直接挂在行上（一次查询，避免逐行 N+1）。它是 tag、
     # 筛选和搜索共用的输入，所以要在装饰之前就能读到 —— 筛选不跑 decorate。
     skill_hits = database.skills_map(conn)
@@ -268,6 +273,7 @@ def write_report(conn, config: dict) -> dict:
     rule_fields = _rule_csv_fields(rule_info)
     for row in top:
         row.update(rule_fields)
+        row["score"] = row.get("total_score")
     for row in excluded:
         row.update(rule_fields)
 

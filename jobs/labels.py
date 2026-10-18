@@ -205,6 +205,20 @@ def set_label(conn, uid: str, rules_version: int | None = None, source: str = "c
     `touch=False` 保留原来的 `labeled_at`。给「把已有判断换一种写法」的
     整理操作用（见 tidy_notes）：那不是在重新判断，不该把时间戳刷成今天。
     """
+    # The read belongs to the write transaction too: concurrent partial edits
+    # must not replace fields captured before another writer committed.
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        result = _set_label(conn, uid, rules_version, source, touch, fields)
+        conn.commit()
+        return result
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def _set_label(conn, uid, rules_version, source, touch, fields):
     existing = conn.execute("SELECT * FROM labels WHERE uid = ?", (uid,)).fetchone()
     current = dict(existing) if existing else {k: None for k in
                                                ("eligibility", "ineligible_reason",
@@ -216,11 +230,26 @@ def set_label(conn, uid: str, rules_version: int | None = None, source: str = "c
             raise ValueError(f"不可标注的字段: {key}（可选 {WRITABLE}）")
 
     now = database.utcnow()
+    if existing and touch:
+        known = {r[0] for r in conn.execute(
+            "SELECT DISTINCT field FROM label_events WHERE uid = ? "
+            "AND (source IS NULL OR source != 'tidy')", (uid,))}
+        for key in WRITABLE:
+            if current.get(key) and key not in known and key not in fields:
+                # Preserve the known pre-edit legacy state before touching the
+                # row timestamp. This is a snapshot, not an invented user edit.
+                conn.execute("""INSERT INTO label_events
+                    (uid, field, old_value, new_value, source, rules_version, at)
+                    VALUES (?,?,NULL,?,?,?,?)""",
+                    (uid, key, current[key], "legacy_snapshot", current.get("rules_version"),
+                     current.get("labeled_at") or ""))
     for key, value in fields.items():
         # note 走专门的规范化（补齐尾随分隔符），其余字段只做取值校验
         new_value = normalize_note(value) if key == "note" else _validate(key, value)
         old_value = current.get(key)
-        if old_value != new_value:
+        # An explicit clear is meaningful even when this UID inherited the
+        # displayed value from another group member and its own field is null.
+        if old_value != new_value or new_value is None or touch:
             conn.execute(
                 """INSERT INTO label_events
                        (uid, field, old_value, new_value, source, rules_version, at)
@@ -247,7 +276,6 @@ def set_label(conn, uid: str, rules_version: int | None = None, source: str = "c
          current["action"], current["applied_at"], current["note"],
          current["rules_version"], current["labeled_at"]),
     )
-    conn.commit()
     return current
 
 
@@ -257,23 +285,58 @@ def clear_label(conn, uid: str) -> bool:
     return cur.rowcount > 0
 
 
-def get_labels(conn) -> dict[str, dict]:
-    return {r["uid"]: dict(r) for r in conn.execute("SELECT * FROM labels")}
+def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
+    rows = {r["uid"]: dict(r) for r in conn.execute("SELECT * FROM labels")}
+    if with_events:
+        # Internal merge metadata only; exports and ordinary callers retain
+        # the historical public row shape. Existing databases need no migration.
+        for event in conn.execute("""
+                SELECT e.uid, e.field, e.new_value, e.at, e.event_id, e.source
+                FROM label_events e JOIN (
+                    SELECT uid, field, MAX(event_id) AS last_id
+                    FROM label_events WHERE source IS NULL OR source != 'tidy'
+                    GROUP BY uid, field
+                ) latest ON latest.last_id = e.event_id"""):
+            row = rows.get(event["uid"])
+            if row is not None and event["field"] in WRITABLE:
+                info = dict(event)
+                if event["field"] == "note":
+                    info["new_value"] = normalize_note(info["new_value"])
+                row.setdefault("_field_events", {})[event["field"]] = info
+    return rows
 
 
 def merge_labels(candidates: list[dict]) -> dict | None:
     """把一个去重组内多条标注合并成一条显示用记录。
 
-    同一字段取**最近标注**的非空值 —— 不要按"更严格/更宽松"排序，
-    那样会让后来的修正被先前的一致性压住。
+    有事件的字段按最后一次字段编辑合并，包括显式清空。旧记录没有事件时
+    保留最近非空值的兼容行为；其他字段的新编辑不会让旧值复活。
     """
     live = [c for c in candidates if c]
     if not live:
         return None
     live.sort(key=lambda c: c.get("labeled_at") or "", reverse=True)
     merged = {}
-    for key in WRITABLE + ("applied_at", "labeled_at"):
-        merged[key] = next((c.get(key) for c in live if c.get(key)), None)
+    owners = {}
+    for key in WRITABLE:
+        choices = []
+        for candidate in live:
+            value = candidate.get(key)
+            event = (candidate.get("_field_events") or {}).get(key)
+            # Legacy rows may retain a note without its trailing separator.
+            # Compare semantic text without rewriting the original peer row.
+            comparable = normalize_note(value) if key == "note" else value
+            if event and event.get("new_value") == comparable:
+                order = 0 if event.get("source") == "legacy_snapshot" else event["event_id"]
+                choices.append(((event.get("at") or "", order), candidate))
+            elif value:
+                choices.append(((candidate.get("labeled_at") or "", 0), candidate))
+        owner = max(choices, key=lambda choice: choice[0])[1] if choices else {}
+        owners[key] = owner
+        merged[key] = owner.get(key)
+    merged["applied_at"] = (owners["action"].get("applied_at")
+                            if merged["action"] == "applied" else None)
+    merged["labeled_at"] = live[0].get("labeled_at")
     return merged
 
 
