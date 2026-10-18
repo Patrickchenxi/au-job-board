@@ -55,6 +55,7 @@ _TOKEN = re.compile(
     re.IGNORECASE)
 
 _RANGE_SEP = re.compile(r'\s*(?:-|–|—|to)\s*', re.I)
+_GRADE_LABEL = re.compile(r'\b(?:band|level|grade|step|classification)\s*[:#-]?\s*$', re.I)
 _MAX_ONLY = re.compile(r'\bup\s*to\b', re.I)
 _MIN_ONLY = re.compile(r'\b(and\s+above|\+|or\s+more|plus)\b', re.I)
 
@@ -124,11 +125,13 @@ def parse(text: str | None) -> dict | None:
         shared_k = False
         if not m.group("k") and value < 1000 and index + 1 < len(matches):
             following = matches[index + 1]
+            preceding = raw[max(0, m.start() - 32):m.start()]
             # 只把明确升序范围右端的 k 共享给左端；完整金额不再乘千，
-            # 也不跨其它文字或独立数字猜量级（例如 Band 5）。
+            # 也不跨其它文字、独立数字或 Band/Level 等级编号猜量级。
             if (following.group("k")
                     and _RANGE_SEP.fullmatch(raw[m.end():following.start()])
-                    and value <= _to_number(following.group("num"), None)):
+                    and value <= _to_number(following.group("num"), None)
+                    and not (value < 20 and _GRADE_LABEL.search(preceding))):
                 value *= 1000
                 shared_k = True
         if value <= 0 or value > MAX_RAW_AMOUNT:

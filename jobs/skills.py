@@ -83,10 +83,24 @@ def merge(base: dict, local: dict) -> dict:
     - `add`：追加新技能条目（同名条目存在则跳过，避免重复）
     - `alias`：给已有技能追加别名；找不到目标就跳过（写入口已经校验过，
       手改出错时宁可静默跳过，也不要让整个词表加载失败）
+    - `remove`：先从种子层摘除 token/整条技能，再应用本地 add / alias；
+      因而显式重分配的别名可以覆盖种子层的抑制。
     - `display_names`：展示覆盖层；只接受仍属于该条目的 token，不改规范名
     """
     entries = [dict(e, aliases=list(e.get("aliases") or []))
                for e in (base.get("skills") or []) if e.get("name")]
+
+    removed = {str(r).strip().lower() for r in (local.get("remove") or []) if str(r).strip()}
+    if removed:
+        kept = []
+        for entry in entries:
+            if str(entry.get("name")).lower() in removed:
+                continue
+            entry["aliases"] = [a for a in (entry.get("aliases") or [])
+                                if str(a).strip().lower() not in removed]
+            kept.append(entry)
+        entries = kept
+
     by_name = {e["name"]: e for e in entries}
 
     for raw in local.get("add") or []:
@@ -112,19 +126,6 @@ def merge(base: dict, local: dict) -> dict:
             if alias and alias.lower() not in have:
                 entry.setdefault("aliases", []).append(alias)
                 have.add(alias.lower())
-
-    # remove 最后应用：值命中**技能名**则整条摘掉（连别名），
-    # 只命中**别名**则只摘那一个 token。大小写不敏感。
-    removed = {str(r).strip().lower() for r in (local.get("remove") or []) if str(r).strip()}
-    if removed:
-        kept = []
-        for entry in entries:
-            if str(entry.get("name")).lower() in removed:
-                continue
-            entry["aliases"] = [a for a in (entry.get("aliases") or [])
-                                if str(a).strip().lower() not in removed]
-            kept.append(entry)
-        entries = kept
 
     overrides = local.get("display_names")
     if isinstance(overrides, dict):
@@ -446,8 +447,14 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
             raise ValueError(f"「{token}」已经是「{target}」的词")
         if owner:
             raise ValueError(f"「{token}」已属于「{owner}」，先从那里移除")
-        local["remove"] = [t for t in local.get("remove") or []
-                           if str(t).strip().lower() != token.lower()]
+        seed_target = next((e for e in (base or {}).get("skills") or []
+                            if e.get("name") == target), None)
+        restores_seed_alias = seed_target is not None and any(
+            str(alias).strip().lower() == token.lower()
+            for alias in seed_target.get("aliases") or [])
+        if restores_seed_alias:
+            local["remove"] = [t for t in local.get("remove") or []
+                               if str(t).strip().lower() != token.lower()]
         aliases = local.setdefault("alias", {}).setdefault(target, [])
         if token not in aliases:
             aliases.append(token)

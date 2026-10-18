@@ -44,6 +44,11 @@ class SalaryTests(unittest.TestCase):
                 low, high = (80500, 100500) if "80.5" in text else (80000, 100000)
                 self.amounts(text, low, high)
 
+    def test_shared_k_range_skips_grade_labels(self):
+        for text in ("Band 5 - $120k per year", "Level 5 - 120k package"):
+            with self.subTest(text=text):
+                self.amounts(text, 120000, 120000)
+
     def test_explicit_ranges_and_modes(self):
         self.amounts("$80k - $100k per annum", 80000, 100000)
         self.amounts("$80,000 - $100k per annum", 80000, 100000)

@@ -198,6 +198,9 @@ class Handler(BaseHTTPRequestHandler):
             request_host = urlparse("//" + self.headers.get("Host", ""))
             bound_host, bound_port = self.server.server_address[:2]
             allowed_hosts = {str(bound_host).lower()}
+            configured_host = str((self.config.get("panel") or {}).get("host") or "").strip().lower()
+            if configured_host:
+                allowed_hosts.add(configured_host)
             if bound_host in ("127.0.0.1", "::1"):
                 allowed_hosts.add("localhost")
             if os.environ.get("JOBS_CONTAINER") == "1":

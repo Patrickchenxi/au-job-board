@@ -38,7 +38,8 @@ class UpdateHTTPTests(unittest.TestCase):
         self.skills_path = root / "skills.yaml"
         self.skills_path.write_text("version: 1\nskills: []\n", encoding="utf-8")
         self.config = {"db_path": str(root / "synthetic.db"),
-                       "skills_path": str(self.skills_path)}
+                       "skills_path": str(self.skills_path),
+                       "panel": {"host": "panel.internal"}}
         self.manager = FakeUpdates()
         handler = type("SyntheticHandler", (panel.Handler,), {"config": self.config})
         self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -103,6 +104,17 @@ class UpdateHTTPTests(unittest.TestCase):
         code, result = self.edit("/api/label", {
             "uid": "synthetic:one", "field": "note", "value": None})
         self.assertEqual((code, result["value"]), (200, None))
+
+    def test_edit_accepts_configured_bind_hostname(self):
+        host = "panel.internal:%s" % self.server.server_port
+        code, result = self.edit("/api/label", {
+            "uid": "synthetic:one", "field": "note", "value": "configured host"},
+            {"Host": host, "Origin": "http://" + host})
+        self.assertEqual((code, result["value"]), (200, "configured host；"))
+        code, result = self.edit("/api/skills", {
+            "token": "ConfiguredHostSkill", "action": "add"},
+            {"Host": host, "Origin": "http://" + host})
+        self.assertEqual((code, result["skill"]), (200, "ConfiguredHostSkill"))
 
     def test_edit_body_limit_and_malformed_json(self):
         # 64 KiB permits normal notes but bounds the complete JSON request.

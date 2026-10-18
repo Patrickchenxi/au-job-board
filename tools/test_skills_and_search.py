@@ -296,10 +296,28 @@ def test_remove_edit() -> None:
     check("删种子别名只摘别名，技能还在",
           skills.skill_names(m2) == ["Kubernetes"] and m2["skills"][0]["aliases"] == [])
     check("种子别名靠 remove 抑制", local2["remove"] == ["K8s"])
-    skills.apply_edit(local2, skills.merge(base2, local2), "k8s", "alias", "Kubernetes")
+    skills.apply_edit(local2, skills.merge(base2, local2),
+                      "k8s", "alias", "Kubernetes", base=base2)
     check("恢复种子别名清除大小写不敏感的抑制",
           skills.extract("K8s", skills.merge(base2, local2)) == ["Kubernetes"]
           and not local2["remove"])
+
+    reassigned_base = {"skills": [
+        {"name": "JavaScript", "aliases": ["JS"], "not": []},
+        {"name": "Java", "aliases": [], "not": []},
+    ]}
+    reassigned = {"version": 1, "add": [], "alias": {}, "remove": []}
+    skills.apply_edit(reassigned, skills.merge(reassigned_base, reassigned), "JS", "remove")
+    skills.apply_edit(reassigned, skills.merge(reassigned_base, reassigned),
+                      "JS", "alias", "Java", base=reassigned_base)
+    reassigned_merged = skills.merge(reassigned_base, reassigned)
+    reassigned_tokens = skills.canonical_tokens(reassigned_merged)
+    check("重新分配已删除种子别名时保留原主体抑制",
+          reassigned["remove"] == ["JS"]
+          and reassigned_tokens.get("js") == "Java"
+          and all("js" not in {str(a).lower() for a in e["aliases"]}
+                  for e in reassigned_merged["skills"] if e["name"] == "JavaScript"))
+
     skills.apply_edit(local, skills.merge(base, local), "Agile", "add", base=base)
     check("恢复种子技能及原有别名",
           skills.extract("Scrum", skills.merge(base, local)) == ["Agile"]
@@ -408,7 +426,8 @@ def test_primary_display_names() -> None:
         skills.apply_edit(local_alias, skills.merge(base, local_alias), "Kube", "remove")
         skills.save_local(local_alias, vocab)
         restored = skills.load_local(vocab)
-        skills.apply_edit(restored, skills.merge(base, restored), "Kube", "alias", "Kubernetes")
+        skills.apply_edit(restored, skills.merge(base, restored),
+                          "Kube", "alias", "Kubernetes", base=base)
         skills.save_local(restored, vocab)
         reloaded = skills.merge(base, skills.load_local(vocab))
         check("重新添加已删除别名后仍可正常抽取", skills.extract("Kube", reloaded) == ["Kubernetes"])
