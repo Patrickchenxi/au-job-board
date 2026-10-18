@@ -115,6 +115,15 @@ The verification skill owns the detailed UX workflow: establish a representative
 interaction before full integration, then verify behavior and usability
 separately. Basic usability is part of implementation quality.
 
+Direction previews may use a mockup or proof of concept to settle consequential
+UX or functional choices early; they do not establish final acceptance.
+First-pass review readiness and fewer unnecessary handoffs are goals, not extra
+approval gates or a guarantee of a clean first review.
+
+For an explicitly authorized delegated feedback repair trial, use the
+[bounded PR repair procedure](pr-feedback-pilot.md). It records roles, limits
+and escalation; it does not configure a model or review integration.
+
 Use these files on demand, without requiring extra plugins or a global skill
 installation. Local verification and PR CI are evidence about their actual
 revision, not authorization to merge, release or deploy.
