@@ -192,9 +192,9 @@ def _ordered(rows: list[dict], view: str, filters: dict, config: dict) -> list[d
         return sorted(rows, key=lambda r: (r.get("rule_id") or "", r.get("title") or ""))
     if sort == "date":
         return sorted(rows, key=lambda r: (_date_key(r),
-                                           -(r.get("total_score") or -999),
+                                           -report_mod.score_value(r),
                                            r.get("uid") or ""))
-    rows = sorted(rows, key=lambda r: (-(r.get("total_score") or -999),
+    rows = sorted(rows, key=lambda r: (-report_mod.score_value(r),
                                        _date_key(r), r.get("uid") or ""))
     if view == "recommend":
         cfg = (config.get("panel") or {}).get("recommend") or {}
@@ -215,8 +215,8 @@ def _mix_low_scores(rows: list[dict], low_ratio: float, low_max_score: int) -> l
     if low_ratio <= 0:
         return rows
     step = max(2, round(1.0 / low_ratio))
-    high = [r for r in rows if (r.get("total_score") or -999) > low_max_score]
-    low = [r for r in rows if (r.get("total_score") or -999) <= low_max_score]
+    high = [r for r in rows if report_mod.score_value(r) > low_max_score]
+    low = [r for r in rows if report_mod.score_value(r) <= low_max_score]
     if not low or not high:
         return rows
     out: list[dict] = []

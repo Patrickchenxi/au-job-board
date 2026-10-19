@@ -125,6 +125,7 @@ async function openJob(uid){
 }
 let OPEN_SEQ=0, OPEN_UID=null;
 const NOTE_REQUESTS=new Set();
+const NOTE_WRITES=new Map();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -163,16 +164,30 @@ async function setLabel(uid,field,value,btn){
   else toast(wasOn ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field)+T('js.colon')+T('value.'+field+'.'+value));
 }
 function setNote(input){
-  const task=saveNote(input);
+  const uid=input.dataset.uid;
+  // Returning to the loaded display while a write is pending also restores
+  // its canonical identity (a translated default is not custom English text).
+  const reverted=input._notePending && input.value===input.dataset.noteLoaded;
+  const request={payload:reverted ? input.dataset.noteStored : noteCanonicalize(input),display:input.value,
+    version:(input._noteSaveVersion||0)+1};
+  input._noteSaveVersion=request.version;
+  input._notePending=request;
+  const previous=NOTE_WRITES.get(uid);
+  const task=previous ? previous.then(()=>saveNote(input,request)) : saveNote(input,request);
+  NOTE_WRITES.set(uid,task);
   NOTE_REQUESTS.add(task);
-  task.finally(()=>NOTE_REQUESTS.delete(task));
+  task.finally(()=>{
+    if(input._notePending===request)delete input._notePending;
+    NOTE_REQUESTS.delete(task);
+    if(NOTE_WRITES.get(uid)===task)NOTE_WRITES.delete(uid);
+  });
   return task;
 }
-async function saveNote(input){
+async function saveNote(input,request){
   const uid=input.dataset.uid;
   // 落库前把界面显示值映射回 canonical：默认标签用中文原文，自定义内容原样，
   // 服务端仍走 labels.normalize_note 做最终规范化。显示值本身不入库。
-  const payload=noteCanonicalize(input);
+  const payload=request.payload;
   try{
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({uid:uid,field:'note',value:payload||null})});
@@ -180,7 +195,13 @@ async function saveNote(input){
     // 服务端回传 canonical；LABELS 存它，输入框按当前语言显示。
     const d=await r.json();
     const saved=d.value||'';
-    noteAdopt(input,saved);
+    if(input._noteSaveVersion===request.version && input.value===request.display){
+      noteAdopt(input,saved);
+    }else{
+      // Keep the newer draft/identity map, but remember what is actually saved.
+      input.dataset.noteStored=saved;
+      input.dataset.noteLoaded=noteTagTranslate(saved);
+    }
     LABELS[uid]=LABELS[uid]||{}; LABELS[uid].note=saved||null; refreshDot(uid);
     toast(T('js.note_saved'));
   }catch(e){toast(T('js.note_failed')+e.message);}
@@ -285,7 +306,8 @@ function noteBlur(input){
   input.dataset.typing='';
   noteClose();
   // 显示转换（译名/全角 <-> 半角）不是用户编辑：值没变就不写库、不产生事件。
-  if(input.dataset.noteLoaded!==undefined && input.value===input.dataset.noteLoaded) return;
+  const baseline=input._notePending ? input._notePending.display : input.dataset.noteLoaded;
+  if(baseline!==undefined && input.value===baseline) return;
   setNote(input);
 }
 function noteSegments(v){ return String(v||'').split(/[\uff1b;]/); }

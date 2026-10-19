@@ -1,17 +1,19 @@
-"""Synthetic loopback contract for update endpoints; never launches a pipeline."""
+"""Synthetic loopback write boundaries; never launches a pipeline."""
 from __future__ import annotations
 
 import http.client
 import json
+import sqlite3
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from jobs import panel
+from jobs import panel, skills
 
 
 class FakeUpdates:
@@ -32,8 +34,15 @@ class FakeUpdates:
 
 class UpdateHTTPTests(unittest.TestCase):
     def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.skills_path = root / "skills.yaml"
+        self.skills_path.write_text("version: 1\nskills: []\n", encoding="utf-8")
+        self.config = {"db_path": str(root / "synthetic.db"),
+                       "skills_path": str(self.skills_path),
+                       "panel": {"host": "panel.internal"}}
         self.manager = FakeUpdates()
-        handler = type("SyntheticHandler", (panel.Handler,), {"config": {}})
+        handler = type("SyntheticHandler", (panel.Handler,), {"config": self.config})
         self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.server.update_manager = self.manager
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -44,6 +53,7 @@ class UpdateHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
+        self.temp.cleanup()
 
     def request(self, path, method="GET", body=None, headers=None):
         client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
@@ -57,6 +67,133 @@ class UpdateHTTPTests(unittest.TestCase):
     def post(self, body="{}", headers=None):
         return self.request("/api/update", "POST", body,
                             {"Content-Type": "application/json", **(headers or {})})
+
+    def edit(self, path, payload, headers=None):
+        body = json.dumps(payload) if isinstance(payload, dict) else payload
+        return self.request(path, "POST", body, {
+            "Content-Type": "application/json", "Origin": "http://" + self.host,
+            **(headers or {})})
+
+    def test_edit_routes_reject_foreign_origins_hosts_and_plain_text(self):
+        for path, payload in (
+                ("/api/label", {"uid": "synthetic:one", "field": "note", "value": "draft"}),
+                ("/api/skills", {"token": "SyntheticSkill", "action": "add"})):
+            for headers, expected in (({"Origin": "http://example.invalid"}, 403),
+                                      ({"Host": "example.invalid:" + str(self.server.server_port)}, 403),
+                                      ({"Content-Type": "text/plain"}, 400)):
+                with self.subTest(path=path, headers=headers), patch.object(
+                        panel.database, "connect", side_effect=AssertionError("DB opened")):
+                    self.assertEqual(self.edit(path, payload, headers)[0], expected)
+
+    def test_local_edits_persist_and_allow_notes_larger_than_update_body(self):
+        note = "Synthetic note 合成 " * 400
+        code, result = self.edit("/api/label", {
+            "uid": "synthetic:one", "field": "note", "value": note})
+        self.assertEqual(code, 200)
+        conn = panel.database.connect(self.config["db_path"])
+        try:
+            stored = conn.execute("SELECT note FROM labels WHERE uid=?",
+                                  ("synthetic:one",)).fetchone()[0]
+            self.assertEqual(stored, result["value"])
+            self.assertTrue(stored.startswith("Synthetic note"))
+        finally:
+            conn.close()
+        self.assertEqual(self.edit("/api/skills", {
+            "token": "SyntheticSkill", "action": "add"})[0], 200)
+        self.assertIn("syntheticskill", skills.canonical_tokens(
+            skills.load_skills(self.skills_path)))
+        code, result = self.edit("/api/label", {
+            "uid": "synthetic:one", "field": "note", "value": None})
+        self.assertEqual((code, result["value"]), (200, None))
+
+    def test_edit_accepts_configured_bind_hostname(self):
+        host = "panel.internal:%s" % self.server.server_port
+        code, result = self.edit("/api/label", {
+            "uid": "synthetic:one", "field": "note", "value": "configured host"},
+            {"Host": host, "Origin": "http://" + host})
+        self.assertEqual((code, result["value"]), (200, "configured host；"))
+        code, result = self.edit("/api/skills", {
+            "token": "ConfiguredHostSkill", "action": "add"},
+            {"Host": host, "Origin": "http://" + host})
+        self.assertEqual((code, result["skill"]), (200, "ConfiguredHostSkill"))
+
+    def test_label_sqlite_failure_rolls_back_and_retry_succeeds(self):
+        payload = {"uid": "synthetic:one", "field": "note", "value": "original"}
+        self.assertEqual(self.edit("/api/label", payload)[0], 200)
+        conn = panel.database.connect(self.config["db_path"])
+        try:
+            before = [tuple(row) for row in conn.execute("SELECT * FROM label_events")]
+            conn.execute("""CREATE TRIGGER fail_label BEFORE INSERT ON labels
+                            BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END""")
+            conn.commit()
+            payload["value"] = "replacement"
+            self.assertEqual(self.edit("/api/label", payload),
+                             (503, {"error": "write_failed"}))
+            self.assertEqual(conn.execute("SELECT note FROM labels").fetchone()[0],
+                             "original；")
+            self.assertEqual([tuple(row) for row in conn.execute("SELECT * FROM label_events")],
+                             before)
+            conn.execute("DROP TRIGGER fail_label")
+            conn.commit()
+            self.assertEqual(self.edit("/api/label", payload),
+                             (200, {"ok": True, "field": "note", "value": "replacement；"}))
+        finally:
+            conn.close()
+
+    def test_label_locked_database_returns_json_and_retry_succeeds(self):
+        conn = panel.database.connect(self.config["db_path"])
+        payload = {"uid": "synthetic:one", "field": "note", "value": "after lock"}
+
+        def short_timeout_connect(path):
+            connection = sqlite3.connect(path, timeout=0.02)
+            connection.row_factory = sqlite3.Row
+            return connection
+
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            with patch.object(panel.database, "connect", side_effect=short_timeout_connect):
+                self.assertEqual(self.edit("/api/label", payload),
+                                 (503, {"error": "write_failed"}))
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], 0)
+            conn.rollback()
+            self.assertEqual(self.edit("/api/label", payload),
+                             (200, {"ok": True, "field": "note", "value": "after lock；"}))
+        finally:
+            conn.close()
+
+    def test_label_sqlite_open_failure_returns_json(self):
+        with patch.object(panel.database, "connect",
+                          side_effect=sqlite3.OperationalError("synthetic open failure")):
+            self.assertEqual(self.edit("/api/label", {
+                "uid": "synthetic:one", "field": "note", "value": "draft"}),
+                (503, {"error": "write_failed"}))
+
+    def test_edit_body_limit_and_malformed_json(self):
+        # 64 KiB permits normal notes but bounds the complete JSON request.
+        limit = 64 * 1024
+        payload = {"uid": "synthetic:one", "field": "note", "value": ""}
+        payload["value"] = "x" * (limit - len(json.dumps(payload)))
+        self.assertEqual(len(json.dumps(payload)), limit)
+        self.assertEqual(self.edit("/api/label", payload)[0], 200)
+        payload["value"] += "x"
+        for path in ("/api/label", "/api/skills"):
+            for body in (json.dumps(payload), "[]", "null", "not json", b"\xff"):
+                with self.subTest(path=path, body=str(body)[:25]), patch.object(
+                        panel.database, "connect", side_effect=AssertionError("DB opened")):
+                    self.assertEqual(self.edit(path, body)[0], 400)
+
+    def test_edit_field_types_are_validated(self):
+        for path, payload in (
+                ("/api/label", {"uid": [], "field": "note", "value": "draft"}),
+                ("/api/label", {"uid": "synthetic:one", "field": "note", "value": {}}),
+                ("/api/label", {"uid": "synthetic:one", "field": [], "value": None}),
+                ("/api/skills", {"token": [], "action": "add"}),
+                ("/api/skills", {"token": "Synthetic", "action": []}),
+                ("/api/skills", {"token": "Synthetic", "action": "alias", "target": {}})):
+            with self.subTest(path=path, payload=payload), patch.object(
+                    panel.database, "connect", side_effect=AssertionError("DB opened")):
+                self.assertEqual(self.edit(path, payload)[0], 400)
 
     def test_status_and_preview_never_open_database(self):
         with patch.object(panel.database, "connect", side_effect=AssertionError("DB opened")):

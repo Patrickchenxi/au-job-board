@@ -5,6 +5,8 @@
 # config.example.yaml and skills.local.example.yaml are the public examples.
 config.yaml
 skills.local.yaml
+.skills.local.yaml.lock
+.skills.local.yaml.*.tmp
 
 # Private corpora, memory and runtime reports.
 research/

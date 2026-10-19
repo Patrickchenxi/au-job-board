@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from jobs.config import load_rules                    # noqa: E402
 from jobs.filters import normalize_text               # noqa: E402
-from jobs.scoring import score_experience             # noqa: E402
+from jobs.scoring import score_experience, score_job  # noqa: E402
 
 # (合成 ID, 场景标签, 正文片段, 期望分数)
 PENALTY = [
@@ -126,6 +126,35 @@ TITLE = [
 ]
 
 
+# 标题写了年限就以标题为准，正文不参与（正文判断误判风险高于收益）。
+# 标题没有年限时才回落到正文；no_title_*_known_limitation 记录正文判断的
+# 既有限制（合同期限 / 雇主年资会被当成经验要求），不是期望的理想行为。
+COMBINED = [
+    ("title_wins_over_higher_body", "Engineer (2 years Python experience)",
+     "Minimum 5 years of software engineering experience required.", -1, 2),
+    ("title_higher", "Engineer (5 years experience)",
+     "Minimum 2 years of Python experience required.", -3, 5),
+    ("title_ignores_denied_body", "Engineer (2 years experience)",
+     "Our team has over 30 years of experience delivering services.", -1, 2),
+    ("title_ignores_unrelated_body", "Engineer (2 years experience)",
+     "The equipment warranty lasts 5 years.", -1, 2),
+    ("title_ignores_contract_duration", "Engineer (2 years experience)",
+     "This is a minimum 5 year fixed-term contract.", -1, 2),
+    ("title_ignores_employer_tenure", "Engineer (2 years experience)",
+     "Acme has 25 years of experience delivering services.", -1, 2),
+    ("title_range_lower_bound", "Engineer (1 year Python experience)",
+     "Minimum 3 to 5 years of software engineering experience required.", -1, 1),
+    ("no_title_body_requirement", "Engineer",
+     "Minimum 5 years of software engineering experience required.", -3, 5),
+    ("no_title_body_exp_abbreviation", "Engineer",
+     "Minimum 3 years exp required.", -2, 3),
+    ("no_title_contract_duration_known_limitation", "Engineer",
+     "This is a minimum 5 year fixed-term contract.", -3, 5),
+    ("no_title_employer_tenure_known_limitation", "Engineer",
+     "Acme has 25 years of experience delivering services.", -3, 25),
+]
+
+
 def main() -> int:
     rules = load_rules()
     failures: list[str] = []
@@ -158,6 +187,20 @@ def main() -> int:
         if not ok:
             failures.append(f"{cid} {label}: 期望 {want:+d}，实际 {got:+d}")
 
+    print("\n== 标题优先、正文兜底（COMBINED）==")
+    for cid, title, body, want, years in COMBINED:
+        got, reasons = score_experience(title, body, rules)
+        job = {"title": title, "description": body, "classification": "",
+               "job_level": "", "location": ""}
+        scored = score_job(job, rules)
+        expected_reason = f"experience:{years}y {want:+d}"
+        ok = (got == want and reasons == [expected_reason]
+              and scored["level_score"] == want
+              and expected_reason in scored["reasons"])
+        print(f"  [{'PASS' if ok else 'FAIL'}] {cid}: {got:+d} {reasons}")
+        if not ok:
+            failures.append(f"{cid}: expected {want} / {expected_reason}, got {scored}")
+
     print()
     if failures:
         print(f"失败 {len(failures)} 项：")
@@ -165,7 +208,7 @@ def main() -> int:
             print(f"  - {item}")
         return 2
     print(f"全部通过（{len(PENALTY)} 条必须扣分 + {len(NO_PENALTY)} 条必须不扣分 "
-          f"+ {len(TITLE)} 条标题）")
+          f"+ {len(TITLE)} 条标题 + {len(COMBINED)} 条组合）")
     return 0
 
 

@@ -378,6 +378,8 @@ class ConfigEditor:
             stream = io.StringIO()
             parser.dump(document, stream)
             encoded = stream.getvalue().encode("utf-8")
+            if len(encoded) > MAX_BYTES:
+                raise ConfigEditError("config_invalid")
             # Validate the complete candidate before any filesystem mutation.
             candidate = _document(encoded)[2]
             candidate_view = self._view(encoded, candidate)

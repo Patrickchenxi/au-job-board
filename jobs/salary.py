@@ -46,16 +46,15 @@ _PERIODS = [
 ]
 
 # 一个「像钱的数字」：可选货币前缀 + 数字 + 可选 k 后缀。
-# 两个负向断言：
-#   (?![0-9])  避免从 "160" 里截出 "1"
-#   (?!\s*%)   排除 "12% Super" 里的 12
+# 不允许从数字内部重新开始，也不允许回溯截断小数/千分位数字。
+# 百分比整项拒绝；不能把 "11.5%" 回溯成 "11" 或再从 "5" 开始。
 _TOKEN = re.compile(
     r'(?P<pre>AU\$|US\$|NZ\$|A\$|\$|\bAUD\b|\bUSD\b|\bNZD\b|\bGBP\b|\bEUR\b|\bSGD\b)?\s*'
-    r'(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?P<k>[kK])?'
-    r'(?![0-9])(?!\s*%)',
+    r'(?<![\d.,])(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?P<k>[kK])?'
+    r'(?!\d|[.,]\d)(?!\s*%)',
     re.IGNORECASE)
 
-_RANGE_SEP = re.compile(r'\s*(?:-|–|—|to|up\s+to|and\s+above)\s*', re.I)
+_RANGE_SEP = re.compile(r'\s*(?:-|–|—|to)\s*', re.I)
 _MAX_ONLY = re.compile(r'\bup\s*to\b', re.I)
 _MIN_ONLY = re.compile(r'\b(and\s+above|\+|or\s+more|plus)\b', re.I)
 
@@ -119,13 +118,25 @@ def parse(text: str | None) -> dict | None:
     # 这样 "AUD 400 - 700 per day" 能取到两个数，
     # 而 "Band 5 $78,154.75" 里的等级序号 5 会被丢掉。
     tokens = []
-    for m in _TOKEN.finditer(raw):
+    matches = list(_TOKEN.finditer(raw))
+    for index, m in enumerate(matches):
         value = _to_number(m.group("num"), m.group("k"))
+        shared_k = False
+        if not m.group("k") and value < 1000 and index + 1 < len(matches):
+            following = matches[index + 1]
+            # 只把明确升序范围右端的 k 共享给左端；完整金额不再乘千，
+            # 推断金额沿用无单位年薪的下限，避免把职级编号猜成几千年薪。
+            if (following.group("k")
+                    and _RANGE_SEP.fullmatch(raw[m.end():following.start()])
+                    and value <= _to_number(following.group("num"), None)
+                    and value * 1000 >= _BARE_ANNUAL_FLOOR):
+                value *= 1000
+                shared_k = True
         if value <= 0 or value > MAX_RAW_AMOUNT:
             # 超过上限的单个数字几乎一定是源数据错误（数量级标注有误），
             # 直接丢弃而不是顺着错误值猜测
             continue
-        tokens.append((value, bool(m.group("pre") or m.group("k"))))
+        tokens.append((value, bool(m.group("pre") or m.group("k") or shared_k)))
     if not tokens:
         return None
 

@@ -42,6 +42,16 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_patch_boundaries.py",
+     "human-data concurrency, explicit clears, source and report regressions", None),
+    ("tools/test_pipeline_boundaries.py",
+     "real interrupted-write cleanup and competing analysis processes", None),
+    ("tools/test_render_security.py",
+     "untrusted Markdown attribute boundaries and normal rendering", None),
+    ("tools/test_skill_edit_concurrency.py",
+     "overlay restoration and serialized atomic cross-process edits", None),
+    ("tools/test_salary.py",
+     "salary numeric-token and shared-unit ranges", None),
     ("tools/test_run_state.py",
      "unified task facts, generations and recovery", None),
     ("tools/test_config_edit.py",

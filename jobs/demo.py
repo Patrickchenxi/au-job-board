@@ -208,7 +208,11 @@ def _build(root: Path, today: dt.date, fixture: dict, template: dict, lang: str)
 # demo 根里会被读 / 写的固定文件名。SQLite 的附属文件和词表补充层是**派生**路径，
 # 配置里没写，但同样会被面板读写，所以也要检查。
 _REQUIRED_FILES = (MANIFEST, "config.yaml", "rules.yaml", "skills.yaml", "jobs.db")
-_OPTIONAL_FILES = ("skills.local.yaml", "jobs.db-wal", "jobs.db-shm", "jobs.db-journal")
+_RUNTIME_DIR = ".jobs.db.panel-update"
+_OPTIONAL_FILES = ("skills.local.yaml", ".skills.local.yaml.lock",
+                   "jobs.db-wal", "jobs.db-shm", "jobs.db-journal",
+                   *(_RUNTIME_DIR + "/" + name for name in
+                     ("run.lock", "latest.json", "generation.json", "settings-baseline.json")))
 
 
 def check_paths(root: Path) -> list[str]:
@@ -225,6 +229,14 @@ def check_paths(root: Path) -> list[str]:
             return ["the demo root is not a plain directory"]
     except OSError:
         return ["the demo root cannot be checked"]
+    try:
+        runtime = os.lstat(root / _RUNTIME_DIR)
+        if not stat.S_ISDIR(runtime.st_mode) or stat.S_ISLNK(runtime.st_mode):
+            return [f"{_RUNTIME_DIR} is not a plain directory"]
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return [f"{_RUNTIME_DIR} cannot be checked"]
     for names, required in ((_REQUIRED_FILES, True), (_OPTIONAL_FILES, False)):
         for name in names:
             try:
