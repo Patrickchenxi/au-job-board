@@ -75,6 +75,26 @@ class SkillEditsTest(unittest.TestCase):
                          {"Kubernetes": "Kubernetes"})
         self.assertEqual(skills.load_local(self.vocab)["remove"], [])
 
+    def test_reassigned_seed_name_does_not_revive_alias_only_tags(self):
+        self.edit("Kubernetes", "remove")
+        self.edit("Alpha", "add")
+        result = self.edit("Kubernetes", "alias", "Alpha")
+        self.assertIsInstance(result["counts"], dict)
+        self.assertNotIn("synthetic:b", db.skills_map(self.conn))
+        fresh = skills.load_skills(self.vocab)
+        self.assertEqual(skills.canonical_tokens(fresh)["kubernetes"], "Alpha")
+        self.assertNotIn("k8s", skills.canonical_tokens(fresh))
+
+    def test_reassigned_seed_alias_remove_and_reload_keep_one_owner(self):
+        self.edit("K8s", "remove")
+        self.edit("Alpha", "add")
+        self.edit("K8s", "alias", "Alpha")
+        self.assertEqual(db.skills_map(self.conn)["synthetic:b"], ["Alpha"])
+        self.assertEqual(skills.canonical_tokens(skills.load_skills(self.vocab))["k8s"], "Alpha")
+        self.edit("Alpha", "remove")
+        self.assertNotIn("synthetic:b", db.skills_map(self.conn))
+        self.assertNotIn("k8s", skills.canonical_tokens(skills.load_skills(self.vocab)))
+
     def test_atomic_replace_preserves_mode_and_failed_replace_preserves_file(self):
         self.edit("Alpha", "add")
         overlay = skills.local_path_for(self.vocab)

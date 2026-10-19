@@ -302,6 +302,23 @@ def test_remove_edit() -> None:
           skills.extract("K8s", skills.merge(base2, local2)) == ["Kubernetes"]
           and not local2["remove"])
 
+    legacy_base = {"skills": [
+        {"name": "React", "aliases": ["ReactJS"], "not": []},
+        {"name": "JavaScript", "aliases": ["JS"], "not": []},
+        {"name": "Java", "aliases": [], "not": []},
+    ]}
+    legacy = {"remove": ["React", "JS"],
+              "add": [{"name": "React", "aliases": [], "not": []}],
+              "alias": {"Java": ["JS"]}}
+    legacy_merged = skills.merge(legacy_base, legacy)
+    check("旧overlay冲突不在升级时自动激活",
+          "React" not in skills.skill_names(legacy_merged)
+          and "js" not in skills.canonical_tokens(legacy_merged))
+    skills.apply_edit(legacy, legacy_merged, "react", "add", base=legacy_base)
+    check("旧shadow add显式恢复后保留种子别名",
+          skills.extract("ReactJS", skills.merge(legacy_base, legacy)) == ["React"]
+          and not legacy["add"])
+
     reassigned_base = {"skills": [
         {"name": "JavaScript", "aliases": ["JS"], "not": []},
         {"name": "Java", "aliases": [], "not": []},
@@ -313,10 +330,42 @@ def test_remove_edit() -> None:
     reassigned_merged = skills.merge(reassigned_base, reassigned)
     reassigned_tokens = skills.canonical_tokens(reassigned_merged)
     check("重新分配已删除种子别名时保留原主体抑制",
-          reassigned["remove"] == ["JS"]
+          not reassigned["remove"]
           and reassigned_tokens.get("js") == "Java"
           and all("js" not in {str(a).lower() for a in e["aliases"]}
                   for e in reassigned_merged["skills"] if e["name"] == "JavaScript"))
+
+    skills.apply_edit(reassigned, reassigned_merged, "JS", "remove", base=reassigned_base)
+    check("移除重分配别名不复活种子归属",
+          "js" not in skills.canonical_tokens(skills.merge(reassigned_base, reassigned)))
+
+    canonical_reassigned = {"add": [], "alias": {}, "remove": ["JavaScript"]}
+    skills.apply_edit(canonical_reassigned, skills.merge(reassigned_base, canonical_reassigned),
+                      "JavaScript", "alias", "Java", base=reassigned_base)
+    canonical_merged = skills.merge(reassigned_base, canonical_reassigned)
+    check("删除后的种子规范名重分配时只有新归属",
+          skills.canonical_tokens(canonical_merged).get("javascript") == "Java"
+          and "JavaScript" not in skills.skill_names(canonical_merged))
+    skills.apply_edit(canonical_reassigned, canonical_merged, "JavaScript", "remove", base=reassigned_base)
+    check("移除重分配的规范名不复活原技能或其别名",
+          "javascript" not in skills.canonical_tokens(skills.merge(reassigned_base, canonical_reassigned))
+          and "js" not in skills.canonical_tokens(skills.merge(reassigned_base, canonical_reassigned)))
+
+    latent = {"remove": ["JS"], "alias": {"Java": ["JS"], "Kotlin": ["js"]},
+              "add": [{"name": "Kotlin", "aliases": [], "not": []}]}
+    skills.apply_edit(latent, skills.merge(reassigned_base, latent), "JS", "alias", "Java", base=reassigned_base)
+    check("新归属覆盖全部旧的潜伏别名声明",
+          skills.canonical_tokens(skills.merge(reassigned_base, latent))["js"] == "Java"
+          and "Kotlin" not in latent["alias"])
+
+    local_target = {"add": [{"name": "LocalSkill", "aliases": [], "not": []}],
+                    "alias": {}, "remove": ["JS"]}
+    skills.apply_edit(local_target, skills.merge(reassigned_base, local_target),
+                      "JS", "alias", "LocalSkill", base=reassigned_base)
+    skills.apply_edit(local_target, skills.merge(reassigned_base, local_target),
+                      "LocalSkill", "remove", base=reassigned_base)
+    check("移除本地目标技能不复活已重分配的种子别名",
+          "js" not in skills.canonical_tokens(skills.merge(reassigned_base, local_target)))
 
     skills.apply_edit(local, skills.merge(base, local), "Agile", "add", base=base)
     check("恢复种子技能及原有别名",

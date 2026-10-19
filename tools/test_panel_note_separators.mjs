@@ -939,10 +939,39 @@ async function testPendingNoteEdits() {
   eq("latest canonical value retained",panel.api.LABELS["synthetic:pending"].note,"Third edit；");
 }
 
+async function testRevertedPendingNote() {
+  for (const initial of ["Original；", "", "搬迁；"]) {
+    const panel=loadPanel("en", LOCAL_TAGS, EN_LABELS);
+    const input=inputOf("synthetic:revert", "");
+    panel.api.noteAdopt(input,initial);
+    const original=input.value;
+    const requests=[];
+    panel.sandbox.fetch=(url,opts)=>new Promise(resolve=>requests.push({body:JSON.parse(opts.body),resolve}));
+    input.value="Temporary";
+    panel.api.noteBlur(input);
+    input.value=original;
+    panel.api.noteBlur(input);
+    requests[0].resolve({ok:true,json:async()=>({value:"Temporary；"})});
+    await tick();
+    eq("reverting to loaded value queues a write "+JSON.stringify(initial),requests.length,2);
+    if(requests.length===2){
+      eq("revert payload retains original canonical "+JSON.stringify(initial),normalize(requests[1].body.value),initial||null);
+      // Repeated blur of the same pending value must not enqueue duplicates.
+      panel.api.noteBlur(input);
+      requests[1].resolve({ok:true,json:async()=>({value:initial||null})});
+      await tick();
+      eq("revert response adopts original display "+JSON.stringify(initial),input.value,original);
+      eq("revert persisted canonical "+JSON.stringify(initial),panel.api.LABELS["synthetic:revert"].note,initial||null);
+      eq("same pending value does not create duplicate write",requests.length,2);
+    }
+  }
+}
+
 async function main() {
   console.log("== 备注分隔符 / 默认标签本地化 JS 交互（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
   await testPendingNoteEdits();
+  await testRevertedPendingNote();
   await testChinese();
   await testEnglish();
   await testLocalizedDefaults();

@@ -145,6 +145,39 @@ class PatchBoundaries(unittest.TestCase):
         self.assertEqual(labels.get_labels(conn)["synthetic:a"]["note"], "Before；")
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], before)
 
+    def test_recreated_label_does_not_replay_deleted_row_events(self):
+        conn = self.connect()
+        labels.set_label(conn, "b", note="Peer history", action="applied")
+        labels.set_label(conn, "a", note=None, action=None)
+        self.assertIsNone(labels.merge_labels(list(
+            labels.get_labels(conn, with_events=True).values()))["note"])
+        self.assertTrue(labels.clear_label(conn, "a"))
+        before = list(conn.execute("SELECT * FROM label_events"))
+        with self.assertRaises(ValueError):
+            labels.set_label(conn, "a", interest="invalid")
+        self.assertEqual(list(conn.execute("SELECT * FROM label_events")), before)
+        labels.set_label(conn, "a", interest="want")
+        merged = labels.merge_labels(list(labels.get_labels(conn, with_events=True).values()))
+        self.assertEqual((merged["note"], merged["action"], merged["interest"]),
+                         ("Peer history；", "applied", "want"))
+        # A subsequent explicit clear belongs to the new row and must still win.
+        labels.set_label(conn, "a", note=None, action=None)
+        merged = labels.merge_labels(list(labels.get_labels(conn, with_events=True).values()))
+        self.assertEqual((merged["note"], merged["action"]), (None, None))
+
+    def test_recreated_legacy_note_can_still_snapshot_current_row(self):
+        conn = self.connect()
+        labels.set_label(conn, "a", note="Old generation")
+        labels.clear_label(conn, "a")
+        labels.set_label(conn, "a", interest="want")
+        # Simulate a legacy/imported current value with no field event.
+        conn.execute("UPDATE labels SET note='Current legacy note' WHERE uid='a'")
+        conn.commit()
+        labels.set_label(conn, "a", action="saved")
+        row = labels.get_labels(conn, with_events=True)["a"]
+        self.assertEqual(row["_field_events"]["note"]["source"], "legacy_snapshot")
+        self.assertEqual(row["_field_events"]["note"]["new_value"], "Current legacy note；")
+
     def test_legacy_peer_unrelated_edit_does_not_revive_cleared_note(self):
         cases = (("Legacy note；", None), ("Legacy note", None),
                  ("Legacy note", "before_clear"), ("Legacy note", "after_clear"))

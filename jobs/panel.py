@@ -180,8 +180,9 @@ class Handler(BaseHTTPRequestHandler):
                 or not isinstance(value, (str, type(None)))):
             self._json({"error": "invalid_request"}, 400, started)
             return
-        conn = database.connect(_db_path(self.config))
+        conn = None
         try:
+            conn = database.connect(_db_path(self.config))
             labels_mod.set_label(conn, uid, source="panel", **{field: value})
             # 把**落库后**的值回传：note 会被规范化（补尾随「；」），
             # 前端要用它回填输入框，否则界面上和刷新后的不一致
@@ -189,8 +190,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "field": field, "value": stored.get(field)}, 200, started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain", started)
+        except sqlite3.Error:
+            self._json({"error": "write_failed"}, 503, started)
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     def _local_json(self, started: float, max_bytes=4096):
         """Validate local-origin JSON writes before reaching any mutable state."""

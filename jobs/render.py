@@ -113,7 +113,10 @@ _MD_BOLD = re.compile(r"\*\*(.+?)\*\*", re.S)
 _MD_ITALIC = re.compile(r"(?<![*\w])\*([^*\n]+)\*(?!\*)")
 _MD_CODE = re.compile(r"`([^`\n]+)`")
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
-_MD_BARE_URL = re.compile(r"(?<![\"'=>(])(https?://[^\s<>\"')\]]+)")
+# Quotes have already been escaped; treat their entities as URL boundaries too.
+_MD_BARE_URL = re.compile(
+    r"(?<![\"'=>(])(?<!&quot;)(?<!&#x27;)"
+    r"(https?://(?:(?!&quot;|&#x27;)[^\s<>\"')\]])+)")
 _MD_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*$")
 _MD_BULLET = re.compile(r"^\s{0,4}[-*•·]\s+(.+)$")
 _MD_NUMBERED = re.compile(r"^\s{0,4}\d{1,3}[.)]\s+(.+)$")

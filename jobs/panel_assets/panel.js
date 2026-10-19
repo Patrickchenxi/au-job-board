@@ -165,14 +165,19 @@ async function setLabel(uid,field,value,btn){
 }
 function setNote(input){
   const uid=input.dataset.uid;
-  const request={payload:noteCanonicalize(input),display:input.value,
+  // Returning to the loaded display while a write is pending also restores
+  // its canonical identity (a translated default is not custom English text).
+  const reverted=input._notePending && input.value===input.dataset.noteLoaded;
+  const request={payload:reverted ? input.dataset.noteStored : noteCanonicalize(input),display:input.value,
     version:(input._noteSaveVersion||0)+1};
   input._noteSaveVersion=request.version;
+  input._notePending=request;
   const previous=NOTE_WRITES.get(uid);
   const task=previous ? previous.then(()=>saveNote(input,request)) : saveNote(input,request);
   NOTE_WRITES.set(uid,task);
   NOTE_REQUESTS.add(task);
   task.finally(()=>{
+    if(input._notePending===request)delete input._notePending;
     NOTE_REQUESTS.delete(task);
     if(NOTE_WRITES.get(uid)===task)NOTE_WRITES.delete(uid);
   });
@@ -301,7 +306,8 @@ function noteBlur(input){
   input.dataset.typing='';
   noteClose();
   // 显示转换（译名/全角 <-> 半角）不是用户编辑：值没变就不写库、不产生事件。
-  if(input.dataset.noteLoaded!==undefined && input.value===input.dataset.noteLoaded) return;
+  const baseline=input._notePending ? input._notePending.display : input.dataset.noteLoaded;
+  if(baseline!==undefined && input.value===baseline) return;
   setNote(input);
 }
 function noteSegments(v){ return String(v||'').split(/[\uff1b;]/); }

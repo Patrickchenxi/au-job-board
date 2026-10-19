@@ -230,10 +230,20 @@ def _set_label(conn, uid, rules_version, source, touch, fields):
             raise ValueError(f"不可标注的字段: {key}（可选 {WRITABLE}）")
 
     now = database.utcnow()
+    if existing is None and conn.execute(
+            "SELECT 1 FROM label_events WHERE uid = ? LIMIT 1", (uid,)).fetchone():
+        # A deleted row's field ownership must not attach to a new row just
+        # because a value (especially NULL) happens to match. Retain its audit
+        # trail, but mark a new generation in the same transaction as recreation.
+        conn.execute("""INSERT INTO label_events (uid, field, source, at)
+                        VALUES (?, '__row__', 'row_reset', ?)""", (uid, now))
     if existing and touch:
         known = {r[0] for r in conn.execute(
             "SELECT DISTINCT field FROM label_events WHERE uid = ? "
-            "AND (source IS NULL OR source != 'tidy')", (uid,))}
+            "AND (source IS NULL OR source != 'tidy') "
+            "AND event_id > COALESCE((SELECT MAX(event_id) FROM label_events "
+            "WHERE uid = ? AND field = '__row__' AND source = 'row_reset'), 0)",
+            (uid, uid))}
         for key in WRITABLE:
             if current.get(key) and key not in known and key not in fields:
                 # Preserve the known pre-edit legacy state before touching the
@@ -294,7 +304,11 @@ def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
                 SELECT e.uid, e.field, e.new_value, e.at, e.event_id, e.source
                 FROM label_events e JOIN (
                     SELECT uid, field, MAX(event_id) AS last_id
-                    FROM label_events WHERE source IS NULL OR source != 'tidy'
+                    FROM label_events e
+                    WHERE (source IS NULL OR source != 'tidy')
+                    AND event_id > COALESCE((SELECT MAX(b.event_id)
+                        FROM label_events b WHERE b.uid = e.uid
+                        AND b.field = '__row__' AND b.source = 'row_reset'), 0)
                     GROUP BY uid, field
                 ) latest ON latest.last_id = e.event_id"""):
             row = rows.get(event["uid"])

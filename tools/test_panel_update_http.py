@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import sqlite3
 from pathlib import Path
 import sys
 import tempfile
@@ -115,6 +116,58 @@ class UpdateHTTPTests(unittest.TestCase):
             "token": "ConfiguredHostSkill", "action": "add"},
             {"Host": host, "Origin": "http://" + host})
         self.assertEqual((code, result["skill"]), (200, "ConfiguredHostSkill"))
+
+    def test_label_sqlite_failure_rolls_back_and_retry_succeeds(self):
+        payload = {"uid": "synthetic:one", "field": "note", "value": "original"}
+        self.assertEqual(self.edit("/api/label", payload)[0], 200)
+        conn = panel.database.connect(self.config["db_path"])
+        try:
+            before = [tuple(row) for row in conn.execute("SELECT * FROM label_events")]
+            conn.execute("""CREATE TRIGGER fail_label BEFORE INSERT ON labels
+                            BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END""")
+            conn.commit()
+            payload["value"] = "replacement"
+            self.assertEqual(self.edit("/api/label", payload),
+                             (503, {"error": "write_failed"}))
+            self.assertEqual(conn.execute("SELECT note FROM labels").fetchone()[0],
+                             "original；")
+            self.assertEqual([tuple(row) for row in conn.execute("SELECT * FROM label_events")],
+                             before)
+            conn.execute("DROP TRIGGER fail_label")
+            conn.commit()
+            self.assertEqual(self.edit("/api/label", payload),
+                             (200, {"ok": True, "field": "note", "value": "replacement；"}))
+        finally:
+            conn.close()
+
+    def test_label_locked_database_returns_json_and_retry_succeeds(self):
+        conn = panel.database.connect(self.config["db_path"])
+        payload = {"uid": "synthetic:one", "field": "note", "value": "after lock"}
+
+        def short_timeout_connect(path):
+            connection = sqlite3.connect(path, timeout=0.02)
+            connection.row_factory = sqlite3.Row
+            return connection
+
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            with patch.object(panel.database, "connect", side_effect=short_timeout_connect):
+                self.assertEqual(self.edit("/api/label", payload),
+                                 (503, {"error": "write_failed"}))
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], 0)
+            conn.rollback()
+            self.assertEqual(self.edit("/api/label", payload),
+                             (200, {"ok": True, "field": "note", "value": "after lock；"}))
+        finally:
+            conn.close()
+
+    def test_label_sqlite_open_failure_returns_json(self):
+        with patch.object(panel.database, "connect",
+                          side_effect=sqlite3.OperationalError("synthetic open failure")):
+            self.assertEqual(self.edit("/api/label", {
+                "uid": "synthetic:one", "field": "note", "value": "draft"}),
+                (503, {"error": "write_failed"}))
 
     def test_edit_body_limit_and_malformed_json(self):
         # 64 KiB permits normal notes but bounds the complete JSON request.

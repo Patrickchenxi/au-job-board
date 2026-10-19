@@ -50,6 +50,9 @@ de-duplication groups, skills). It never touches your labels.
 It shares the database update lock with `run` and panel updates. If another
 update owns that lock, standalone `analyze` exits with code 4; retry after that
 update finishes.
+Conversely, a scheduled `run` that overlaps a standalone `analyze` exits busy
+without an automatic retry. Avoid manual analysis around the scheduled time,
+or rerun the update after analysis finishes.
 
 ### The panel
 

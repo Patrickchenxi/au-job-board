@@ -23,6 +23,24 @@ class ParsedHTML(HTMLParser):
 
 
 class RenderSecurityTests(unittest.TestCase):
+    def test_quoted_bare_urls_stay_plain_text(self):
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                text = f'Apply at {quote}https://example.invalid/apply{quote} today.'
+                parsed = ParsedHTML(render_jd_html(text))
+                self.assertEqual([attrs for tag, attrs in parsed.tags if tag == "a"], [])
+                self.assertEqual("".join(parsed.text), text)
+
+    def test_bare_url_stops_before_escaped_closing_quote(self):
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                url = "https://example.invalid/apply?a=1&b=2"
+                text = f'Apply at {url}{quote} today.'
+                parsed = ParsedHTML(render_jd_html(text))
+                self.assertEqual([attrs["href"] for tag, attrs in parsed.tags if tag == "a"],
+                                 [url])
+                self.assertEqual("".join(parsed.text), text)
+
     def test_markdown_url_quotes_cannot_create_attributes(self):
         for event in ("onmouseover", "onpointerenter"):
             with self.subTest(event=event):

@@ -139,13 +139,24 @@ def score_experience(title: str, body: str, rules: dict) -> tuple[int, list[str]
         return int(m.group(1))
 
     years = 0
+    title_has_years = False
     for m in _EXP_NUM.finditer(title or ""):
+        title_has_years = True
         years = max(years, lower_bound(m))
 
     for m in _EXP_NUM.finditer(body or ""):
         start, end = m.start(), m.end()
         before = body[max(0, start - lookback):start]
         after = body[end:end + lookahead]
+        # 标题已有年限时，仅要求用词可能指合同期限；正文须有经验信号。
+        if title_has_years:
+            # "of software engineering experience" 可能超过短前向窗口。
+            # 经验信号只能来自当前句/行，不能借用相邻句的经验要求。
+            experience_before = re.split(r"[.?!;\r\n]", before)[-1]
+            experience_after = re.split(
+                r"[.?!;\r\n]", body[end:end + max(lookback, lookahead)])[0]
+            if not _EXP_WORD.search(f"{experience_before} {experience_after}"):
+                continue
         is_requirement = (_EXP_WORD.search(after) or _EXP_REQ_AFTER.match(after)
                           or _EXP_WORD.search(before)
                           or (cue and cue.search(before)))

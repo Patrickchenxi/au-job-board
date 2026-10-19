@@ -83,23 +83,12 @@ def merge(base: dict, local: dict) -> dict:
     - `add`：追加新技能条目（同名条目存在则跳过，避免重复）
     - `alias`：给已有技能追加别名；找不到目标就跳过（写入口已经校验过，
       手改出错时宁可静默跳过，也不要让整个词表加载失败）
-    - `remove`：先从种子层摘除 token/整条技能，再应用本地 add / alias；
-      因而显式重分配的别名可以覆盖种子层的抑制。
+    - `remove`：最后应用抑制，保留旧 overlay 的行为；只有明确编辑才解除。
+    - 显式本地别名优先于种子别名，重分配时保持唯一归属。
     - `display_names`：展示覆盖层；只接受仍属于该条目的 token，不改规范名
     """
     entries = [dict(e, aliases=list(e.get("aliases") or []))
                for e in (base.get("skills") or []) if e.get("name")]
-
-    removed = {str(r).strip().lower() for r in (local.get("remove") or []) if str(r).strip()}
-    if removed:
-        kept = []
-        for entry in entries:
-            if str(entry.get("name")).lower() in removed:
-                continue
-            entry["aliases"] = [a for a in (entry.get("aliases") or [])
-                                if str(a).strip().lower() not in removed]
-            kept.append(entry)
-        entries = kept
 
     by_name = {e["name"]: e for e in entries}
 
@@ -123,9 +112,30 @@ def merge(base: dict, local: dict) -> dict:
         have = {str(name).lower()} | {str(a).lower() for a in (entry.get("aliases") or [])}
         for alias in aliases:
             alias = str(alias).strip()
-            if alias and alias.lower() not in have:
-                entry.setdefault("aliases", []).append(alias)
-                have.add(alias.lower())
+            if alias:
+                # A local assignment replaces the old token owner. A removed
+                # seed name may itself be reassigned; retire that seed entry
+                # rather than leaving two canonical lookup results.
+                entries[:] = [other for other in entries
+                              if other is entry or str(other["name"]).lower() != alias.lower()]
+                for other in entries:
+                    if other is not entry:
+                        other["aliases"] = [a for a in other.get("aliases") or []
+                                            if str(a).lower() != alias.lower()]
+                if alias.lower() not in have:
+                    entry.setdefault("aliases", []).append(alias)
+                    have.add(alias.lower())
+
+    removed = {str(r).strip().lower() for r in (local.get("remove") or []) if str(r).strip()}
+    if removed:
+        kept = []
+        for entry in entries:
+            if str(entry.get("name")).lower() in removed:
+                continue
+            entry["aliases"] = [a for a in (entry.get("aliases") or [])
+                                if str(a).strip().lower() not in removed]
+            kept.append(entry)
+        entries = kept
 
     overrides = local.get("display_names")
     if isinstance(overrides, dict):
@@ -447,14 +457,15 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
             raise ValueError(f"「{token}」已经是「{target}」的词")
         if owner:
             raise ValueError(f"「{token}」已属于「{owner}」，先从那里移除")
-        seed_target = next((e for e in (base or {}).get("skills") or []
-                            if e.get("name") == target), None)
-        restores_seed_alias = seed_target is not None and any(
-            str(alias).strip().lower() == token.lower()
-            for alias in seed_target.get("aliases") or [])
-        if restores_seed_alias:
-            local["remove"] = [t for t in local.get("remove") or []
-                               if str(t).strip().lower() != token.lower()]
+        local["remove"] = [t for t in local.get("remove") or []
+                           if str(t).strip().lower() != token.lower()]
+        # Historical overlays may contain several suppressed claims. A fresh
+        # edit chooses one target and must supersede those latent assignments.
+        for previous, values in list((local.get("alias") or {}).items()):
+            if previous != target:
+                values[:] = [a for a in values if str(a).strip().lower() != token.lower()]
+                if not values:
+                    del local["alias"][previous]
         aliases = local.setdefault("alias", {}).setdefault(target, [])
         if token not in aliases:
             aliases.append(token)
@@ -467,6 +478,17 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
         if (token.lower() == owner.lower()
                 or _clean(display_overrides.get(owner)).lower() == token.lower()):
             display_overrides.pop(owner, None)
+        if token.lower() == owner.lower():
+            entry = next(e for e in merged["skills"] if e["name"] == owner)
+            owned = {str(a).strip().lower() for a in entry.get("aliases") or []}
+            suppressed = local.setdefault("remove", [])
+            for seed in (base or {}).get("skills") or []:
+                if seed.get("name") == owner:
+                    continue
+                for original in [seed.get("name"), *(seed.get("aliases") or [])]:
+                    if original and str(original).strip().lower() in owned:
+                        if str(original).lower() not in {str(t).lower() for t in suppressed}:
+                            suppressed.append(original)
         # 优先从补充层直接删，让它只记「相对种子的差异」；只有种子里的词
         # 才写进 remove 抑制列表。这样补充层始终可读、可整体丢弃。
         for entry in list(local.get("add") or []):
@@ -479,6 +501,11 @@ def apply_edit(local: dict, merged: dict, token: str, action: str,
                 aliases.remove(hit[0])
                 if not aliases:
                     del local["alias"][target]
+                # Removing a reassigned seed alias must not revive its old owner.
+                if any(str(a).strip().lower() == token.lower()
+                       for e in (base or {}).get("skills") or []
+                       for a in [e.get("name"), *(e.get("aliases") or [])] if a):
+                    local.setdefault("remove", []).append(token)
                 return {"kind": "remove", "skill": owner, "token": token}
         removed = local.setdefault("remove", [])
         if token not in removed:
@@ -513,6 +540,9 @@ def edit_and_sync(conn, path, token, action, target=None) -> dict:
         restoring_seed = action == "add" and _clean(token).lower() in removed and any(
             str(e.get("name") or "").lower() == _clean(token).lower()
             for e in base.get("skills") or [])
+        reassigning_seed = action == "alias" and any(
+            str(e.get("name") or "").lower() == _clean(token).lower()
+            for e in base.get("skills") or [])
         info = apply_edit(local, merged, token, action, target, base=base)
         previous = overlay.read_bytes() if overlay.exists() else None
         previous_mode = stat.S_IMODE(overlay.stat().st_mode) if overlay.exists() else 0o600
@@ -526,7 +556,7 @@ def edit_and_sync(conn, path, token, action, target=None) -> dict:
             counts = None
             if info["kind"] == "display_name":
                 docs = 0
-            elif info["kind"] == "remove" or restoring_seed:
+            elif info["kind"] == "remove" or restoring_seed or reassigning_seed:
                 docs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
                 counts = sync(conn, fresh)
             else:

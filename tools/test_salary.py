@@ -45,9 +45,19 @@ class SalaryTests(unittest.TestCase):
                 self.amounts(text, low, high)
 
     def test_shared_k_range_skips_grade_labels(self):
-        for text in ("Band 5 - $120k per year", "Level 5 - 120k package"):
+        for text, amount in (("Band 5 - $120k per year", 120000),
+                             ("Level 5 - 120k package", 120000),
+                             ("APS 6 - $95k", 95000),
+                             ("APS6 - $95k + super", 95000),
+                             ("HEW 7 - 100k", 100000),
+                             ("HEW7 - 100k", 100000),
+                             ("EL1 - 120k", 120000),
+                             ("VPS 5 - $110k", 110000),
+                             ("VPS5 - $110k", 110000),
+                             ("PSO 4 - 95k", 95000),
+                             ("PSO4 - 95k", 95000)):
             with self.subTest(text=text):
-                self.amounts(text, 120000, 120000)
+                self.amounts(text, amount, amount)
 
     def test_explicit_ranges_and_modes(self):
         self.amounts("$80k - $100k per annum", 80000, 100000)
@@ -57,6 +67,7 @@ class SalaryTests(unittest.TestCase):
         self.amounts("Up to $100k per annum", None, 100000)
         self.amounts("$80k and above per annum", 80000, None)
         self.amounts("$80k or more per annum", 80000, None)
+        self.amounts("$5k - $10k per annum", 5000, 10000)
         self.amounts("AUD 400 - 700 per day", 400, 700, "day")
         self.amounts("$5000 per month", 5000, 5000, "month")
 
