@@ -14,9 +14,11 @@ the implementation actually does:
   page, read all listings, descriptions and your notes, and use the write
   endpoints: change labels and notes, add, alias or remove skills in your
   vocabulary overlay, and trigger a full network update.
-- **No transport encryption.** It serves HTTP, not HTTPS. The manual-update
-  endpoint requires JSON and checks the request host and browser origin; older
-  label/skill endpoints do not check origin. These checks are not authentication.
+- **No transport encryption.** It serves HTTP, not HTTPS. The update, configuration, label and skill write
+  endpoints require JSON and check the request host and browser origin. Label and
+  skill bodies are limited to 64 KiB, including JSON encoding. Scripts must use
+  `Content-Type: application/json` and an accepted Host; an Origin header, when
+  present, must match the local HTTP origin. These checks are not authentication.
 - **Wildcard binding is refused, nothing else is.** `panel.serve` refuses to start
   on `0.0.0.0`, `::` or an empty host. It still accepts any specific address, so a
   LAN or other interface address works, and then it is exposed to everyone on

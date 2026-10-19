@@ -42,12 +42,14 @@ Keep a compact local ledger: source/ID or URL, reviewed SHA when supplied, affec
 
 Read the affected call chain and reproduce plausible defects. Batch common-root fixes and leave material uncertain product choices to the user with evidence. Use [jobs-verify](../jobs-verify/SKILL.md) for affected checks and UI journeys; root AGENTS defines independent-review requirements. Independently inspect the integrated diff after delegated fixes.
 
+Keep the agreed scope and completion criteria. Repair this change's regressions and small affected edge cases; record justified deferrals or rejection of unrelated low-impact improvements. Escalate material data, safety or core-workflow risks to the lead. Finishing the round requires an evidenced disposition for every item, not implementing every suggestion.
+
 Proceed when every collected candidate has a disposition and confirmed fixes have actual verification results or explicit gaps.
 
 ## 4. Update and hand off
 
 For an authorized PR update, describe the final problem/behavior and actual validation on the candidate. Verify base/head/diff and checks on the latest revision. Follow the contributor guide's delivery route; retain draft status while unfinished when requested, and set ready only after agreed local acceptance/review.
 
-Stop when this snapshot's findings have dispositions, verification/coverage gaps are reported, authorized updates are complete and the user has the remaining CI/acceptance status. Wait for user acceptance at that boundary.
+Stop when this snapshot's findings have dispositions, verification/coverage gaps are reported, authorized updates are complete and the user has the remaining CI/acceptance status. Required verification or feedback coverage gaps keep the result a validation-pending candidate, not implemented, complete or merge-ready. Wait for user acceptance at that boundary.
 
-Only for explicitly requested continuous care, use an available watcher such as babysit-pr after reading its instructions and applying the user's duration, budget and action limits. An available one-shot `--once` helper can collect a snapshot without starting background monitoring.
+Only for an explicitly authorized delegated repair pilot, read the repository's [bounded feedback repair procedure](../../../docs/pr-feedback-pilot.md) and establish its task contract before handing off. It defines independent review and per-issue limits, selective escalation and lead acceptance; it requires no machine-local skill or watcher. Other continuous care needs its own explicit duration, budget and action limits. Ordinary checks remain one complete snapshot.

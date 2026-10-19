@@ -105,11 +105,13 @@ read identifies a stale running record as interrupted.
 Private snapshots, the shared lock, latest task and result generation live beside
 the DB in `.<database-filename>.panel-update/`. Preserve this whole directory with
 the DB/WAL files; Docker mounts their parent data directory. Separate databases
-have separate locks. Individual details/analyze commands do not acquire the
-full-run lock; avoid running those manually alongside an update. A crash may
+have separate locks. Standalone `analyze` shares the full-run lock and exits busy
+when an update owns it; a scheduled run likewise exits busy without retry when
+analysis owns it. Individual `details` does not acquire that lock; avoid running
+it manually alongside an update. A crash may
 leave a private snapshot; keep this directory out of Git and public archives.
 
 The panel has no authentication. Keep source deployment on loopback, and use the
-Docker guide's localhost host binding. The update and configuration write APIs
+Docker guide's localhost host binding. The label, skills, update and configuration write APIs
 check JSON, Host and Origin; this is a local browser boundary, not authentication.
 See [safety-and-sources.md](safety-and-sources.md).

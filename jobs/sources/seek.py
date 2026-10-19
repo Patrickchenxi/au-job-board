@@ -187,5 +187,7 @@ def fetch_detail(source_id: str) -> str | None:
     if not job:
         return None
     content = html_to_text(job.get("content", ""))
+    if not content:
+        return None  # An abstract is not a successfully fetched full body.
     abstract = job.get("abstract") or ""
     return f"{content}\n\n{abstract}".strip() or None

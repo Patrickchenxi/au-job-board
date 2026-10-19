@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS label_events (
     field        TEXT,
     old_value    TEXT,
     new_value    TEXT,
-    source       TEXT,      -- cli | panel
+    source       TEXT,      -- cli | panel | tidy | legacy_snapshot | row_reset
     rules_version INTEGER,
     at           TEXT NOT NULL
 );

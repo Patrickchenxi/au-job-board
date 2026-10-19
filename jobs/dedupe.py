@@ -65,7 +65,10 @@ def assign_groups(jobs: list, include_city: bool = False,
     # 块 = 公司（可选含城市）。只在块内比标题相似度，避免 O(n^2) 全量比较
     fuzzy_blocks: dict[tuple, list] = {}
     for job in jobs:
-        key = (normalize_company(job["company"]),)
+        company = normalize_company(job["company"])
+        if not company:
+            continue  # Missing identity cannot establish the same employer.
+        key = (company,)
         if include_city:
             key = key + (city_of(job["location"]),)
         fuzzy_blocks.setdefault(key, []).append(job)

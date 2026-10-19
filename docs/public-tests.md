@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 20 checks: 19 Python tests
+be collected by accident. The entry currently has 25 checks: 24 Python tests
 plus one Node behavior test.
 
 Run it from the project root with the project interpreter:
@@ -42,6 +42,11 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_patch_boundaries.py` | Concurrent partial labels, explicit group clears and legacy events, config candidate limit, unknown-employer grouping, detail retries and score/CSV values | all |
+| `tools/test_pipeline_boundaries.py` | Real interrupted writes, timeout finalization and competing standalone analysis | all |
+| `tools/test_render_security.py` | Markdown URL attribute injection and ordinary rendering controls | all |
+| `tools/test_skill_edit_concurrency.py` | Seed restoration, atomic file publication and competing overlay editors across processes | all |
+| `tools/test_salary.py` | Decimal percentages/money, shared range units and numeric controls | all |
 | `tools/test_config_edit.py` | YAML roundtrip/CLI semantics, allowlist, conflicts, shared lock, applied and legacy-file snapshots | all |
 | `tools/test_run_state.py` | Unified run/fetch facts, generations and orphan-worker recovery | all |
 | `tools/test_public_configuration.py` | Public example configuration, source selection, loopback binding, read-only profile command | all |

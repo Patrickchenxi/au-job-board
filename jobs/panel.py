@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import sqlite3
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +44,7 @@ from .panel_views import (  # noqa: F401
 )
 
 FORBIDDEN_HOSTS = {"0.0.0.0", "::", ""}
+EDIT_MAX_BYTES = 64 * 1024  # Complete JSON body; allow notes larger than update requests.
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,25 +161,28 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/update":
             self._post_update(started)
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except ValueError:
-            self._json({"error": "bad json"}, 400, started)
-            return
-        if self.path == "/api/skills":
-            self._post_skills(payload, started)
-            return
-        if self.path != "/api/label":
+        if self.path not in ("/api/label", "/api/skills"):
             self._send(b"not found", 404, "text/plain", started)
             return
-        conn = database.connect(_db_path(self.config))
-        try:
-            uid, field, value = payload.get("uid"), payload.get("field"), payload.get("value")
-            if not uid or field not in labels_mod.WRITABLE:
-                self._send("bad request".encode(), 400, "text/plain", started)
+        payload = self._local_json(started, EDIT_MAX_BYTES)
+        if payload is None:
+            return
+        if self.path == "/api/skills":
+            if (not isinstance(payload.get("token"), str)
+                    or not isinstance(payload.get("action"), str)
+                    or not isinstance(payload.get("target"), (str, type(None)))):
+                self._json({"error": "invalid_request"}, 400, started)
                 return
+            self._post_skills(payload, started)
+            return
+        uid, field, value = payload.get("uid"), payload.get("field"), payload.get("value")
+        if (not isinstance(uid, str) or not uid or field not in labels_mod.WRITABLE
+                or not isinstance(value, (str, type(None)))):
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        conn = None
+        try:
+            conn = database.connect(_db_path(self.config))
             labels_mod.set_label(conn, uid, source="panel", **{field: value})
             # 把**落库后**的值回传：note 会被规范化（补尾随「；」），
             # 前端要用它回填输入框，否则界面上和刷新后的不一致
@@ -185,15 +190,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "field": field, "value": stored.get(field)}, 200, started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain", started)
+        except sqlite3.Error:
+            self._json({"error": "write_failed"}, 503, started)
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     def _local_json(self, started: float, max_bytes=4096):
-        """Reuse the local-origin boundary for configuration and update writes."""
+        """Validate local-origin JSON writes before reaching any mutable state."""
         try:
             request_host = urlparse("//" + self.headers.get("Host", ""))
             bound_host, bound_port = self.server.server_address[:2]
             allowed_hosts = {str(bound_host).lower()}
+            configured_host = str((self.config.get("panel") or {}).get("host") or "").strip().lower()
+            if configured_host:
+                allowed_hosts.add(configured_host)
             if bound_host in ("127.0.0.1", "::1"):
                 allowed_hosts.add("localhost")
             if os.environ.get("JOBS_CONTAINER") == "1":
@@ -273,29 +284,17 @@ class Handler(BaseHTTPRequestHandler):
         conn = database.connect(_db_path(self.config))
         try:
             skills_path = self.config.get("skills_path")
-            local = skills_mod.load_local(skills_path)
-            merged = skills_mod.load_skills(skills_path)
             try:
-                info = skills_mod.apply_edit(local, merged, payload.get("token"),
-                                             payload.get("action"), payload.get("target"))
+                info = skills_mod.edit_and_sync(conn, skills_path, payload.get("token"),
+                                                payload.get("action"), payload.get("target"))
             except ValueError as exc:
                 self._json({"error": str(exc)}, 400, started)
                 return
-            skills_mod.save_local(local, skills_path)
-            if info.get("kind") == "display_name":
-                # Presentation only: canonical DB/filter identity is unchanged.
-                self._json({"ok": True, "docs": 0, **info}, 200, started)
+            except (OSError, sqlite3.Error):
+                self._json({"error": "write_failed"}, 503, started)
                 return
-            fresh = skills_mod.load_skills(skills_path)
-            if info.get("kind") == "remove":
-                # 删除会波及所有靠旧 token 命中过的岗位（别名尤其如此），
-                # 只重抽含该 token 的文档不够，必须全量。
-                skills_mod.sync(conn, fresh)
-                self._json({"ok": True, **info}, 200, started)
-                return
-            # add / alias 是纯增量：只重抽含新 token 的文档
-            updated = skills_mod.sync_incremental(conn, fresh, [info.get("token")])
-            self._json({"ok": True, "docs": updated, **info}, 200, started)
+            result = {key: value for key, value in info.items() if key != "counts"}
+            self._json({"ok": True, **result}, 200, started)
         finally:
             conn.close()
 

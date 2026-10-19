@@ -296,7 +296,8 @@ def test_generate(base: Path, guard_factory) -> Path:
                            summary["labelled"]) == (19, 16, 2, 6), str(summary))
     check("demo 根内文件完整",
           sorted(p.name for p in root.iterdir() if not p.name.startswith("jobs.db-")) ==   # SQLite WAL 旁路文件也在根内
-          sorted(["config.yaml", "demo-manifest.json", "jobs.db", "reports", "rules.yaml", "skills.yaml"]))
+          sorted(["config.yaml", "demo-manifest.json", "jobs.db", "reports", "rules.yaml", "skills.yaml",
+                  ".jobs.db.panel-update"]))
 
     rows = db_rows(root, "SELECT uid, source, url, dedupe_group FROM jobs")
     check("uid 稳定且与 fixture 一致", sorted(r["uid"] for r in rows) == sorted(EXPECTED_UIDS))
@@ -732,6 +733,11 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
         os.link(target, path)
 
     start_cases = [
+        ("词表锁是符号链接", lambda r, e: swap(r / ".skills.local.yaml.lock", e / "local.yaml")),
+        ("词表锁是硬链接", lambda r, e: hard(r / ".skills.local.yaml.lock", e / "local.yaml")),
+        ("运行目录是符号链接", lambda r, e: (shutil.rmtree(r / ".jobs.db.panel-update"),
+                                                   swap(r / ".jobs.db.panel-update", e))),
+        ("运行锁是符号链接", lambda r, e: swap(r / ".jobs.db.panel-update/run.lock", e / "local.yaml")),
         ("skills.local.yaml 链到外部已有文件", lambda r, e: swap(r / "skills.local.yaml", e / "local.yaml")),
         ("skills.local.yaml 是悬空链接", lambda r, e: swap(r / "skills.local.yaml", e / "missing.yaml")),
         ("skills.local.yaml 与外部文件是硬链接", lambda r, e: hard(r / "skills.local.yaml", e / "local.yaml")),
@@ -786,6 +792,7 @@ def test_link_boundaries(base: Path, guard_factory) -> None:
         return httpd, thread, ctx, request_finished
 
     runtime_cases = [
+        ("词表锁替换为符号链接", lambda r, e: swap(r / ".skills.local.yaml.lock", e / "local.yaml")),
         ("skills.local.yaml 换成指向外部文件的符号链接",
          lambda r, e: swap(r / "skills.local.yaml", e / "local.yaml")),
         ("skills.local.yaml 换成悬空符号链接",

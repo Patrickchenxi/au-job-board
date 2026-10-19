@@ -113,7 +113,10 @@ _MD_BOLD = re.compile(r"\*\*(.+?)\*\*", re.S)
 _MD_ITALIC = re.compile(r"(?<![*\w])\*([^*\n]+)\*(?!\*)")
 _MD_CODE = re.compile(r"`([^`\n]+)`")
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
-_MD_BARE_URL = re.compile(r"(?<![\"'=>(])(https?://[^\s<>\"')\]]+)")
+# Quotes have already been escaped; treat their entities as URL boundaries too.
+_MD_BARE_URL = re.compile(
+    r"(?<![\"'=>(])(?<!&quot;)(?<!&#x27;)"
+    r"(https?://(?:(?!&quot;|&#x27;)[^\s<>\"')\]])+)")
 _MD_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*$")
 _MD_BULLET = re.compile(r"^\s{0,4}[-*•·]\s+(.+)$")
 _MD_NUMBERED = re.compile(r"^\s{0,4}\d{1,3}[.)]\s+(.+)$")
@@ -141,7 +144,8 @@ def render_jd_html(text: str | None, empty: str = "（这份 JD 没有抓到正�
     # 招聘网站转出来的正文常有成片的 "  \n  \n\n"，先压成单个空行
     body = _TRAILING_WS.sub("", body)
     body = _BLANK_RUN.sub("\n\n", body)
-    body = html.escape(body, quote=False)
+    # Markdown URLs later enter quoted href attributes, so escape quotes too.
+    body = html.escape(body, quote=True)
 
     out: list[str] = []
     para: list[str] = []
