@@ -25,8 +25,10 @@ about people do not.
   compliant or supported unless it has been checked.
 - **Profiles are rule switches.** Do not present a preset as an eligibility
   judgement. See [legacy-rule-profiles.md](legacy-rule-profiles.md).
-- **Never lose labels.** Labels and their history are the one dataset that cannot
-  be regenerated. `analyze` must not touch them.
+- **Preserve human work.** Labels, notes, their history and vocabulary-overlay
+  edits are not reproducible from listings. Their write paths are high risk,
+  including indirect cross-module changes; see [AGENTS](../AGENTS.md).
+  `analyze` must preserve labels and their history.
 - **Keep fetching separate from analysis.** Only `fetch`, `details` and `run` may
   use the network.
 - **Keep dependencies minimal.** The runtime uses `python-jobspy`,
@@ -77,8 +79,9 @@ entry; see [public-tests.md](public-tests.md). The source install and what it
 checks are in [install.md](install.md) and
 [installation-verification.md](installation-verification.md).
 
-Do not use `fetch`, `details`, `run` or `analyze` against your own database as a
-test.
+Use synthetic data for public checks. Authorized private local-copy comparisons
+follow [test-data-policy.md](test-data-policy.md); production data remains
+untouched and all private-derived results stay local.
 
 ## Pull requests
 
@@ -111,7 +114,9 @@ repository-local skills provide task-specific procedures:
 - [jobs-pr-finish](../.agents/skills/jobs-pr-finish/SKILL.md): complete feedback
   collection, evidence-based fixes and a bounded handoff.
 
-The verification skill owns the detailed UX workflow: establish a representative
+Root AGENTS fixes the authorization boundary for heuristic behavior changes;
+the verification skill covers old-state inventories, counterexamples and
+risk-based change batches as well as the detailed UX workflow: establish a representative
 interaction before full integration, then verify behavior and usability
 separately. Basic usability is part of implementation quality.
 
@@ -121,8 +126,9 @@ First-pass review readiness and fewer unnecessary handoffs are goals, not extra
 approval gates or a guarantee of a clean first review.
 
 For an explicitly authorized delegated feedback repair trial, use the
-[bounded PR repair procedure](pr-feedback-pilot.md). It records roles, limits
-and escalation; it does not configure a model or review integration.
+[bounded PR repair procedure](pr-feedback-pilot.md). It records roles, the single initial-auto-review repair pass,
+escalation and the no-manual-review default; it does not configure a model or
+review integration.
 
 Use these files on demand, without requiring extra plugins or a global skill
 installation. Local verification and PR CI are evidence about their actual

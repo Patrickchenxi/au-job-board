@@ -10,7 +10,9 @@ description: Verify AU Job Board product changes, UI/UX journeys or documentatio
 Read root AGENTS and affected code/docs. Record repository, base/head, tested local diff, agreed task/completion criteria and environment; include the served source/image revision for browser evidence. Trace changed inputs through their consumers before selecting checks.
 
 - **Documentation only:** check facts, local links, instruction consistency and any changed skill frontmatter. Once these pass or gaps are recorded, go directly to **4. Deliver evidence**. Keep existing PR CI; no product service or runtime dependency installation is needed.
-- **Product change:** use hand-written synthetic fixtures and an isolated DB/loopback port. For substantial UI work or consequential functional uncertainty, complete **2** before full integration; otherwise proceed to **3**.
+- **Product change:** use hand-written synthetic fixtures and an isolated DB/loopback port. Supplementary authorized local-copy comparisons follow [test-data-policy.md](../../../docs/test-data-policy.md); they never replace public synthetic regressions. For substantial UI work or consequential functional uncertainty, complete **2** before full integration; otherwise proceed to **3**.
+
+Group changes by shared behavior and risk. Keep tightly coupled fixes together; split unrelated persistence, parsing and presentation work into reviewable batches, with targeted acceptance before final integration. One release does not require one large PR.
 
 ## 2. Establish the interaction direction
 
@@ -22,12 +24,17 @@ Label this a direction preview: agreement covers what was demonstrated, not unsh
 
 ## 3. Verify the changed boundary
 
+Before changing a high-risk write path, list the affected old states, intended transitions and protected invariants. Include reachable legacy states, absent versus explicitly cleared values, tidy/merge, delete/recreate, and partial failure/retry where relevant. Generate legacy fixtures through the old code when practical. Follow the call chain across modules: identify the lock identity and lifetime, transaction/publication order and competing writers. Arrange independent review of these boundaries; line count does not determine risk.
+
+For each defect, cover the triggering example, a family of counterexamples, and normal behavior that must stay valid. Assert outcomes such as preserved human edits, unique token ownership, no publication on failure and successful retry; avoid tests that only repeat the implementation. Heuristic behavior remains subject to root AGENTS authorization. For an authorized heuristic change, compare old/new outputs on identical inputs and explain differences; authorized private copies can supplement this under the data policy, especially for analysis changes.
+
 Use [public-tests.md](../../../docs/public-tests.md) to select current scripts, requirements and commands. The following are cross-state scenarios beyond that inventory; choose those affected by the diff:
 
 | Boundary | Exercise |
 |---|---|
 | YAML/settings | save → reload → edit again → revert; explicit vs inherited values, conflict/failure, valid large input through HTTP |
 | Async UI/navigation | A → B/close/settings/ordinary URL with dirty or in-flight notes/skills; a new generation during a pending request; repeated operations |
+| Human-data/overlay writes | legacy → edit/clear → tidy/merge → delete/recreate where applicable; two writers, lock handoff, publication/commit failure and retry; protect notes and canonical identity |
 | Run lifecycle | controlled failure/termination near terminal persistence, competing generations and lock handoff |
 | Vocabulary/config paths | selected paths from outside repo cwd through CLI/worker/report/panel; rename/remove/re-add without changing canonical identity |
 | Layout/copy | realistic Chinese/English text, relevant desktop/mobile widths, keyboard/focus, loading/error state and task hierarchy |
