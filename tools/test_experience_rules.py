@@ -126,34 +126,32 @@ TITLE = [
 ]
 
 
-# 标题与正文都保留既有守卫，取有效要求的最大值。
+# 标题写了年限就以标题为准，正文不参与（正文判断误判风险高于收益）。
+# 标题没有年限时才回落到正文；no_title_*_known_limitation 记录正文判断的
+# 既有限制（合同期限 / 雇主年资会被当成经验要求），不是期望的理想行为。
 COMBINED = [
-    ("body_higher", "Engineer (2 years Python experience)",
-     "Minimum 5 years of software engineering experience required.", -3, 5),
+    ("title_wins_over_higher_body", "Engineer (2 years Python experience)",
+     "Minimum 5 years of software engineering experience required.", -1, 2),
     ("title_higher", "Engineer (5 years experience)",
      "Minimum 2 years of Python experience required.", -3, 5),
-    ("body_denied", "Engineer (2 years experience)",
+    ("title_ignores_denied_body", "Engineer (2 years experience)",
      "Our team has over 30 years of experience delivering services.", -1, 2),
-    ("body_unrelated", "Engineer (2 years experience)",
+    ("title_ignores_unrelated_body", "Engineer (2 years experience)",
      "The equipment warranty lasts 5 years.", -1, 2),
-    ("body_contract_duration", "Engineer (2 years experience)",
+    ("title_ignores_contract_duration", "Engineer (2 years experience)",
      "This is a minimum 5 year fixed-term contract.", -1, 2),
-    ("body_experience_before_contract_sentence", "Engineer (2 years experience)",
-     "3 years experience. This is a minimum 5 year fixed-term contract.", -2, 3),
-    ("body_experience_after_contract_sentence", "Engineer (2 years experience)",
-     "This is a minimum 5 year fixed-term contract. 3 years experience.", -2, 3),
-    ("no_title_contract_duration_unchanged", "Engineer",
+    ("title_ignores_employer_tenure", "Engineer (2 years experience)",
+     "Acme has 25 years of experience delivering services.", -1, 2),
+    ("title_range_lower_bound", "Engineer (1 year Python experience)",
+     "Minimum 3 to 5 years of software engineering experience required.", -1, 1),
+    ("no_title_body_requirement", "Engineer",
+     "Minimum 5 years of software engineering experience required.", -3, 5),
+    ("no_title_body_exp_abbreviation", "Engineer",
+     "Minimum 3 years exp required.", -2, 3),
+    ("no_title_contract_duration_known_limitation", "Engineer",
      "This is a minimum 5 year fixed-term contract.", -3, 5),
-    ("no_title_experience_before_contract_unchanged", "Engineer",
-     "3 years experience. This is a minimum 5 year fixed-term contract.", -3, 5),
-    ("no_title_experience_after_contract_unchanged", "Engineer",
-     "This is a minimum 5 year fixed-term contract. 3 years experience.", -3, 5),
-    ("body_experience_before_years", "Engineer (2 years experience)",
-     "Experience required: minimum 5 years building production services.", -3, 5),
-    ("body_exp_abbreviation", "Engineer (2 years experience)",
-     "Minimum 5 years exp required.", -3, 5),
-    ("body_range", "Engineer (1 year Python experience)",
-     "Minimum 3 to 5 years of software engineering experience required.", -2, 3),
+    ("no_title_employer_tenure_known_limitation", "Engineer",
+     "Acme has 25 years of experience delivering services.", -3, 25),
 ]
 
 
@@ -189,7 +187,7 @@ def main() -> int:
         if not ok:
             failures.append(f"{cid} {label}: 期望 {want:+d}，实际 {got:+d}")
 
-    print("\n== 标题与正文的有效最大要求（COMBINED）==")
+    print("\n== 标题优先、正文兜底（COMBINED）==")
     for cid, title, body, want, years in COMBINED:
         got, reasons = score_experience(title, body, rules)
         job = {"title": title, "description": body, "classification": "",
