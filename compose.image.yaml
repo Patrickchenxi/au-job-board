@@ -1,0 +1,4 @@
+# Optional overlay: docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
+services:
+  panel:
+    image: ${AU_JOB_BOARD_IMAGE:-ghcr.io/skywingjam/au-job-board:latest}

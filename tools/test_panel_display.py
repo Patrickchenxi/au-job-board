@@ -93,7 +93,8 @@ def test_card() -> None:
         check(f"{lang}：卡片不显示加减分", "+3" not in visible(html) and "out_of_state" not in html
               and "-2" not in visible(html))
         check(f"{lang}：层级并入分数徽章", re.search(r'class="score"[^>]*><span class="tier">T1</span>.*?<b>6</b>', html) is not None)
-        check(f"{lang}：技能最多 3 个，其余用 …", "Python · Selenium · AWS …" in html and "Docker ·" not in visible(html))
+        check(f"{lang}：全部技能交给单行宽度排版，没有固定数量省略",
+              ">Python · Selenium · AWS · Docker · Git</span>" in html)
         check(f"{lang}：技能悬停列出全部", "Python, Selenium, AWS, Docker, Git" in html)
         prog = i18n.value_label(lang, "action", "applied")
         check(f"{lang}：进度文字来自 _label（与圆点同源）",
@@ -127,6 +128,14 @@ def test_detail() -> None:
     plain = panel._detail_html(synthetic_row(reasons="[]", tier=None), "zh")
     check("没有计分信号：折叠区说明没有加减分", i18n.t("zh", "detail.why_empty") in plain
           and i18n.t("zh", "detail.why_plain", score=6) in plain)
+    excluded = panel._detail_html(synthetic_row(
+        is_excluded=1, rule_id="synthetic.authorization,synthetic.location,<fake>",
+        matched_text="Synthetic matching phrase"), "en")
+    rule = excluded[excluded.index('<div class="rule">'):excluded.index('<section class="decide"')]
+    check("排除规则保留逗号和完整单词",
+          "synthetic.authorization,synthetic.location," in re.sub(r"<[^>]+>", "", rule))
+    check("规则之间允许换行，规则内容仍转义", rule.count("<wbr>") == 2
+          and "&lt;fake&gt;" in rule and "<fake>" not in rule)
 
 
 def make_db(d: str):
@@ -214,7 +223,12 @@ def test_settings_sections() -> None:
             check(f"{lang}：说明保存不会重算", i18n.t(lang, "set.rules_hint") in rules)
             groups = re.search(r'id="config-editor" data-config-groups="([^"]+)"', fetch).group(1).split()
             check(f"{lang}：抓取与更新不再含规则组", "rules" not in groups and "queries" in groups, str(groups))
-        check("不带分区仍落在技术栈", 'aria-current="page">' + i18n.t("zh", "set.skills")
+        for section in (None, "unknown", ""):
+            page = (panel.render_settings(conn, {}, "zh") if section is None else
+                    panel.render_settings(conn, {}, "zh", None, section, "zh"))
+            check(f"未指定/未知分区 {section!r}：进入第一分页规则 Profile",
+                  'id="config-editor" data-config-groups="rules"' in page)
+        check("显式技术栈链接仍进入技术栈", 'aria-current="page">' + i18n.t("zh", "set.skills")
               in panel.render_settings(conn, {}, "zh", None, "skills", "zh"))
         conn.close()
 

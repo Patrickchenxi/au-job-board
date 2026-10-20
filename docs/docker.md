@@ -3,15 +3,39 @@
 **macOS users should prefer the [source installation](install.md).** It is the
 primary macOS workflow and retains the optional launchd templates. Docker is an
 alternative for people who already use a Docker Engine and Compose v2. It does
-not replace source installation or add a scheduler. The image is built locally;
-this repository does not require a published container image.
+not replace source installation or add a scheduler. You can use the public
+`ghcr.io/skywingjam/au-job-board` image or build it locally.
 
 The verification record in [installation-verification.md](installation-verification.md)
 states the container architecture actually tested. Do not assume Windows, other
 architectures or native Linux source installations have been verified from a
 container check. Docker Desktop on macOS runs Linux containers in a VM.
 
-## Build and start
+## Pull a published image
+
+The published image supports `linux/amd64` and `linux/arm64`. Docker selects the
+matching platform. Use a version tag for a specific release (for example
+`v1.2.2`), `sha-<full-main-commit>` for a specific main build, or `latest` for
+the most recently published main build. A digest pins the exact image content.
+Publication requires the synthetic container smoke test on each native platform;
+it does not test real job sources or other operating systems.
+
+From a source checkout, use the image overlay with the existing Compose file:
+
+```bash
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.2.2
+docker compose -f compose.yaml -f compose.image.yaml pull
+docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
+docker compose -f compose.yaml -f compose.image.yaml logs panel
+# Open http://127.0.0.1:8090/ and /settings
+```
+
+The overlay only selects an image; it keeps the same service, ports, volumes
+and Compose project. Continue using both `-f` arguments for image-based commands
+and upgrades. `AU_JOB_BOARD_IMAGE` defaults to `latest` if unset. Anonymous pulls
+require the GHCR package to have public visibility.
+
+## Build locally and start
 
 From a new source checkout with Docker Engine running:
 
@@ -105,8 +129,18 @@ checks versions, validates allowed fields and writes atomically.
 
 ## Upgrade and backup
 
+For a published-image installation, after updates have finished, select the
+new version and recreate the panel without building:
+
 ```bash
-# After updates have finished, update your source checkout as appropriate.
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.2.2
+docker compose -f compose.yaml -f compose.image.yaml pull
+docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --force-recreate
+```
+
+For a local build, update the source checkout and rebuild:
+
+```bash
 docker compose build
 docker compose up -d --force-recreate
 ```
@@ -146,3 +180,31 @@ and any failed check; it never reads your normal Compose volumes.
 The strict `.dockerignore` allowlist excludes personal config, databases,
 reports, `.git`, screenshots and tests from the build context. Runtime volumes
 are private data and are not image content. Never publish them with the image.
+
+## Maintainer image workflow
+
+The `Docker image` GitHub Actions workflow automatically builds only on pushes
+to `main`, including merged PRs. It does not build for PRs, `dev` or tag pushes.
+Manual runs also require the `main` ref; other refs skip the Docker jobs.
+
+With an empty `release_tag`, the workflow builds on native amd64 and arm64
+Ubuntu runners, runs `tools/test_docker.py --no-build` with isolated synthetic
+volumes and no runtime network, then publishes the tested platform images.
+Only after both pass does it publish the combined `sha-<full-commit>` and
+`latest` tags. Platform staging tags end in `-amd64` / `-arm64`.
+
+To publish a version, first wait for that main build and the public source CI
+to pass, create the matching Git tag/Release, then manually run `Docker image`
+on `main` with `release_tag` set to the existing `vX.Y.Z` tag. The tag must
+point to that exact main commit. This adds a version tag to the existing tested
+multi-platform image without rebuilding or moving `latest`. Repeating the
+operation accepts the same image but rejects replacing a different version image.
+
+Authentication uses `GITHUB_TOKEN` with job-scoped `packages: write`; no Docker
+Hub account or additional registry secret is needed. On first publication, GHCR
+defaults the package to private: change the package visibility to public in its
+GitHub package settings and verify an anonymous pull. Preserve that visibility
+for later versions. See [GitHub's Container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+The workflow uses the public source context and the Dockerfile allowlist. It
+does not deploy a service or migrate an existing source installation to Docker.

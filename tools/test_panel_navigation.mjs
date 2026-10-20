@@ -210,6 +210,43 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   return t;
 }
 
+async function testMobileReopenLoading() {
+  console.log("\n-- 移动端重新打开：新请求期间不显示旧详情 --");
+  const t = loadPanel({ portrait: true });
+  await t.api.openJob("A");
+  await t.api.closeDetail();
+  t.pane.scrollTop = 300;
+  t.pane.classList.add("label-open");
+  let respond;
+  t.routes.job = () => new Promise((resolve) => { respond = resolve; });
+  const opening = t.api.openJob("B");
+  eq("入场前替换旧详情为加载占位", t.pane.innerHTML.includes('class="skeleton"'), true);
+  eq("不展示旧 A", t.pane.innerHTML.includes("<detail A>"), false);
+  eq("入场从顶部开始", t.pane.scrollTop, 0);
+  eq("不继承上一条标注抽屉", t.pane.classList.contains("label-open"), false);
+  respond({ ok: true, json: async () => ({ html: "<detail B>" }) });
+  await opening;
+  eq("响应后显示 B", t.pane.innerHTML, "<detail B>");
+
+  // 关闭动画尚未结束时重新打开，也必须先清除旧内容。
+  t.pane.classList.add("leaving");
+  const reopening = t.api.openJob("B");
+  eq("关闭动画中重开也显示加载占位", t.pane.innerHTML.includes('class="skeleton"'), true);
+  await t.api.closeDetail();
+  respond({ ok: true, json: async () => ({ html: "<detail B late>" }) });
+  await reopening;
+  eq("关闭后不接纳迟到响应", t.pane.innerHTML.includes("late"), false);
+
+  const desktop = loadPanel();
+  await desktop.api.openJob("A");
+  await desktop.api.closeDetail();
+  desktop.routes.job = () => new Promise((resolve) => { respond = resolve; });
+  const desktopOpening = desktop.api.openJob("B");
+  eq("桌面保留原有延迟加载占位行为", desktop.pane.innerHTML, "<detail A>");
+  respond({ ok: true, json: async () => ({ html: "<detail B>" }) });
+  await desktopOpening;
+}
+
 async function testFrozenList() {
   console.log("\n-- UX-1①：冻结列表上的上一条 / 下一条 --");
   const t = loadPanel();
@@ -678,6 +715,7 @@ async function testSkillCandidates() {
 async function main() {
   console.log("== v1.2.2 PR-B 面板导航与异步（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
+  await testMobileReopenLoading();
   await testFrozenList();
   await testNavigationGate();
   await testRapidKeys();

@@ -167,9 +167,11 @@ to the agent:
 
 ## Project status
 
-AU Job Board is source-only: you install it from the repository at
-`https://github.com/SkywingJam/au-job-board` into your own virtual environment. There is no
-packaged release.
+AU Job Board is not distributed as a Python package on PyPI. On macOS, install it
+from the repository at `https://github.com/SkywingJam/au-job-board` into your own
+virtual environment; source installation remains the recommended workflow. The
+main-branch Docker workflow publishes an optional container image to GHCR, and
+Docker/Compose users can also build it locally; see the [Docker guide](docs/docker.md).
 
 - **License and scope.** MIT (see [License](#license)). The public contents are
   the 296 files of the initial public file set, built on a clean history that
@@ -200,7 +202,7 @@ Not verified, and the documentation does not imply otherwise:
 | [Agent-assisted installation](docs/agent-install.md) | The same steps for an AI agent |
 | [Usage guide](docs/usage.md) | Workflow, commands, local data, notes, languages |
 | [Fetch settings and updates](docs/manual-updates.md) | Editable next-run configuration and background updates from the panel |
-| [Optional Docker](docs/docker.md) | Local image, Compose, persistent volumes, commands and backup |
+| [Optional Docker](docs/docker.md) | Published GHCR or local image, Compose, persistent volumes and backup |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |
 | [Rule profiles](docs/legacy-rule-profiles.md) | The six profiles, per-rule switches, applying a change |
 | [Eligibility snapshot](docs/eligibility-profiles.md) | The separate, read-only `eligibility` section |

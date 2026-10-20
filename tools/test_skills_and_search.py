@@ -234,7 +234,7 @@ def test_skill_tree_and_settings() -> None:
         check("每条含全部字段", all(want <= set(s) for s in tree["skills"]))
         names = [s["name"] for s in tree["skills"]]
         check("按字母顺序返回（方便查找）", names == sorted(names, key=str.lower))
-        html = panel.render_settings(conn, {})
+        html = panel.render_settings(conn, {}, section="skills")
         check("设置页有左导航与右列表容器",
               'class="set-nav"' in html and 'id="skill-tree"' in html)
         check("返回是独立图标按钮，不是文字链接",
