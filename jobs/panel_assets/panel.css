@@ -794,7 +794,7 @@ body.portrait .detail.swap>*{animation:none}
 /* 竖屏筛选抽屉：每行左名称、右取值（技能按钮与下拉对齐） */
 body.portrait .more-panel .skillpick>button.ctl{justify-content:flex-start}
 body.portrait .more-panel .skillpick>button.ctl .v{margin-left:auto;max-width:60%}
-body.portrait .more-panel .ctl select{text-align:right;text-align-last:right}
+body.portrait .more-panel .ctl select{flex:1 1 auto;min-width:0;text-align:right;text-align-last:right}
 body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁边下拉的 16px 取值对齐 */
 @media(max-width:760px){
  .skhits-k{display:inline;color:var(--ink3);font-family:inherit}
