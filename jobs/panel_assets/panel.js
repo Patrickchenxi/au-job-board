@@ -241,8 +241,12 @@ function navKeyIgnored(ev){
     if(!el || !el.tagName) continue;
     if(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
   }
-  // 抽屉、筛选面板开着时按键属于它们
-  return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'));
+  // 抽屉、筛选面板和对话浮层开着时按键属于它们
+  const detail=document.getElementById('detail');
+  return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'))
+    || !!(detail && detail.classList.contains('label-open'))
+    || shown(document.getElementById('update-confirm'))
+    || shown(document.getElementById('display-pop'));
 }
 document.addEventListener('keydown',ev=>{
   const step={j:1,k:-1}[String(ev.key||'').toLowerCase()];

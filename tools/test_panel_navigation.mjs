@@ -8,7 +8,8 @@
     等待期间重复按键不排队；待应用新结果（UPDATE_PENDING）时整页载入一次并把目标
     uid 带进 hash，之后的按键不再发起导航；快速连按只认最后一次响应
   - 按键忽略：输入框 / textarea / select / contenteditable、IME 组字（isComposing、
-    keyCode 229）、修饰键、自动重复、抽屉或筛选面板打开
+    keyCode 229）、修饰键、自动重复、抽屉或筛选面板打开，以及移动端标注抽屉、
+    更新确认窗和顶栏 Display 弹出层打开
   - UX-5：竖屏标注抽屉开合、收起时备注走原保存队列、换条/关闭时收起、Esc 先收抽屉
   - BUG-1：标注 / 备注写入后重拉只读统计；失败保留原数字；乱序响应只认最后一次；
     /api/label 请求体不变
@@ -401,6 +402,68 @@ async function testKeyFilters() {
   }
 }
 
+async function testOverlayKeyOwnership() {
+  console.log("\n-- UX-1①：浮层打开时 J/K 不切条 --");
+  {
+    const t = loadPanel({ portrait: true });
+    await t.api.openJob("B");
+    const sheet = new El("div"); t.ids.set("label-sheet", sheet);
+    t.api.toggleLabelSheet(true);
+    const j = { key: "j", target: sheet };
+    t.key(j); await tick(); await tick();
+    eq("标注抽屉：焦点在容器时 J 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    const k = { key: "k", target: sheet };
+    t.key(k); await tick(); await tick();
+    eq("标注抽屉：焦点在容器时 K 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    t.key({ key: "Escape" });
+    eq("标注抽屉：Esc 仍只收抽屉", [t.pane.classList.contains("label-open"), t.api.state().uid], [false, "B"]);
+    t.key({ key: "j" }); await tick(); await tick();
+    eq("标注抽屉关闭后：J 恢复", t.api.state().uid, "C");
+    t.key({ key: "k" }); await tick(); await tick();
+    eq("标注抽屉关闭后：K 恢复", t.api.state().uid, "B");
+  }
+  {
+    const t = loadPanel();
+    await t.api.openJob("B");
+    const confirm = new El("div", { hidden: false });
+    const cancel = new El("button");
+    confirm.q["[data-update-cancel]"] = [cancel];
+    t.ids.set("update-confirm", confirm);
+    cancel.focus();
+    const j = { key: "j", target: cancel };
+    t.key(j); await tick(); await tick();
+    eq("更新确认：焦点在按钮时 J 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    const k = { key: "k", target: cancel };
+    t.key(k); await tick(); await tick();
+    eq("更新确认：焦点在按钮时 K 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    confirm.hidden = true; t.document.activeElement = t.document.body;
+    t.key({ key: "j" }); await tick(); await tick();
+    eq("更新确认关闭后：J 恢复", t.api.state().uid, "C");
+    t.key({ key: "k" }); await tick(); await tick();
+    eq("更新确认关闭后：K 恢复", t.api.state().uid, "B");
+  }
+  {
+    const t = loadPanel();
+    await t.api.openJob("B");
+    const btn = new El("button"), pop = new El("div", { hidden: false }), choice = new El("button");
+    choice.className = "on"; pop.q["button.on"] = [choice];
+    t.ids.set("display-btn", btn); t.ids.set("display-pop", pop);
+    choice.focus();
+    const j = { key: "j", target: choice };
+    t.key(j); await tick(); await tick();
+    eq("Display：焦点在弹出层内时 J 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    const k = { key: "k", target: choice };
+    t.key(k); await tick(); await tick();
+    eq("Display：焦点在弹出层内时 K 不切条", [t.api.state().uid, t.jobCalls()], ["B", ["B"]]);
+    t.key({ key: "Escape" });
+    eq("Display：Esc 仍收起并把焦点还给按钮", [pop.hidden, t.document.activeElement === btn], [true, true]);
+    t.key({ key: "j" }); await tick(); await tick();
+    eq("Display 关闭后：J 恢复", t.api.state().uid, "C");
+    t.key({ key: "k" }); await tick(); await tick();
+    eq("Display 关闭后：K 恢复", t.api.state().uid, "B");
+  }
+}
+
 async function testLabelSheet() {
   console.log("\n-- UX-5：竖屏标注抽屉 --");
   const t = loadPanel({ portrait: true });
@@ -720,6 +783,7 @@ async function main() {
   await testNavigationGate();
   await testRapidKeys();
   await testKeyFilters();
+  await testOverlayKeyOwnership();
   await testLabelSheet();
   await testStats();
   await testFilterDrawer();
