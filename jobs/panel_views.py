@@ -5,11 +5,13 @@
 岗位正文、公司、备注、技能名等数据原样输出，不翻译。
 
 布局约定：
-  - 顶栏一行：名称 · 视图 · 语言 · 外观 · 设置；第二行是搜索 + 常驻筛选，
-    其余筛选收进「更多筛选」，收起时把生效的条件列成可移除的小标签。
-  - 视图说明条：一句话说明当前视图口径 + 相关统计 + 上次抓取。
-  - 卡片固定三个圆点（可投性 · 兴趣 · 投递进度），未标注是空心。
-  - 详情按步骤：资格线索（原文）→ 做标记（带 ? 说明）→ 备注。
+  - 顶栏一行：名称 · 视图 · 上次抓取 + 更新岗位 · 显示（语言/外观）· 设置；
+    第二行是搜索 + 常驻筛选，其余筛选收进「更多筛选」，收起时把生效的条件列成
+    可移除的小标签。
+  - 视图说明条：一句话说明当前视图口径 + 相关统计。
+  - 卡片只有三类强调（状态、资格线索、薪资）；右侧是进度文字 + 三个圆点
+    （可投性 · 兴趣 · 投递进度），未标注是空心。
+  - 详情按步骤：资格线索（原文）→ 做标记（带 ? 说明）→ 备注；计分明细在底部折叠。
   - 竖屏（右栏放不下，见 panel.js 的 fitLayout）：汉堡菜单 + 底部筛选抽屉。
 """
 
@@ -63,24 +65,13 @@ ICON_MENU = ('<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke
 ICON_CLOSE = ('<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
               'stroke-width="2" stroke-linecap="round" aria-hidden="true">'
               '<path d="M6 6l12 12M18 6L6 18"/></svg>')
-ICON_GLOBE = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-              'stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/>'
-              '<path d="M3 12h18M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18"/></svg>')
 ICON_INFO = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>')
 ICON_REFRESH = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
                 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
                 '<path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0-.7 7"/></svg>')
-# 主题按钮同时放太阳和月亮，CSS 按当前生效的主题只显示一个（见 panel.css）
-ICON_THEME = ('<svg class="i-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" '
-              'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
-              'stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>'
-              '<svg class="i-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" '
-              'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
-              '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4'
-              'M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>')
-# 齿轮（Feather 风格），和主题按钮的太阳刻意画得不一样
+# 齿轮（Feather 风格）
 ICON_GEAR = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
              'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 '
@@ -110,17 +101,36 @@ def _js(value) -> str:
 
 
 def _update_widget(lang: str, *, compact: bool = False) -> str:
+    """「更新岗位」：带文字的按钮，点了先确认（见 _update_confirm），因为它会联网。
+    按钮只有一个 #update-start；竖屏时 panel.js 把整个小部件挪进汉堡抽屉。"""
     T = lambda key: i18n.t(lang, key)
     icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg>'
     return ''.join([
-        '<span class="update-widget update-compact">' if compact else '<section class="update-widget">',
-        f'<button type="button" class="{"iconbtn" if compact else "btn"}" id="update-start" '
-        f'title="{_e(T("set.update_hint"))}" aria-label="{_e(T("js.update_title"))}" disabled>',
-        icon if compact else _e(T("js.update_title")), '</button>',
-        '<span class="update-feedback"><span id="update-status" role="status" aria-live="polite" aria-atomic="true"></span>',
-        '' if compact else '<span id="update-meta" class="muted"></span>',
+        '<span class="update-widget update-compact" id="update-widget">' if compact else '<section class="update-widget">',
+        f'<button type="button" class="btn update-btn" id="update-start" '
+        f'title="{_e(T("set.update_hint"))}" aria-haspopup="dialog" disabled>',
+        icon, f'<span>{_e(T("js.update_title"))}</span></button>',
+        '<span class="update-feedback"><span id="update-status" tabindex="-1" role="status" aria-live="polite" aria-atomic="true"></span>',
+        '' if compact else ('<span id="update-meta" class="muted"></span>'
+                            f'<details class="update-details"><summary>{_e(T("update.details"))}</summary>'
+                            '<span id="update-task" class="muted"></span></details>'),
         '</span>', '</span>' if compact else '</section>',
     ])
+
+
+def _update_confirm(lang: str) -> str:
+    """更新前的确认窗。只拦一下「会联网、要几分钟」，状态机与禁用逻辑仍在 panel.js 原处。"""
+    T = lambda key: i18n.t(lang, key)
+    return (
+        '<div class="modal update-confirm" id="update-confirm" hidden>'
+        '<div class="dialog" role="dialog" aria-modal="true" '
+        'aria-labelledby="update-confirm-title" aria-describedby="update-confirm-body">'
+        f'<div class="dialog-head"><h3 id="update-confirm-title">{_e(T("update.confirm_title"))}</h3></div>'
+        f'<div class="dialog-body"><p id="update-confirm-body">{_e(T("update.confirm_body"))}</p></div>'
+        '<div class="dialog-foot"><span class="spacer"></span>'
+        f'<button type="button" class="btn" data-update-cancel>{_e(T("update.cancel"))}</button>'
+        f'<button type="button" class="primary-btn" data-update-ok>{_e(T("update.confirm_ok"))}</button>'
+        '</div></div></div>')
 
 
 def _tag_html(kind: str, text: str, title: str | None = None) -> str:
@@ -207,6 +217,43 @@ def _dots(uid: str, label: dict, lang: str) -> str:
 # 列表卡片与详情
 # ---------------------------------------------------------------------------
 
+SCORE_KINDS = ("tier", "level", "adjust")    # 计分信号：卡片不显示，详情收进「为什么是 …」
+
+
+def _salary_tip(row: dict, lang: str) -> str:
+    """薪资标签的悬停说明：来源标记的含义 + 雇主原文（完整，不截断）。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    tips = []
+    if row.get("salary_basis") == "annualized":
+        tips.append(T("salary.tip_annualized"))
+    if row.get("salary_origin") == "description":
+        tips.append(T("salary.tip_text"))
+    if (raw := " ".join(str(row.get("salary") or "").split())):
+        tips.append(T("salary.tip_raw", text=raw))
+    return "\n".join(tips)
+
+
+def _salary_chip(pairs, row: dict, lang: str) -> str:
+    """卡片只留**一枚**薪资：有折算值就显示折算值（≈ / （正文）来源标记原样保留），
+    原文放进悬停；解析不出来时，原文本身就是那一枚（它是唯一的线索）。"""
+    for kind in ("salary", "raw"):
+        text = next((t for k, t in pairs if k == kind), None)
+        if text:
+            return _tag_html(kind, _tag_text(kind, text, lang), _salary_tip(row, lang))
+    return ""
+
+
+def _progress(uid: str, label: dict, lang: str) -> str:
+    """投递进度的文字小标签（待投 / 已投 / 跳过）。手机没有悬停，只靠圆点看不出来。
+    读的是去重组合并后的标注（row['_label']），与圆点同源；panel.js 标注后就地更新。"""
+    value = label.get("action")
+    text = i18n.value_label(lang, "action", value) if value else ""
+    title = i18n.t(lang, "field.action") + i18n.t(lang, "js.colon") + text if value else ""
+    tone = TONE.get(value, "mid") if value else ""
+    return (f'<span class="prog {tone}" data-prog-uid="{_e(uid)}" title="{_e(title)}"'
+            f'{"" if value else " hidden"}>{_e(text)}</span>')
+
+
 def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     uid = row["uid"]
     label = row.get("_label") or {}
@@ -215,32 +262,76 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     t = label.get("labeled_at") or ""
     done = bool(since and t and t > since)
 
-    tags = _tags(tags_for(row), lang)
-    if row.get("is_excluded"):
-        # 「全部」和「新增」都会同时列出保留区与排除区，不标一下分不清
-        tags = _tag_html("bad", i18n.t(lang, "card.excluded"),
-                         i18n.t(lang, "card.rule", rule=row.get("rule_id") or "")) + tags
+    # 卡片只用三类强调：状态（挂出 N 天 / 已排除）、资格线索、薪资。
+    # 层级并进分数徽章；加减分移到详情的「为什么是 …」；技能是中性文字。
+    # 这里只挑选 render.tags_for 的输出来显示，报告与搜索用的 tags_for 本身不变。
+    pairs = tags_for(row, skill_limit=None)
+    tags = ""
     # 挂出 >30 天的 tag **置顶于所有 tag**（包括「已排除」）：一眼看到就能跳过
     if (age := _age_tag(row, lang)):
-        tags = _tag_html(*age) + tags
+        tags += _tag_html(*age)
+    if row.get("is_excluded"):
+        # 「全部」和「新增」都会同时列出保留区与排除区，不标一下分不清
+        tags += _tag_html("bad", i18n.t(lang, "card.excluded"),
+                          i18n.t(lang, "card.rule", rule=row.get("rule_id") or ""))
     if row.get("eligibility_cue"):
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
+    tags += _salary_chip(pairs, row, lang)
+    skills = [text for kind, text in pairs if kind == "skill"]
+    skills_html = ""
+    if skills:
+        shown = " · ".join(skills)  # 由单行剩余宽度决定省略，不按技能个数截断
+        skills_html = (f'<span class="skills" title="{_e(i18n.t(lang, "card.skills", list=", ".join(skills)))}">'
+                 f'{_e(shown)}</span>')
+
+    tier = next((text for kind, text in pairs if kind == "tier"), None)
+    score = row.get("total_score")
+    badge_title = (i18n.t(lang, "card.tier_score", tier=tier, score=score) if tier
+                   else i18n.t(lang, "card.score"))
+    badge = (f'<span class="tier">{_e(tier)}</span><span class="sep">·</span>' if tier else "") + f'<b>{_e(score)}</b>'
 
     sub = " · ".join(str(x) for x in (
         row.get("company"), row.get("location"), row.get("source")) if x)
+    # 技能与进度共用一行：技能按剩余宽度省略，进度保持完整；空间不足时整组换行。
+    state = f'<span class="card-state">{_progress(uid, label, lang)}{_dots(uid, label, lang)}</span>'
+    tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
     return "".join([
         f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" role="button" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
-        f'<span class="score" title="{_e(i18n.t(lang, "card.score"))}">{_e(row.get("total_score"))}</span>',
+        f'<span class="score" title="{_e(badge_title)}">{badge}</span>',
         "</div>",
         f'<div class="sub">{_e(sub)}</div>',
-        # 状态点放在 tags 行内部（不是绝对定位），避免压在标签上
-        f'<div class="tags">{tags}{_dots(uid, label, lang)}</div>',
+        # 进度文字与状态点放在 tags 行内部（不是绝对定位），避免压在标签上
+        # 进度文字与圆点是一组，换行时一起走，不会被拆到两行
+        f'<div class="tags">{tags}{tail}</div>',
         "</div>",
     ])
+
+
+def _why_section(pairs, row: dict, lang: str) -> str:
+    """「为什么是 T1 · 6 分」：卡片上拿掉的计分信号（层级、级别、经验、规则加减分）
+    原样移到这里，默认收起。只换位置，不删证据；文字与报告同源（render.tags_for）。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    score = row.get("total_score")
+    tier = next((text for kind, text in pairs if kind == "tier"), None)
+    items = []
+    if tier:
+        items.append((T("detail.why_tier"), tier))
+    for kind, text in pairs:
+        if kind in ("level", "adjust"):
+            shown = _tag_text(kind, text, lang)
+            name, _, delta = shown.rpartition(" ")
+            items.append((name or shown, delta if name else ""))
+    rows = "".join(f'<li><span>{_e(name)}</span><b>{_e(value)}</b></li>' for name, value in items)
+    if not any(kind in ("level", "adjust") for kind, _ in pairs):
+        rows += f'<li class="muted">{_e(T("detail.why_empty"))}</li>'
+    title = T("detail.why", tier=tier, score=score) if tier else T("detail.why_plain", score=score)
+    return (f'<details class="why"><summary>{_e(title)}</summary>'
+            f'<div class="why-body"><p class="hint">{_e(T("detail.why_hint"))}</p>'
+            f'<ul class="why-list">{rows}</ul></div></details>')
 
 
 def _detail_html(row: dict, lang: str = "zh") -> str:
@@ -249,23 +340,44 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
     uid = row["uid"]
     label = row.get("_label") or {}
 
+    # 薪资原文不再进元信息行：它和折算值并排显示在下面的标签行（同一信息只出现一次）
     meta_parts = [row.get("company"), row.get("location"), row.get("source"),
                   T("detail.posted", date=row["listing_date"]) if row.get("listing_date") else None,
-                  row.get("salary"), row.get("work_type")]
+                  row.get("work_type")]
     meta = " · ".join(str(x) for x in meta_parts if x)
     if row.get("duplicate_count"):
         meta += " · " + T("detail.dupes", n=row["duplicate_count"],
                           sources=row.get("duplicate_sources") or "")
 
-    # 详情页空间够，技能 tag 全部展开，不折成 +N
-    tag_pairs = tags_for(row, skill_limit=None)
+    # 详情页空间够，技能 tag 全部展开，不折成 +N。计分信号收进底部「为什么是 …」。
+    all_pairs = tags_for(row, skill_limit=None)
+    tags = ""
     if (age := _age_tag(row, lang)):
-        tag_pairs = [age] + tag_pairs
-    tags = _tags(tag_pairs, lang)
+        tags += _tag_html(*age)
+    salary = next((text for kind, text in all_pairs if kind == "salary"), None)
+    if salary:
+        tags += _tag_html("salary", _tag_text("salary", salary, lang), _salary_tip(row, lang))
+    if (raw := " ".join(str(row.get("salary") or "").split())):
+        # 详情给**完整**原文（卡片与报告里的原文标签会截断）
+        tags += _tag_html("raw full", i18n.t(lang, "tag.raw", text=raw))
+    tags += _tags([(kind, text) for kind, text in all_pairs if kind == "skill"], lang)
     url = _e(row.get("url"))
 
+    # 上一条 / 下一条：列表顺序只有前端知道（页面载入时冻结的卡片顺序），
+    # 这里只给按钮，位置与可用状态由 panel.js 的 syncDetailNav 填。
+    def step_btn(delta: int, text: str) -> str:
+        key, name = ("J", T("detail.next")) if delta > 0 else ("K", T("detail.prev"))
+        return (f'<button type="button" class="stepbtn" data-step="{delta}" onclick="stepDetail({delta})" '
+                f'aria-label="{_e(name)}" aria-keyshortcuts="{key}" title="{_e(name)} ({key})" disabled>'
+                f'{text}</button>')
     out = [
+        '<div class="d-nav">',
         f'<button type="button" id="back" onclick="closeDetail()">{_e(T("detail.back"))}</button>',
+        '<span class="d-steps">',
+        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>K</kbd>'),
+        '<span class="d-pos"></span>',
+        step_btn(1, f'{_e(T("detail.next"))} <kbd>J</kbd> ›'),
+        '</span></div>',
         '<div class="d-head"><div class="d-title">',
         f'<h2>{_e(row.get("title"))}</h2>',
         f'<div class="sub">{_e(meta)}</div></div>',
@@ -289,7 +401,11 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
     ]
 
     if row.get("is_excluded"):
-        out.append(f'<div class="rule">{_e(T("detail.rule"))}<b>{_e(row.get("rule_id"))}</b>'
+        rule_ids = ',<wbr>'.join(
+            f'<span class="rule-token">{_e(token)}</span>'
+            for token in str(row.get("rule_id") or "").split(",")
+        )
+        out.append(f'<div class="rule">{_e(T("detail.rule"))}<b>{rule_ids}</b>'
                    f'　{_e(T("detail.matched"))}{_e(row.get("matched_text"))}</div>')
 
     out.append(f'<section class="decide" aria-label="{_e(T("detail.decide"))}">')
@@ -306,6 +422,14 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
             '</div>')
         step += 1
 
+    # 标注与备注：桌面原位不动；竖屏（panel.js 的 body.portrait）这一块变成底部抽屉，
+    # 正文前置。是同一组节点，不复制 —— 备注输入框只有一个，保存队列与未保存保护照旧。
+    out.append(
+        f'<button type="button" class="label-scrim" tabindex="-1" aria-label="{_e(T("detail.sheet_close"))}" '
+        'onclick="toggleLabelSheet(false)"></button>'
+        f'<div class="label-sheet" id="label-sheet" tabindex="-1" aria-label="{_e(T("detail.decide"))}">'
+        '<div class="sheet-grab" aria-hidden="true"></div>'
+        f'<div class="label-sheet-head"><b>{_e(T("detail.decide"))}</b></div>')
     axes = []
     for field, values in (("eligibility", ("eligible", "ineligible", "unsure")),
                           ("interest", ("want", "maybe", "no")),
@@ -347,13 +471,26 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'onkeydown="noteKeys(event,this)" onblur="noteBlur(this)">'
         f'<div class="hint">{_e(T("detail.note_hint"))}</div>'
         f'</div></div>')
+    out.append(f'<div class="label-sheet-foot"><button type="button" class="primary-btn" '
+               f'onclick="toggleLabelSheet(false)">{_e(T("detail.sheet_done"))}</button></div>'
+               '</div>')
     out.append("</section>")
 
     out.append(f'<h3 class="jd-head">{_e(T("detail.jd"))} <span>· {_e(T("detail.jd_note"))}</span></h3>')
     out.append(f'<div class="jd">{render_jd_html(row.get("description"), T("detail.jd_empty"))}</div>')
-    # 竖屏时固定在底部的操作栏（桌面隐藏；顶部那个按钮在竖屏隐藏）
-    out.append(f'<div class="apply-bar"><a class="apply" href="{url}" target="_blank" '
-               f'rel="noopener">{_e(T("detail.open"))} ↗</a></div>')
+    out.append(_why_section(all_pairs, row, lang))
+    # 竖屏时固定在底部的操作栏（桌面隐藏；顶部那个按钮在竖屏隐藏）：
+    # 上一条 · 标注抽屉（显示当前三项）· 打开原文 · 下一条
+    summary = " · ".join(i18n.value_label(lang, k, label.get(k)) for k in FILTER_KEYS
+                         if label.get(k)) or T("js.detail_unlabelled")
+    out.append('<div class="apply-bar">'
+               + step_btn(-1, "‹")
+               + f'<button type="button" class="label-toggle" aria-expanded="false" '
+                 f'aria-controls="label-sheet" onclick="toggleLabelSheet()">'
+                 f'<b>{_e(T("detail.labels"))} ▴</b><span class="label-sum">{_e(summary)}</span></button>'
+               + f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
+               + step_btn(1, "›")
+               + '</div>')
     return "".join(out)
 
 
@@ -392,7 +529,9 @@ def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
         except ValueError:
             text = T("run.at", stamp=stamp)
         if state != "success":
-            text += " · " + T("js.update_" + state)
+            # 状态行只放简短结果；完整说明在设置页。「结果未记录」保持未知，不写成成功。
+            short = "run.state_" + state
+            text += " · " + T(short if short in i18n.STRINGS[i18n.DEFAULT_LANG] else "js.update_" + state)
     dot = '<span class="dot bad" aria-hidden="true"></span>' if stale else ""
     return (f'<span class="run{" stale" if stale else ""}" data-run-time="{_e(stamp or "")}" '
             f'data-run-state="{_e(state)}">{dot}<span>{_e(text)}</span></span>')
@@ -420,13 +559,13 @@ def _select(key: str, label: str, options: list[tuple[str, str]], current: str) 
                    for v, t in options)
     on = " on" if current else ""
     return (f'<label class="ctl{on}"><span class="k">{_e(label)}</span>'
-            f'<select data-fkey="{key}" onchange="applyFilter()">{opts}</select></label>')
+            f'<select data-fkey="{key}" onchange="filterChanged()">{opts}</select></label>')
 
 
 def _toggle(key: str, label: str, checked: bool) -> str:
     return (f'<label class="ctl tog{" on" if checked else ""}">'
             f'<input type="checkbox" data-fkey="{key}"{" checked" if checked else ""} '
-            f'onchange="applyFilter()"> {_e(label)}</label>')
+            f'onchange="filterChanged()"> {_e(label)}</label>')
 
 
 def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=None) -> str:
@@ -447,7 +586,7 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=No
         opts.append(
             f'<label class="skillopt">'
             f'<input type="checkbox" data-fkey="{SKILL_KEY}" value="{_e(name)}"{checked} '
-            f'onchange="applyFilter()">'
+            f'onchange="filterChanged()">'
             f'<span>{_e(skill_labels.get(name, name))}</span>'
             f'<span class="skc">{counts.get(name, 0)}</span></label>')
     title = i18n.t(lang, "filter.skill")
@@ -455,7 +594,7 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=No
     return (f'<div class="skillpick" id="skillpick">'
             f'<button type="button" class="ctl{" on" if selected else ""}" aria-haspopup="true" '
             f'title="{_e(i18n.t(lang, "filter.skill_hint"))}" onclick="skillToggle(event)">'
-            f'<span class="k">{_e(title)}</span> <span class="v">{_e(value)}</span> ▾</button>'
+            f'<span class="k">{_e(title)}</span> <span class="v">{_e(value)}</span> <span class="caret" aria-hidden="true">▾</span></button>'
             f'<div class="skillpanel" id="skill-panel">{"".join(opts)}</div></div>')
 
 
@@ -566,7 +705,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
                    f'{_e(T("filter.clear_all"))}</a>')
     out.append("</div>")
 
-    # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉
+    # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉。
+    # 竖屏抽屉里的改动先留在控件上，「应用」才走一次 applyFilter（panel.js filterChanged）。
     out.append(f'<div class="more-panel" id="more-panel" data-keys="{" ".join(hidden_keys)}" hidden>'
                f'<div class="sheet-grab" aria-hidden="true"></div>'
                f'<div class="sheet-head"><b>{_e(T("filter.button"))} · {_e(T("view." + view))}</b>'
@@ -585,7 +725,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     clear_hidden = (f'<button type="button" class="linkbtn" onclick="clearHidden()">'
                     f'{_e(T("filter.clear_hidden"))}</button>') if hidden_keys else ""
     out.append(f'<div class="more-foot">{clear_hidden}'
-               f'<button type="button" class="primary-btn" onclick="toggleMore(false)">'
+               f'<button type="button" class="primary-btn" id="more-done" onclick="moreDone()">'
                f'{_e(T("filter.done"))}</button></div></div>')
 
     if hidden_active:
@@ -659,19 +799,44 @@ def _demo_banner(config: dict, lang: str = "en") -> str:
             f'<span>{_e(text)}</span></div>')
 
 
-def _theme_button(lang: str) -> str:
-    # aria-label 由 panel.js 按当前生效主题改写（切到深色 / 切到浅色）
-    return (f'<button type="button" class="iconbtn theme-btn" onclick="toggleTheme()" '
-            f'aria-label="{_e(i18n.t(lang, "theme.to_dark"))}" '
-            f'title="{_e(i18n.t(lang, "theme.to_dark"))}">{ICON_THEME}</button>')
+# 语言与外观：一个「显示」小菜单（顶栏）、手机抽屉和设置页用**同一组选项、同一顺序**：
+# 跟随 → 中文/浅色 → English/深色。「跟随」= 清掉 cookie，不写任何值（见 panel.js setPref）。
+LANG_CHOICES = ("auto", "zh", "en")
+THEME_CHOICES = ("auto", "light", "dark")
 
 
-def _lang_button(lang: str) -> str:
-    other = "en" if lang == "zh" else "zh"
-    return (f'<button type="button" class="iconbtn lang-btn" onclick="setLang(\'{other}\')" '
-            f'aria-label="{_e(i18n.t(lang, "lang.switch"))}" title="{_e(i18n.t(lang, "lang.switch"))}">'
-            f'{ICON_GLOBE}<span>{_e(i18n.t(lang, "lang.current"))}</span>'
-            f'<span class="muted">/ {_e(i18n.t(lang, "lang.other"))}</span></button>')
+def _lang_choice_label(lang: str, code: str) -> str:
+    # 语言名用各自的语言写（「中文」「English」），切过去的人才认得
+    return {"zh": "中文", "en": "English"}.get(code) or i18n.t(lang, "set.lang_auto")
+
+
+def _display_choices(lang: str, lang_pref: str, prefix: str) -> str:
+    """语言 + 外观两组分段按钮。外观的选中态由 panel.js syncThemeUi 按 data-theme-choice 同步。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    langs = "".join(
+        f'<button type="button" class="{"on" if code == lang_pref else ""}" data-lang-choice="{code}" '
+        f'aria-pressed="{"true" if code == lang_pref else "false"}" onclick="setLang(\'{code}\')">'
+        f'{_e(_lang_choice_label(lang, code))}</button>' for code in LANG_CHOICES)
+    themes = "".join(
+        f'<button type="button" data-theme-choice="{code}" onclick="setTheme(\'{code}\')">'
+        f'{_e(T("set.theme_" + code))}</button>' for code in THEME_CHOICES)
+    return (f'<div class="drawer-sec"><span id="{prefix}-lang">{_e(T("set.lang_title"))}</span>'
+            f'<div class="segrow" role="group" aria-labelledby="{prefix}-lang">{langs}</div></div>'
+            f'<div class="drawer-sec"><span id="{prefix}-theme">{_e(T("set.theme_title"))}</span>'
+            f'<div class="segrow" role="group" aria-labelledby="{prefix}-theme">{themes}</div></div>')
+
+
+def _display_menu(lang: str, lang_pref: str) -> str:
+    """顶栏的「Aa 显示 ▾」：低频设置收成一个按钮，弹出层就是 _display_choices。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    return (f'<div class="display-menu" id="display-menu">'
+            f'<button type="button" class="iconbtn display-btn" id="display-btn" aria-expanded="false" '
+            f'aria-controls="display-pop" aria-label="{_e(T("display.label"))}" onclick="toggleDisplay()">'
+            f'<span class="aa" aria-hidden="true">Aa</span><span>{_e(T("display.button"))}</span>'
+            f'<span class="caret" aria-hidden="true">▾</span></button>'
+            f'<div class="display-pop" id="display-pop" role="group" aria-label="{_e(T("display.label"))}" hidden>'
+            f'{_display_choices(lang, lang_pref, "dm")}'
+            f'<p class="display-more">{_e(T("display.more"))}</p></div></div>')
 
 
 def _scripts(lang: str, extra: dict | None = None) -> str:
@@ -681,22 +846,33 @@ def _scripts(lang: str, extra: dict | None = None) -> str:
     return "".join(f"<script>window.{k}={_js(v)};</script>" for k, v in data.items())
 
 
-def _stats(view: str, stats: dict, total: int, lang: str) -> list[tuple[str, object]]:
-    T = lambda k: i18n.t(lang, k)   # noqa: E731
-    common = [(T("stat.labelled"), stats["已标注"]), (T("stat.saved"), stats["待投"]),
-              (T("stat.applied"), stats["已投递"])]
+# 顶部统计的稳定键（= i18n 的 stat.* 后缀）-> labels.summary 的口径。
+# 页面渲染与只读接口 /api/stats 共用这一张表：标注后前端按键重拉，不自行加减。
+STAT_KEYS = {"labelled": "已标注", "saved": "待投", "applied": "已投递",
+             "miss": "漏杀候选", "false_excl": "误杀候选"}
+
+
+def _stats(view: str, stats: dict, total: int, lang: str) -> list[tuple[str, object, str | None]]:
+    """(显示名, 数值, 统计键)。统计键为 None 的项（本批）不随标注变化。"""
+    def stat(key):
+        return (i18n.t(lang, "stat." + key), stats[STAT_KEYS[key]], key)
+    common = [stat("labelled"), stat("saved"), stat("applied")]
     if view == "new":
-        return [(T("stat.batch"), total)] + common
+        return [(i18n.t(lang, "stat.batch"), total, None)] + common
     if view == "excluded":
-        return [(T("stat.miss"), stats["漏杀候选"]), (T("stat.false_excl"), stats["误杀候选"])]
+        return [stat("miss"), stat("false_excl")]
     if view == "labelled":
-        return common[1:] + [(T("stat.miss"), stats["漏杀候选"])]
+        return common[1:] + [stat("miss")]
     return common
+
+
+def _stat_attr(key: str | None) -> str:
+    return f' data-stat="{key}"' if key else ""
 
 
 def render_page(conn, config: dict, view: str, offset: int, limit: int,
                 started: float | None = None, filters: dict | None = None,
-                lang: str = "zh", theme: str | None = None) -> str:
+                lang: str = "zh", theme: str | None = None, lang_pref: str = "auto") -> str:
     """渲染整页。
 
     `started` 现在**不在这里用**（页脚已删），但保留参数：它和
@@ -738,6 +914,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
     note_tags = labels_mod.note_tag_candidates(conn)
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
+    # 「已被占用」的预判直接用后端的 canonical_tokens（同一份小写口径）；
+    # 用 [token, 规范名] 数组而不是对象，避免 __proto__ 之类的词撞原型。
     skill_embed = [{"name": e.get("name"), "display_name": skills_mod.display_name(e), "aliases": e.get("aliases") or []}
                    for e in sorted(skills_cfg.get("skills") or [],
                                    key=lambda e: str(e.get("name") or "").lower())]
@@ -752,7 +930,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
             pager.append(f'<a href="{_link(view, offset + limit, filters, since)}">{_e(T("list.next"))}</a>')
 
     stat_items = _stats(view, stats, total, lang)
-    stats_html = "".join(f'<span>{_e(name)} <b>{_e(n)}</b></span>' for name, n in stat_items)
+    stats_html = "".join(f'<span>{_e(name)} <b{_stat_attr(key)}>{_e(n)}</b></span>'
+                         for name, n, key in stat_items)
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
     if page:
@@ -765,18 +944,9 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     else:
         cards = f'<div class="placeholder">{_e(T("list.empty"))}</div>'
 
-    drawer_stats = "".join(f'<div><b>{_e(n)}</b>{_e(name)}</div>'
-                           for name, n in [(T("stat.labelled"), stats["已标注"]),
-                                           (T("stat.saved"), stats["待投"]),
-                                           (T("stat.applied"), stats["已投递"])])
-    lang_seg = "".join(
-        f'<button type="button" class="{"on" if code == lang else ""}" '
-        f'aria-pressed="{"true" if code == lang else "false"}" onclick="setLang(\'{code}\')">{label}</button>'
-        for code, label in (("zh", "中文"), ("en", "English")))
-    theme_seg = "".join(
-        f'<button type="button" data-theme-choice="{code}" onclick="setTheme(\'{code}\')">'
-        f'{_e(T("set.theme_" + code))}</button>'
-        for code in ("light", "dark", "auto"))
+    drawer_stats = "".join(f'<div><b{_stat_attr(key)}>{_e(stats[STAT_KEYS[key]])}</b>'
+                           f'{_e(T("stat." + key))}</div>'
+                           for key in ("labelled", "saved", "applied"))
 
     return "".join([
         _head(lang, theme, T("app.title") + _demo_suffix(config, lang)),
@@ -790,8 +960,10 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<nav class="tabs" aria-label="{_e(T("nav.views"))}">{nav}</nav>',
         '<span class="spacer"></span>',
         '<div class="top-actions">',
-        _lang_button(lang),
-        _theme_button(lang),
+        # 上次抓取 + 「更新岗位」放在一起；竖屏时 panel.js 把更新按钮挪进抽屉
+        f'<span class="run-controls">{run_note}<span id="update-home" hidden></span>'
+        f'{_update_widget(lang, compact=True)}</span>',
+        _display_menu(lang, lang_pref),
         f'<a class="iconbtn setlink" href="/settings" title="{_e(T("nav.settings"))}">'
         f'{ICON_GEAR}<span>{_e(T("nav.settings"))}</span></a>',
         "</div></div>",
@@ -802,8 +974,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<b>{_e(T("view." + view))}</b>{_e(T("js.colon"))}{_e(T("viewdesc." + view))}</span>'
         f'{_search_explanation(filters, skills_cfg, total, lang)}</div></div>',
         f'<div class="ctx-stats">{stats_html}'
-        f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span>'
-        f'<span class="run-controls">{run_note}{_update_widget(lang, compact=True)}</span></div>',
+        f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span></div>',
         "</div>",
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
         cards,
@@ -827,20 +998,22 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'onclick="closeDrawer()">{ICON_CLOSE}</button></div>',
         f'<div class="drawer-views">{drawer_views}</div>',
         f'<div class="drawer-stats">{drawer_stats}</div>',
-        f'<div class="drawer-sec"><span>{_e(T("set.lang_title"))}</span><div class="segrow">{lang_seg}</div></div>',
-        f'<div class="drawer-sec"><span>{_e(T("set.theme_title"))}</span><div class="segrow">{theme_seg}</div></div>',
+        f'<div class="drawer-run">{run_note}<div id="drawer-update-slot"></div></div>',
+        _display_choices(lang, lang_pref, "dw"),
         f'<a class="drawer-link" href="/settings">{ICON_GEAR}<span>{_e(T("nav.settings"))}</span>'
-        f'<small>{_e(T("set.skills"))} ›</small></a>',
-        f'<div class="drawer-foot">{run_note}</div>',
+        f'<small>{_e(T("nav.settings_hint"))} ›</small></a>',
         "</nav>",
         f'<button type="button" class="scrim" aria-label="{_e(T("nav.menu_close"))}" onclick="closeDrawer()"></button>',
         "</div>",
         '<div class="sheet-scrim" id="sheet-scrim" onclick="toggleMore(false)"></div>',
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         '<div class="note-menu" id="note-menu"></div>',
+        _update_confirm(lang),
         _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
-                        "__SKILLS__": skill_embed, "__RESULT_GENERATION__": result_generation}),
+                        "__SKILLS__": skill_embed,
+                        "__SKILL_OWNERS__": sorted(skills_mod.canonical_tokens(skills_cfg).items()),
+                        "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
         "</body></html>",
     ])
@@ -850,21 +1023,25 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # 设置页
 # ---------------------------------------------------------------------------
 
-SETTINGS_SECTIONS = ("skills", "fetch", "display")
+# 「资格与规则」从「抓取与更新」里独立出来：它决定哪些岗位被排除，与抓取无关。
+# 未指定或未知分区时进入第一个分区：资格与规则。
+SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
+# 配置编辑器（settings.js）按分区只显示自己的那几组；写入与冲突检测是同一套。
+CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
-                    section: str = "skills", lang_pref: str = "auto") -> str:
+                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto") -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
     """
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     if section not in SETTINGS_SECTIONS:
-        section = "skills"
+        section = SETTINGS_SECTIONS[0]
     nav = "".join(
         f'<a class="set-nav-item{" on" if key == section else ""}" '
         f'href="/settings?section={key}"{CURRENT if key == section else ""}>'
-        f'{_e(T("set." + key))}</a>'
+        f'{_e(T("set.rules_tab" if key == "rules" else "set." + key))}</a>'
         for key in SETTINGS_SECTIONS)
 
     if section == "skills":
@@ -890,14 +1067,23 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             f'<p class="set-foot">{_e(T("set.footnote"))}</p>',
         ])
         extra = {"__SKILL_TREE__": tree}
+    elif section == "rules":
+        pane = "".join([
+            '<div class="config-title-line">'
+            f'<h2>{_e(T("set.rules_title"))}</h2><span id="config-actions"></span></div>',
+            f'<p class="set-hint">{_e(T("set.rules_hint"))}</p>',
+            f'<div id="config-editor" data-config-groups="{CONFIG_GROUPS["rules"]}"></div>',
+        ])
+        extra = {}
     elif section == "fetch":
         pane = "".join([
             '<div class="config-title-line">'
             f'<h2>{_e(T("set.fetch_title"))}</h2><span id="config-actions"></span></div>',
-            '<div id="config-editor"></div>',
+            f'<div id="config-editor" data-config-groups="{CONFIG_GROUPS["fetch"]}"></div>',
             f'<h2 class="h2-gap">{_e(T("js.update_title"))}</h2>',
             f'<p class="set-hint">{_e(T("set.update_hint"))}</p>',
             _update_widget(lang),
+            _update_confirm(lang),
         ])
         extra = {}
     else:
@@ -915,7 +1101,7 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
                                        ("zh", "中文", T("set.lang_zh_desc")),
                                        ("en", "English", T("set.lang_en_desc"))], "setLang"),
             f'<h2 class="h2-gap">{_e(T("set.theme_title"))}</h2>',
-            radios("theme", theme or "auto", [("auto", T("set.theme_auto"), "prefers-color-scheme"),
+            radios("theme", theme or "auto", [("auto", T("set.theme_auto"), T("set.theme_auto_desc")),
                                               ("light", T("set.theme_light"), ""),
                                               ("dark", T("set.theme_dark"), "")], "setTheme"),
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
@@ -933,7 +1119,8 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
         f'<a class="backlink" href="/" title="{_e(T("nav.back"))}" aria-label="{_e(T("nav.back"))}">'
         f'{ICON_BACK}</a>'
         f'<h1>{_e(T("settings.title"))}</h1><span class="spacer"></span>',
-        _lang_button(lang), _theme_button(lang),
+        # 显示分区本身就是这些选项，顶栏不再重复一份
+        "" if section == "display" else _display_menu(lang, lang_pref),
         '</header>',
         '<main class="set-wrap">',
         f'<nav class="set-nav" aria-label="{_e(T("set.sections"))}">{nav}</nav>',

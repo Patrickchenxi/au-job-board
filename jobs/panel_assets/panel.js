@@ -71,11 +71,22 @@ function refreshDot(uid){
     d.querySelectorAll('.dot').forEach(el=>{ setDot(el, dotClass(s[el.dataset.axis])); });
     const title=dotsTitle(s); d.title=title; d.setAttribute('aria-label',title);
   });
-  // 详情里每条轴标签前的同款圆点
+  // 卡片上的进度文字（待投 / 已投 / 跳过）与圆点同源：都读 LABELS[uid]（组合并后的标注）
+  document.querySelectorAll('.prog[data-prog-uid="'+uid+'"]').forEach(el=>{
+    const v=s.action;
+    el.hidden=!v;
+    el.className='prog'+(v ? ' '+(TONE[v]||'mid') : '');
+    el.textContent=v ? T('value.action.'+v) : '';
+    el.title=v ? T('field.action')+T('js.colon')+T('value.action.'+v) : '';
+  });
+  // 详情里每条轴标签前的同款圆点，以及竖屏底栏「标注 ▴」后的当前三项
+  if(!document.querySelector('#detail [data-uid="'+uid+'"]')) return;
   AXES.forEach(k=>{
     const el=document.querySelector('#detail [data-axis-dot="'+k+'"]');
-    if(el && document.querySelector('#detail [data-uid="'+uid+'"]')) setDot(el, dotClass(s[k]));
+    if(el) setDot(el, dotClass(s[k]));
   });
+  const sum=AXES.filter(k=>s[k]).map(k=>T('value.'+k+'.'+s[k])).join(' · ')||T('js.detail_unlabelled');
+  document.querySelectorAll('#detail .label-sum').forEach(el=>{ el.textContent=sum; });
 }
 /* 圆点状态变化时轻轻弹一下，让人看到「标注落到了哪一颗」 */
 function setDot(el, cls){
@@ -98,9 +109,14 @@ async function openJob(uid){
   history.replaceState(null,'','#'+encodeURIComponent(uid));
   const pane=document.getElementById('detail');
   const seq=(OPEN_SEQ+=1);
-  // 请求很快时不闪「载入中」：160ms 内回来就直接换内容，慢了才显示骨架屏
-  const slow=setTimeout(()=>{ if(seq===OPEN_SEQ) showSkeleton(pane); },160);
-  if(document.body.classList.contains('portrait') && (!pane.classList.contains('open') || pane.classList.contains('leaving'))){
+  const mobileOpening=document.body.classList.contains('portrait') &&
+    (!pane.classList.contains('open') || pane.classList.contains('leaving'));
+  // 竖屏重新入场前清掉上一条详情；已显示的详情仍等 160ms 才显示骨架屏。
+  const slow=mobileOpening ? null : setTimeout(()=>{ if(seq===OPEN_SEQ) showSkeleton(pane); },160);
+  if(mobileOpening){
+    showSkeleton(pane);
+    pane.scrollTop=0;
+    pane.classList.remove('label-open');
     pane.classList.add('open'); pane.classList.remove('leaving');
     reveal(pane);                                   // 竖屏：详情从右侧滑入
   }
@@ -112,8 +128,10 @@ async function openJob(uid){
     clearTimeout(slow);
     pane.innerHTML=d.html;
     pane.querySelectorAll('.note input').forEach(noteSync);
+    pane.classList.remove('label-open');            // 标注抽屉属于上一条，换条即收起
     pane.classList.add('open');
     pane.scrollTop=0;
+    syncDetailNav();
     swapIn(pane);
   }catch(e){
     clearTimeout(slow);
@@ -146,6 +164,7 @@ async function closeDetail(){
   if(UPDATE_PENDING){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
   const pane=document.getElementById('detail');
+  pane.classList.remove('label-open');
   if(!document.body.classList.contains('portrait') || REDUCED.matches){ pane.classList.remove('open'); return; }
   conceal(pane, ()=>{ pane.hidden=false; pane.classList.remove('open'); });
 }
@@ -160,8 +179,93 @@ async function setLabel(uid,field,value,btn){
     .forEach(b=>{ const on=(b===btn&&!wasOn); b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false'); });
   LABELS[uid]=LABELS[uid]||{}; LABELS[uid][field]= wasOn?null:value;
   refreshDot(uid);
+  refreshStats();
   if(field==='eligibility' && !wasOn && value==='ineligible') toast(T('js.miss_hint'));
   else toast(wasOn ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field)+T('js.colon')+T('value.'+field+'.'+value));
+}
+/* ---- 顶部统计 -----------------------------------------------------------
+   写入成功后向只读接口 /api/stats 重拉，按 data-stat 键回填。**不在前端加减**：
+   统计按单条记录计，列表按去重组合并显示，自己算会和后端口径对不上。
+   连续标注时只认最后一次请求；失败就保留原数字（宁可旧，不写错）。 */
+let STATS_SEQ=0;
+async function refreshStats(){
+  if(!document.querySelector('[data-stat]')) return;
+  const seq=(STATS_SEQ+=1);
+  try{
+    const r=await fetch('/api/stats',{cache:'no-store',credentials:'same-origin'});
+    if(!r.ok) return;
+    const d=await r.json();
+    if(seq!==STATS_SEQ || !d || typeof d!=='object') return;
+    document.querySelectorAll('[data-stat]').forEach(el=>{
+      const v=d[el.dataset.stat];
+      if(Number.isSafeInteger(v) && v>=0) el.textContent=String(v);
+    });
+  }catch(e){}
+}
+/* ---- 上一条 / 下一条 + J/K ---------------------------------------------
+   顺序是**页面载入时冻结**的卡片顺序：标注不会让卡片消失或换位，所以刚标完
+   的那条仍占着位置，「下一条」不会跳过一条（推荐视图本来就按 since 冻结）。
+   切换一律走 openJob：它先过 allowDetailNavigation（等备注写完、草稿先确认），
+   有待应用的新结果时整页载入并把目标 uid 带进 hash。
+   正在等保存/确认时再按键直接忽略 —— 不排队，免得一口气跳过几条没看过的。 */
+let NAV_LIST=null, NAV_GATES=0;
+function navList(){
+  if(!NAV_LIST) NAV_LIST=Array.from(document.querySelectorAll('.list .card')).map(c=>c.dataset.uid);
+  return NAV_LIST;
+}
+function syncDetailNav(){
+  const pane=document.getElementById('detail'); if(!pane) return;
+  const list=navList(), i=OPEN_UID ? list.indexOf(OPEN_UID) : -1;
+  pane.querySelectorAll('.stepbtn').forEach(b=>{ b.disabled = i<0 || !list[i+parseInt(b.dataset.step,10)]; });
+  pane.querySelectorAll('.d-pos').forEach(el=>{ el.textContent = i<0 ? '' : T('js.detail_pos',{n:i+1,total:list.length}); });
+}
+async function stepDetail(delta){
+  if(NAV_GATES || DETAIL_LEAVING || UPDATE_APPLYING) return;
+  const list=navList(); if(!list.length) return;
+  let target;
+  if(!OPEN_UID) target = delta>0 ? list[0] : list[list.length-1];
+  else {
+    const i=list.indexOf(OPEN_UID);
+    if(i<0){ toast(T('js.detail_not_in_list')); return; }   // 从别处打开的岗位不在本页列表里
+    target=list[i+delta];
+  }
+  if(!target){ toast(T(delta>0 ? 'js.detail_last' : 'js.detail_first')); return; }
+  await openJob(target);
+  if(OPEN_UID!==target || document.body.classList.contains('portrait')) return;
+  const card=Array.from(document.querySelectorAll('.list .card')).find(c=>c.dataset.uid===target);
+  if(card && card.scrollIntoView) card.scrollIntoView({block:'nearest'});
+}
+function navKeyIgnored(ev){
+  if(ev.defaultPrevented || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey || imeComposing(ev)) return true;
+  for(const el of [ev.target, document.activeElement]){
+    if(!el || !el.tagName) continue;
+    if(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
+  }
+  // 抽屉、筛选面板和对话浮层开着时按键属于它们
+  const detail=document.getElementById('detail');
+  return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'))
+    || !!(detail && detail.classList.contains('label-open'))
+    || shown(document.getElementById('update-confirm'))
+    || shown(document.getElementById('display-pop'));
+}
+document.addEventListener('keydown',ev=>{
+  const step={j:1,k:-1}[String(ev.key||'').toLowerCase()];
+  if(!step || !document.getElementById('detail') || navKeyIgnored(ev)) return;
+  ev.preventDefault();
+  stepDetail(step);
+});
+/* ---- 竖屏：标注抽屉 -----------------------------------------------------
+   竖屏先读正文：「做标记 + 备注」这一块（同一组节点，不复制）变成底部抽屉，
+   由底栏「标注 ▴」打开。收起时让抽屉里的焦点失焦 —— 备注照常走 noteBlur →
+   保存队列；没保存成的草稿仍留在输入框里，离开时照样拦截。 */
+function toggleLabelSheet(force){
+  const pane=document.getElementById('detail'), sheet=document.getElementById('label-sheet');
+  if(!pane || !sheet) return;
+  const open = force===undefined ? !pane.classList.contains('label-open') : !!force;
+  if(!open && document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
+  pane.classList.toggle('label-open',open);
+  pane.querySelectorAll('.label-toggle').forEach(b=>b.setAttribute('aria-expanded',open?'true':'false'));
+  if(open && sheet.focus) sheet.focus({preventScroll:true});
 }
 function setNote(input){
   const uid=input.dataset.uid;
@@ -203,6 +307,7 @@ async function saveNote(input,request){
       input.dataset.noteLoaded=noteTagTranslate(saved);
     }
     LABELS[uid]=LABELS[uid]||{}; LABELS[uid].note=saved||null; refreshDot(uid);
+    refreshStats();                 // 只有备注的新标注也算「已标注」
     toast(T('js.note_saved'));
   }catch(e){toast(T('js.note_failed')+e.message);}
 }
@@ -526,10 +631,14 @@ function fitLayout(){
   if(avail < MIN_LEFT+MIN_RIGHT){
     document.body.classList.add('portrait');
     placeFilters(true);
+    if(shown(document.getElementById('more-panel'))) filterDraftBegin();
+    placeUpdate(true);
     return;
   }
   document.body.classList.remove('portrait');
+  filterDraftDiscard();             // 桌面即改即生效：没应用的抽屉草稿作废
   placeFilters(false);
+  placeUpdate(false);
   closeDrawer();
   const want=readStoredLeft() ?? Math.min(DEFAULT_LEFT,avail-MIN_RIGHT);
   setLeft(Math.min(Math.max(want,MIN_LEFT),avail-MIN_RIGHT));
@@ -586,12 +695,15 @@ function searchTyping(ev){
   // **也不要清掉 compositionend 已经排上的那个** —— 否则组字确认后反倒搜不了。
   if(imeComposing(ev) || imeBusy(el) || imeJustComposed(el)) return;
   clearTimeout(Q_TIMER);
+  // 竖屏筛选抽屉开着：搜索词也是草稿，只更新「应用（N 项）」
+  if(filterBatching()){ filterChanged(); return; }
   Q_TIMER=setTimeout(applyFilter,380);
 }
 function searchStart(ev){ clearTimeout(Q_TIMER); imeStart(ev.target); }
 function searchEnd(ev){
   imeEnd(ev.target);
   clearTimeout(Q_TIMER);
+  if(filterBatching()){ filterChanged(); return; }
   Q_TIMER=setTimeout(applyFilter,380);
 }
 function searchKeys(ev){
@@ -622,36 +734,113 @@ function skillMenuClose(){
 }
 
 /* ---- 详情页的技能词表编辑 ----------------------------------------------
-   复用备注候选表那套形态（输入即过滤、候选可滚、点选生效），但语义不同：
-   点候选 = 把输入框里的词作为该技能的**别名**；回车 = **新增**一个技能。
-   落库前由 skills.apply_edit 校验（同名、重复、超长都会被打回）。 */
+   复用备注候选表那套形态（候选可滚、点选生效），但语义不同：
+   点候选 = 把输入框里的词作为该技能的**别名**；回车 / 首行 = **新增**一个技能。
+   落库前由 skills.apply_edit 校验（同名、重复、超长都会被打回）。
+
+   **候选不按输入过滤**：要设成别名的词与目标技能天然不同名（aws ↔ Amazon Web
+   Services），按输入筛会把目标筛掉。所以排序是唯一的"怎么找"：
+     首行   固定「＋ 新增技能」；词已是某技能的名称/别名时换成不可点的提示
+     可能是 首字母缩写、名称/别名互相包含、词重叠 —— 忽略大小写、空格、标点
+     全部   完整字母表（含上一组的项），每行技能名 + 灰字别名
+   列表显示展示名，写入的 target 一律是规范名。 */
 const SKILLS = window.__SKILLS__ || [];
+/* token（后端 canonical_tokens 的小写键）-> 规范名，与 apply_edit 的判定同一份数据 */
+const SKILL_OWNERS = new Map(window.__SKILL_OWNERS__ || []);
+/* 与后端 skills._clean 同口径：Python str.split() 的空白字符集合，折叠成单个空格 */
+const PY_SPACE = /[\t\n\x0b\x0c\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+function skillClean(v){ return String(v==null?'':v).split(PY_SPACE).filter(Boolean).join(' '); }
+/* 已占用：apply_edit 用 canonical_tokens().get(token.lower())，这里同样只做 toLowerCase */
+function skillOwner(token){
+  const t=skillClean(token);
+  return t ? (SKILL_OWNERS.get(t.toLowerCase())||null) : null;
+}
+function skillLabel(s){ return s.display_name||s.name; }
+function skillCompare(a,b){
+  const x=skillLabel(a).toLowerCase(), y=skillLabel(b).toLowerCase();
+  return x<y ? -1 : x>y ? 1 : 0;
+}
+/* 相似度只决定「可能是」组的顺序，不隐藏任何项 */
+function skillNorm(v){ return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,''); }
+function skillWords(v){ return String(v||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>1); }
+function skillInitials(v){
+  return String(v||'').split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(w=>w[0]).join('').toLowerCase();
+}
+function skillSimilarity(token,s){
+  const q=skillNorm(token), qi=skillInitials(token), qw=skillWords(token);
+  if(!q) return 0;
+  let best=0;
+  for(const name of [s.name, ...(s.aliases||[])]){
+    const n=skillNorm(name); if(!n) continue;
+    const ni=skillInitials(name);
+    if((q.length>1 && ni.length>1 && ni===q) || (n.length>1 && qi.length>1 && qi===n)) best=Math.max(best,90);
+    const short=q.length<=n.length ? q : n;
+    if(short.length>1 && (n.includes(q) || q.includes(n))) best=Math.max(best,70);
+    const nw=skillWords(name);
+    if(qw.some(w=>nw.includes(w))) best=Math.max(best,50);
+  }
+  return best;
+}
 function skillInput(){ return document.getElementById('skill-q'); }
 function skillMenu(){ return document.getElementById('skill-menu'); }
+/* 候选行：kind = add | taken | hint | group | alias；alias 行带规范名 target */
+function skillRows(value){
+  const token=skillClean(value);
+  const owner=skillOwner(token);
+  const rows=[];
+  if(!token) rows.push({kind:'hint', label:T('js.skill_type_first')});
+  else if(owner){
+    const hit=SKILLS.find(s=>s.name===owner);
+    rows.push({kind:'taken', label:T('js.skill_taken',{token:token,name:hit?skillLabel(hit):owner})});
+  } else rows.push({kind:'add', label:T('js.skill_add',{token:token})});
+  const off=!token || !!owner;
+  const alias=s=>{
+    const shown=skillLabel(s).toLowerCase();
+    const extra=[s.name, ...(s.aliases||[])].filter((a,i,all)=>a && String(a).toLowerCase()!==shown
+      && all.findIndex(b=>String(b).toLowerCase()===String(a).toLowerCase())===i);
+    return {kind:'alias', label:skillLabel(s), extra:extra, target:s.name, off:off};
+  };
+  if(!off){
+    const like=SKILLS.map(s=>[skillSimilarity(token,s),s]).filter(x=>x[0]>0)
+      .sort((a,b)=>(b[0]-a[0]) || skillCompare(a[1],b[1])).slice(0,5);
+    if(like.length){
+      rows.push({kind:'group', label:T('js.skill_group_like')});
+      like.forEach(x=>rows.push(alias(x[1])));
+    }
+  }
+  if(SKILLS.length){
+    rows.push({kind:'group', label:T('js.skill_group_all')});
+    SKILLS.slice().sort(skillCompare).forEach(s=>rows.push(alias(s)));
+  }
+  return {token:token, owner:owner, rows:rows};
+}
 function skillRender(){
   const input=skillInput(); if(!input) return;
   const m=skillMenu(); if(!m) return;
-  const rows=[];
-  if(input.value.trim())
-    rows.push({kind:'add', label:T('js.skill_add',{token:input.value.trim()}), target:''});
-  // **候选不按输入过滤**：词表已按字母排好，滚一遍就能找到。之前按输入筛，
-  // 想打 "Amazon Web Service" 去认 AWS 时，列表会被逐字筛空，反而找不到。
-  // 候选标签带上别名，扫一眼就知道是不是它。
-  SKILLS.forEach(s=>{
-    rows.push({kind:'alias', label:T('js.skill_as_alias',{name:s.display_name||s.name}), target:s.name});
-  });
+  const list=skillRows(input.value);
   m.innerHTML=''; m.scrollTop=0;
-  if(!rows.length){
-    const d=document.createElement('div'); d.className='note-empty';
-    d.textContent=T('js.skill_empty'); m.appendChild(d);
-  }
-  rows.slice(0,400).forEach(r=>{
-    const d=document.createElement('div'); d.className='note-item'; d.textContent=r.label;
+  list.rows.slice(0,500).forEach(r=>{
+    const d=document.createElement('div');
+    if(r.kind==='group' || r.kind==='hint' || r.kind==='taken'){
+      d.className = r.kind==='group' ? 'note-group' : (r.kind==='taken' ? 'note-empty note-warn' : 'note-empty');
+      d.textContent=r.label; m.appendChild(d); return;
+    }
+    d.className='note-item'+(r.kind==='add' ? ' note-add' : '')+(r.off ? ' off' : '');
+    d.textContent=r.label;
+    if(r.extra && r.extra.length){
+      const a=document.createElement('span'); a.className='note-alias'; a.textContent=r.extra.join(' · ');
+      d.appendChild(a);
+    }
+    d.dataset.kind=r.kind; d.dataset.target=r.target||'';
     // mousedown + preventDefault：和备注候选一样，别让输入框失焦导致菜单先被收掉
-    d.addEventListener('mousedown',ev=>{ev.preventDefault(); skillPick(r.kind,r.target);});
+    d.addEventListener('mousedown',ev=>{
+      ev.preventDefault();
+      if(r.off){ toast(list.rows[0].label); return; }   // 先输入 / 已被占用
+      skillPick(r.kind, r.target||'');
+    });
     m.appendChild(d);
   });
-  placeMenu(input,m,{minWidth:240});
+  placeMenu(input,m,{minWidth:280});
 }
 let SKILL_SAVING=false, SKILL_REQUEST=null, SKILL_NAV_WAITING=false;
 function skillStatus(text){
@@ -704,7 +893,12 @@ async function saveSkill(kind,target){
 function skillKeys(ev){
   if(imeComposing(ev) || imeBusy(ev.target) || imeJustComposed(ev.target)) return;
   if(ev.key==='Escape'){ skillMenuClose(); return; }
-  if(ev.key==='Enter'){ ev.preventDefault(); skillPick('add',''); }
+  if(ev.key==='Enter'){
+    ev.preventDefault();
+    const list=skillRows(ev.target.value);
+    if(list.owner){ toast(list.rows[0].label); return; }       // 已占用：提前提示，不发请求
+    skillPick('add','');
+  }
 }
 /* 每个视图各记各的筛选条件。
    存在 localStorage 的 {view: "q=python&interest=want"} 里。
@@ -735,8 +929,14 @@ function viewParams(){
   return p;
 }
 /* 所有筛选控件共用这一套：data-fkey -> URL 参数。
-   **不要给排序另起状态管理**，否则 URL 里会有两个真相。 */
+   **不要给排序另起状态管理**，否则 URL 里会有两个真相。
+   竖屏筛选抽屉开着时，任何防抖 / 直接调用都只更新草稿；只有「应用」走 commitFilter 跳转。 */
 function applyFilter(){
+  clearTimeout(Q_TIMER);
+  if(filterBatching()){ filterChanged(); return; }
+  commitFilter();
+}
+function commitFilter(){
   clearTimeout(Q_TIMER);
   const view=window.__VIEW__||'recommend';
   const p=viewParams();
@@ -747,8 +947,10 @@ function applyFilter(){
   p.set('view',view);
   navigatePanel('/'+ (p.toString()?'?'+p.toString():''));
 }
-/* 清除筛选 = 回到该视图的默认口径，并忘掉记住的那套 */
+/* 清除筛选 = 回到该视图的默认口径，并忘掉记住的那套。
+   竖屏抽屉里只把全部控件复位进草稿（「应用」才跳转，关闭即还原）。 */
 function clearFilter(){
+  if(filterBatching()){ filterDraftBegin(); filterControls().forEach(resetEl); filterChanged(); return; }
   const view=window.__VIEW__||'recommend';
   const st=filterStore(); delete st[view]; writeFilterStore(st);
   navigatePanel('/?view='+encodeURIComponent(view));
@@ -807,7 +1009,7 @@ function syncMenusOnScroll(){
   const active=document.activeElement;
   const si=skillInput(), sm=document.getElementById('skill-menu');
   if(sm && sm.classList.contains('open')){
-    if(si && active===si) placeMenu(si,sm,{minWidth:240});
+    if(si && active===si) placeMenu(si,sm,{minWidth:280});
     else skillMenuClose();
   }
   const ni=document.querySelector('.note input'), nm=noteMenu();
@@ -852,12 +1054,16 @@ function toggleMore(force){
   const open = (force===undefined) ? !shown(p) : !!force;
   if(open===shown(p)) return;
   moreButtons().forEach(b=>b.setAttribute('aria-expanded',open?'true':'false'));
+  if(open && document.body.classList.contains('portrait')) filterDraftBegin();
+  if(!open) filterDraftDiscard();
   if(open){ document.body.classList.remove('sheet-closing'); document.body.classList.add('sheet-open'); reveal(p); }
   else {
     document.body.classList.add('sheet-closing');
     conceal(p, ()=>document.body.classList.remove('sheet-open','sheet-closing'));
   }
   try{ if(open) sessionStorage.setItem(MORE_KEY,'1'); else sessionStorage.removeItem(MORE_KEY); }catch(e){}
+  // 草稿期间推迟的新结果：丢弃草稿后没开着岗位就立刻载入
+  if(!open && UPDATE_PENDING && !OPEN_UID) applyLatestResults();
 }
 function placeFilters(portrait){
   const slot=document.getElementById('sheet-slot'); if(!slot) return;
@@ -868,11 +1074,30 @@ function placeFilters(portrait){
     else if(el.previousElementSibling!==anchor){ anchor.after(el); }
   });
 }
+/* 「更新岗位」只有一个按钮（#update-start，状态机与禁用逻辑都挂在它上面）。
+   竖屏时顶栏隐藏，把整个小部件**挪进**抽屉里「上次抓取」旁边；横屏挪回顶栏。
+   和 placeFilters 一样是移动节点，不复制。 */
+function placeUpdate(portrait){
+  const w=document.getElementById('update-widget');
+  const slot=document.getElementById('drawer-update-slot'), home=document.getElementById('update-home');
+  if(!w || !slot || !home) return;
+  if(portrait){ if(w.parentNode!==slot) slot.appendChild(w); }
+  else if(home.nextElementSibling!==w){ home.after(w); }
+}
 /* 移除单个筛选：把对应控件复位，再走同一个 applyFilter（URL 仍是唯一真相） */
 function resetControl(key){
   document.querySelectorAll('[data-fkey="'+key+'"]').forEach(el=>{
     if(el.type==='checkbox') el.checked=false; else el.value='';
   });
+}
+/* 复位成默认页渲染出的样子：下拉选「任意」（空值）项，没有空值项（排序）就选第一项 */
+function resetEl(el){
+  if(el.type==='checkbox'){ el.checked=false; return; }
+  const opts=el.tagName==='SELECT' && el.options ? Array.from(el.options) : [];
+  if(!opts.length){ el.value=''; return; }
+  if(el.multiple){ opts.forEach(o=>{ o.selected=false; }); return; }
+  const i=opts.findIndex(o=>o.value==='');
+  el.selectedIndex = i<0 ? 0 : i;
 }
 function removeFilter(key){
   resetControl(key);
@@ -885,7 +1110,89 @@ function removeFilter(key){
 function clearHidden(){
   const p=document.getElementById('more-panel'); if(!p) return;
   (p.dataset.keys||'').split(' ').filter(Boolean).forEach(resetControl);
-  applyFilter();
+  filterChanged();
+}
+/* ---- 竖屏筛选抽屉：改完一次「应用」 --------------------------------------
+   桌面即改即生效。竖屏抽屉里改动只留在控件上，「应用」才调一次 applyFilter，
+   其余一切照旧 —— **不另建筛选状态**：草稿就是控件本身，URL 仍是唯一真相。
+   打开抽屉时记下各控件的值（= 由 URL 渲染出的状态）；关闭 / 取消 / 切回桌面
+   就按快照还原，等于丢弃草稿。 */
+let FILTER_DRAFT=null;
+function filterControls(){ return Array.from(document.querySelectorAll('[data-fkey]')); }
+function filterBatching(){
+  return document.body.classList.contains('portrait') && shown(document.getElementById('more-panel'));
+}
+/* 搜索框还没提交的字（380ms 防抖内）不算 URL 状态：基线与快照用渲染时的值，
+   这样它计入「应用（N 项）」，丢弃草稿时也一起还原。 */
+function urlValue(el){
+  return el.dataset.fkey==='q' && typeof el.defaultValue==='string' ? el.defaultValue : el.value;
+}
+function filterDraftBegin(){
+  if(FILTER_DRAFT) return;
+  clearTimeout(Q_TIMER);              // 抽屉打开前排上的搜索跳转作废，搜索词进草稿
+  const base=viewParams();
+  const qi=filterControls().find(el=>el.dataset.fkey==='q');
+  if(qi){ base.delete('q'); if(urlValue(qi)) base.append('q', urlValue(qi)); }
+  FILTER_DRAFT={base, snap:filterControls().map(el=>[el,
+    el.type==='checkbox' ? el.checked : (el.multiple ? Array.from(el.options).map(o=>o.selected) : urlValue(el))])};
+  syncFilterDraft();
+}
+function filterDraftDiscard(){
+  const draft=FILTER_DRAFT; if(!draft) return;
+  FILTER_DRAFT=null;
+  draft.snap.forEach(([el,v])=>{
+    if(el.type==='checkbox') el.checked=v;
+    else if(Array.isArray(v)) Array.from(el.options).forEach((o,i)=>{ o.selected=!!v[i]; });
+    else el.value=v;
+  });
+  syncFilterDraft();
+}
+/* 草稿里与 URL 不同的参数个数（同一个键的多值按集合比较） */
+function filterDraftCount(){
+  if(!FILTER_DRAFT) return 0;
+  const a=FILTER_DRAFT.base, b=viewParams();
+  const keys=new Set([...a.keys(), ...b.keys()]);
+  let n=0;
+  keys.forEach(k=>{
+    const x=a.getAll(k).sort().join('\n'), y=b.getAll(k).sort().join('\n');
+    if(x!==y) n+=1;
+  });
+  return n;
+}
+/* 控件外观跟着草稿走（ctl.on、技能多选的摘要），按钮写「应用（N 项）」 */
+function syncFilterDraft(){
+  filterControls().forEach(el=>{
+    const box=el.closest ? el.closest('.ctl') : null;
+    if(box && el.dataset.fkey!=='sort' && el.dataset.fkey!=='q')
+      box.classList.toggle('on', el.type==='checkbox' ? el.checked : !!el.value);
+  });
+  const pick=document.getElementById('skillpick');
+  if(pick){
+    const names=Array.from(pick.querySelectorAll('input[type=checkbox]')).filter(c=>c.checked)
+      .map(c=>{ const t=c.nextElementSibling; return t ? t.textContent : c.value; });
+    const btn=pick.querySelector('button.ctl'), v=pick.querySelector('.v');
+    if(btn) btn.classList.toggle('on',names.length>0);
+    if(v) v.textContent=names.length ? names.join(', ') : T('filter.any');
+  }
+  const done=document.getElementById('more-done');
+  if(done){
+    const n=filterDraftCount();
+    done.textContent = n ? T('js.filter_apply',{n}) : T('filter.done');
+  }
+}
+function filterChanged(){
+  if(!filterBatching()){ applyFilter(); return; }
+  filterDraftBegin();
+  syncFilterDraft();
+}
+/* 抽屉底部按钮：有改动 =「应用」（一次跳转，跳完不再自动展开）；没改动 = 收起 */
+function moreDone(){
+  if(filterBatching() && filterDraftCount()){
+    try{ sessionStorage.removeItem(MORE_KEY); }catch(e){}
+    commitFilter();
+    return;
+  }
+  toggleMore(false);
 }
 
 /* ---- 汉堡菜单（竖屏）------------------------------------------------- */
@@ -902,6 +1209,8 @@ function closeDrawer(){
 }
 document.addEventListener('keydown',ev=>{
   if(ev.key!=='Escape') return;
+  const pane=document.getElementById('detail');
+  if(pane && pane.classList.contains('label-open')){ toggleLabelSheet(false); return; }
   closeDrawer();
   const p=document.getElementById('more-panel');
   if(shown(p) && document.body.classList.contains('portrait')) toggleMore(false);
@@ -930,11 +1239,7 @@ function setTheme(theme){
   else { setPref('jobs_theme',theme); document.documentElement.dataset.theme=theme; }
   syncThemeUi();
 }
-function toggleTheme(){ setTheme(effectiveTheme()==='dark' ? 'light' : 'dark'); }
 function syncThemeUi(){
-  const eff=effectiveTheme();
-  const label=eff==='dark' ? T('theme.to_light') : T('theme.to_dark');
-  document.querySelectorAll('.theme-btn').forEach(b=>{ b.setAttribute('aria-label',label); b.title=label; });
   const choice=document.documentElement.dataset.theme||'auto';
   document.querySelectorAll('[data-theme-choice]').forEach(b=>{
     const on=b.dataset.themeChoice===choice;
@@ -945,6 +1250,34 @@ if(window.matchMedia){
   const mq=matchMedia('(prefers-color-scheme: dark)');
   if(mq.addEventListener) mq.addEventListener('change',syncThemeUi);
 }
+
+/* ---- 顶栏「显示」菜单 ------------------------------------------------
+   语言 + 外观的弹出层（披露式按钮，不是 ARIA menu：里面是普通的切换按钮）。
+   点外面 / Esc / 焦点离开都会收起；Esc 把焦点还给「显示」按钮。 */
+function displayParts(){ return [document.getElementById('display-btn'), document.getElementById('display-pop')]; }
+function toggleDisplay(force){
+  const [btn,pop]=displayParts(); if(!btn || !pop) return;
+  const open=(force===undefined) ? pop.hidden : !!force;
+  if(open===!pop.hidden) return;
+  pop.hidden=!open;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+  if(open){ const on=pop.querySelector('button.on')||pop.querySelector('button'); if(on) on.focus(); }
+}
+document.addEventListener('click',ev=>{
+  const box=document.getElementById('display-menu');
+  if(box && ev.target instanceof Node && !box.contains(ev.target)) toggleDisplay(false);
+});
+document.addEventListener('focusout',ev=>{
+  const box=document.getElementById('display-menu');
+  if(!box || !box.contains(ev.target)) return;
+  if(ev.relatedTarget && box.contains(ev.relatedTarget)) return;
+  if(ev.relatedTarget) toggleDisplay(false);
+},true);
+document.addEventListener('keydown',ev=>{
+  if(ev.key!=='Escape') return;
+  const [btn,pop]=displayParts();
+  if(pop && !pop.hidden){ toggleDisplay(false); if(btn) btn.focus(); }
+});
 
 /* ---- 详情：? 说明与技能编辑的展开 ------------------------------------- */
 function toggleHelp(btn){
@@ -1000,13 +1333,16 @@ function hasDetailDraft(){
     !!(skillInput() && skillInput().value.trim());
 }
 async function allowDetailNavigation(){
-  if(SKILL_REQUEST){
-    SKILL_NAV_WAITING=true;
-    await SKILL_REQUEST;
-    SKILL_NAV_WAITING=false;
-  }
-  if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
-  return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));
+  NAV_GATES+=1;
+  try{
+    if(SKILL_REQUEST){
+      SKILL_NAV_WAITING=true;
+      await SKILL_REQUEST;
+      SKILL_NAV_WAITING=false;
+    }
+    if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
+    return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));
+  }finally{NAV_GATES-=1;}
 }
 function rememberListPosition(){
   const list=document.querySelector('.list');if(!list)return;
@@ -1018,7 +1354,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && hasDetailDraft()))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();
@@ -1043,7 +1379,10 @@ function relativeRunTime(data){
   const n=Math.max(1,Math.floor(seconds/(unit==='minutes'?60:unit==='hours'?3600:86400)));
   let text=T('run.ago',{ago:T('ago.'+unit,{n})});
   if(isRunStale(data))text+=T('run.stale');
-  if(data.state!=='success')text+=' · '+T('js.update_'+data.state);
+  if(data.state!=='success'){
+    const short='run.state_'+data.state;
+    text+=' · '+(Object.prototype.hasOwnProperty.call(I18N,short) ? T(short) : T('js.update_'+data.state));
+  }
   return text;
 }
 function renderUpdateState(data, fromPoll=false){
@@ -1085,7 +1424,9 @@ function renderUpdateState(data, fromPoll=false){
     const text=document.createElement('span');text.textContent=relativeRunTime(data);el.appendChild(text);
   });
   const meta=[];
-  if(data.task_id)meta.push(T('js.update_task',{id:data.task_id}));
+  const task=document.getElementById('update-task');
+  if(task){task.textContent=data.task_id?T('js.update_task',{id:data.task_id}):'';
+    if(task.parentElement)task.parentElement.hidden=!data.task_id;}
   if(data.trigger)meta.push(T('js.update_trigger',{source:T('js.update_trigger_'+data.trigger)}));
   const startedTime=updateTime(data.started_at),finished=updateTime(data.finished_at);
   if(startedTime)meta.push(T('js.update_started',{time:startedTime}));
@@ -1142,9 +1483,44 @@ async function startJobUpdate(){
   }catch(e){updateConnectionLost();}
   finally{UPDATE_REQUESTING=false;scheduleUpdatePoll(1500);}
 }
+/* 「更新岗位」会联网、要几分钟，所以先确认。确认窗只是挡在 startJobUpdate 前面：
+   按钮的禁用、请求和轮询仍走原来的状态机。确认时按钮若已被禁用（例如别的
+   页面刚开始更新），就不再发起。 */
+function updateConfirmEl(){ return document.getElementById('update-confirm'); }
+function requestJobUpdate(){
+  const box=updateConfirmEl();
+  if(!box){ startJobUpdate(); return; }
+  reveal(box);
+  const cancel=box.querySelector('[data-update-cancel]'); if(cancel) cancel.focus();
+}
+function closeUpdateConfirm(start){
+  const box=updateConfirmEl(); if(!box || !shown(box)) return;
+  if(start){   // 更新按钮运行期间会禁用、接不住焦点：先把焦点移到可见的状态文字，再收起对话框
+    const status=document.getElementById('update-status');
+    if(status && status.focus) status.focus();
+  }
+  conceal(box);
+  const button=document.getElementById('update-start');
+  if(start && button && !button.disabled) startJobUpdate();
+  else if(button && !button.disabled && button.getClientRects && button.getClientRects().length) button.focus();
+}
 document.addEventListener('DOMContentLoaded',()=>{
   const button=document.getElementById('update-start');
-  if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
+  if(button){button.addEventListener('click',requestJobUpdate);pollUpdateState();}
+  const box=updateConfirmEl();
+  if(!box || !box.querySelector) return;
+  const ok=box.querySelector('[data-update-ok]'), cancel=box.querySelector('[data-update-cancel]');
+  if(ok) ok.addEventListener('click',()=>closeUpdateConfirm(true));
+  if(cancel) cancel.addEventListener('click',()=>closeUpdateConfirm(false));
+  box.addEventListener('click',ev=>{ if(ev.target===box) closeUpdateConfirm(false); });
+  box.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape'){ ev.preventDefault(); ev.stopPropagation(); closeUpdateConfirm(false); return; }
+    if(ev.key!=='Tab') return;
+    const items=[cancel,ok].filter(Boolean);
+    const i=items.indexOf(document.activeElement);
+    ev.preventDefault();
+    items[(i + (ev.shiftKey ? items.length-1 : 1)) % items.length].focus();
+  });
 });
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden && document.getElementById('update-start'))pollUpdateState();

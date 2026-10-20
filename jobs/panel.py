@@ -40,7 +40,7 @@ from .panel_data import (  # noqa: F401
 from .panel_views import (  # noqa: F401
     _e, _btn, _tag_html, _label_state, _card, _detail_html, STALE_AFTER_DAYS,
     _last_run_note, _skill_picker, _tier_select, _filter_bar, _search_explanation,
-    SETTINGS_SECTIONS, filter_layout, render_settings, render_page,
+    SETTINGS_SECTIONS, STAT_KEYS, filter_layout, render_settings, render_page,
 )
 
 FORBIDDEN_HOSTS = {"0.0.0.0", "::", ""}
@@ -101,6 +101,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = manager.status() if manager else {"state": "disabled", "error": reason}
             self._json(result, 200, started)
             return
+        if parsed.path == "/api/stats":
+            self._stats(started)
+            return
         conn = database.connect(_db_path(self.config))
         try:
             if parsed.path == "/api/job":
@@ -119,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/settings":
-                section = (qs.get("section") or ["skills"])[0]
+                section = (qs.get("section") or [SETTINGS_SECTIONS[0]])[0]
                 page = render_settings(conn, self.config, lang, theme, section,
                                        i18n.lang_pref(self.headers.get("Cookie")))
                 self._send(page.encode("utf-8"), 200,
@@ -141,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
                 offset = 0
             filters = parse_filters(qs)
             page = render_page(conn, self.config, view, offset, limit, started, filters,
-                               lang, theme)
+                               lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
         finally:
             conn.close()
@@ -196,29 +199,53 @@ class Handler(BaseHTTPRequestHandler):
             if conn is not None:
                 conn.close()
 
+    def _same_origin(self) -> bool:
+        """Host (and Origin, when sent) must name this listener. A malformed
+        port raises ValueError; callers treat that as a rejection."""
+        request_host = urlparse("//" + self.headers.get("Host", ""))
+        bound_host, bound_port = self.server.server_address[:2]
+        allowed_hosts = {str(bound_host).lower()}
+        configured_host = str((self.config.get("panel") or {}).get("host") or "").strip().lower()
+        if configured_host:
+            allowed_hosts.add(configured_host)
+        if bound_host in ("127.0.0.1", "::1"):
+            allowed_hosts.add("localhost")
+        if os.environ.get("JOBS_CONTAINER") == "1":
+            allowed_hosts.update(("localhost", "127.0.0.1", "::1"))
+        host_ok = (request_host.hostname in allowed_hosts
+                   and (request_host.port or 80) == bound_port
+                   and not request_host.username and not request_host.password)
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            parsed = urlparse(origin)
+            host_ok = host_ok and (parsed.scheme == "http"
+                                  and parsed.netloc == request_host.netloc
+                                  and not parsed.path and not parsed.query
+                                  and not parsed.fragment)
+        return host_ok
+
+    def _stats(self, started: float):
+        """Read-only header counters, re-fetched after a label/note write.
+        Same counting as the rendered page (labels.summary); no write path."""
+        try:
+            host_ok = self._same_origin()
+        except ValueError:
+            host_ok = False
+        if not host_ok:
+            self.close_connection = True
+            self._json({"error": "origin_rejected"}, 403, started)
+            return
+        conn = database.connect(_db_path(self.config))
+        try:
+            summary = labels_mod.summary(conn)
+        finally:
+            conn.close()
+        self._json({key: summary[name] for key, name in STAT_KEYS.items()}, 200, started)
+
     def _local_json(self, started: float, max_bytes=4096):
         """Validate local-origin JSON writes before reaching any mutable state."""
         try:
-            request_host = urlparse("//" + self.headers.get("Host", ""))
-            bound_host, bound_port = self.server.server_address[:2]
-            allowed_hosts = {str(bound_host).lower()}
-            configured_host = str((self.config.get("panel") or {}).get("host") or "").strip().lower()
-            if configured_host:
-                allowed_hosts.add(configured_host)
-            if bound_host in ("127.0.0.1", "::1"):
-                allowed_hosts.add("localhost")
-            if os.environ.get("JOBS_CONTAINER") == "1":
-                allowed_hosts.update(("localhost", "127.0.0.1", "::1"))
-            host_ok = (request_host.hostname in allowed_hosts
-                       and (request_host.port or 80) == bound_port
-                       and not request_host.username and not request_host.password)
-            origin = self.headers.get("Origin")
-            if origin is not None:
-                parsed = urlparse(origin)
-                host_ok = host_ok and (parsed.scheme == "http"
-                                      and parsed.netloc == request_host.netloc
-                                      and not parsed.path and not parsed.query
-                                      and not parsed.fragment)
+            host_ok = self._same_origin()
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             host_ok, length = False, 0

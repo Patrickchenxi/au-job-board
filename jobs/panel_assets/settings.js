@@ -71,7 +71,8 @@ function skillRow(s){
   if(s.has_not){ const f=el('span','skflags','not'); f.title=T('set.flag_not'); name.append(f); }
   const al=el('span','sk-aliases');
   [s.name,...(s.aliases||[])].filter(a=>a!==(s.display_name||s.name)).forEach(a=>al.append(bubble(a,a===s.name?s.origin:(s.alias_origins||{})[a]||'local')));
-  const hits=el('span','skhits',String(s.hits));
+  // 手机没有列头：命中数前补一个「命中」（桌面由 CSS 隐藏，列头已经写了）
+  const hits=el('span','skhits'); hits.append(el('span','skhits-k',T('set.col_hits')+' '), String(s.hits));
   const src=el('span'); src.append(sourceBadge(s.source||s.origin));
   const act=el('span');
   const pen=el('button','pen'); pen.type='button';
@@ -288,7 +289,10 @@ function bindConfigEditor(){
   const modal=document.getElementById('config-modal'), confirmation=document.getElementById('config-confirm');
   const en=window.__LANG__==='en',msg=(zh,eng)=>en?eng:zh;
   const words={queries:msg('抓取关键词','Search terms'),'seek.locations':msg('地区','Locations'),enabled:msg('启用来源','Source enabled'),location:msg('地区','Location'),pages_per_query:msg('每个关键词页数','Pages per term'),daterange:msg('最近天数','Posted within days'),detail_sleep:msg('正文请求间隔（秒）','Detail request delay (seconds)'),country_indeed:msg('国家','Country'),results_wanted:msg('每个关键词请求条数','Requested results per term'),fetch_description:msg('抓取完整描述','Fetch full descriptions'),profile:msg('规则预设','Rule profile')};
-  const groups=[{id:'queries',prefix:'queries',name:msg('关键词','Search terms')},{id:'seek',prefix:'seek.',name:'SEEK'},{id:'indeed',prefix:'jobspy.indeed.',name:'Indeed'},{id:'linkedin',prefix:'jobspy.linkedin.',name:'LinkedIn'},{id:'rules',prefix:'legacy_rule_profile.',name:msg('原始规则开关','Legacy rule switches')}];
+  const groups=[{id:'queries',prefix:'queries',name:msg('关键词','Search terms')},{id:'seek',prefix:'seek.',name:'SEEK'},{id:'indeed',prefix:'jobspy.indeed.',name:'Indeed'},{id:'linkedin',prefix:'jobspy.linkedin.',name:'LinkedIn'},{id:'rules',prefix:'legacy_rule_profile.',name:msg('规则预设与逐条开关','Rule preset & switches')}];
+  // 「资格与规则」与「抓取与更新」是两个分区，各显示自己的几组；读写、digest 与冲突检测仍是同一套。
+  const only=(root.dataset.configGroups||'').split(' ').filter(Boolean);
+  const shownGroups=only.length?groups.filter(group=>only.includes(group.id)):groups;
   const errors={conflict:msg('文件已被其他页面或外部编辑。输入已保留，请重新载入后再修改。','The file changed in another tab or editor. Your input is retained; reload and reapply your changes.'),run_busy:msg('更新正在运行，暂时不能保存。输入已保留。','An update is running. Your input is retained; try saving afterwards.'),config_invalid:msg('配置文件包含非法值、重复键或不支持的 YAML。请先修复文件。','The file contains invalid values, duplicate keys or unsupported YAML. Repair it first.'),config_unavailable:msg('无法读取配置文件，请检查读取权限。','Cannot read the configuration file. Check its permissions.'),write_failed:msg('写入失败，请检查目录权限和磁盘空间。','Could not write the file. Check directory permissions and disk space.'),validation_failed:msg('字段类型或数值范围不合法。','A field has an invalid type or range.'),demo_disabled:msg('演示环境不能编辑配置。','Configuration editing is disabled in the demo.')};
   const listPaths=new Set(['queries','seek.locations']),numberPaths=new Set(['seek.pages_per_query','seek.daterange','seek.detail_sleep','jobspy.indeed.results_wanted','jobspy.linkedin.results_wanted']);
   let state=null,editing=null,controls={},form=null,submit=null,modalStatus=null,dirty=false,saving=false,loading=false,leaving=false,refreshPending=false;
@@ -335,7 +339,7 @@ function bindConfigEditor(){
     const recorded=state.applied?.status==='recorded',fallback=!recorded&&state.baseline?.status==='recorded';
     const currentView=recorded?state.applied:fallback?state.baseline:state;
     status.classList.remove('error');status.textContent=recorded?msg('当前为最近成功分析使用的配置；保存的修改在下一次运行生效。','Current values were used by the last successful analysis. Saved changes apply to the next run.'):fallback?msg('最近运行配置未记录。当前区域保留修改前文件配置，下一次区域展示已保存的改动。','The last-run configuration was not recorded. Current shows the file before editing; Next run shows saved changes.'):msg('最近运行配置尚未记录；以下展示当前文件配置，保存后在下一次运行生效。','The last-run configuration was not recorded. Showing the current file; saved changes apply to the next run.');
-    groups.forEach(group=>{
+    shownGroups.forEach(group=>{
       const paired=(recorded||fallback)&&!sameGroup(group,currentView,state);
       const region=el('section','config-region');region.dataset.configRegion=group.id;
       const current=el('div','config-version config-current');current.dataset.configCurrent=group.id;
@@ -387,7 +391,7 @@ function bindConfigEditor(){
       const advanced=el('details','config-advanced');advanced.append(el('summary',null,msg('高级','Advanced')));const fields=el('div','config-advanced-fields');pathsFor(group).filter(isRule).forEach(path=>fields.append(makeField(path)));advanced.append(fields);form.append(advanced);
     }
     modalStatus=el('p','config-status');modalStatus.setAttribute('role','status');shell.body.append(form,modalStatus);
-    const cancel=el('button','linkbtn',msg('取消','Cancel'));cancel.type='button';cancel.onclick=()=>close(false);
+    const cancel=el('button','btn',msg('取消','Cancel'));cancel.type='button';cancel.onclick=()=>close(false);
     submit=el('button','primary-btn',msg('确认','Confirm'));submit.type='submit';submit.setAttribute('form','config-form');submit.disabled=true;
     shell.foot.append(cancel,el('span','spacer'),submit);form.onsubmit=event=>{event.preventDefault();if(!saving&&dirty&&form.reportValidity())confirmChanges();};
     reveal(modal);requestAnimationFrame(()=>Object.values(controls)[0]?.focus());
@@ -407,7 +411,7 @@ function bindConfigEditor(){
     Object.entries(edited).forEach(([path,value])=>lines.append(el('p',null,msg(labelFor(path)+'将从 '+valueText(path,state.values[path])+' 变成 '+valueText(path,value)+'，确认吗？',labelFor(path)+' will change from '+valueText(path,state.values[path])+' to '+valueText(path,value)+'. Confirm?'))));
     const note=el('p','config-confirm-note',msg('新规则将在下一次生效','The new rules will take effect on the next run.'));
     const result=el('p','config-status');result.setAttribute('role','status');shell.body.append(lines,note,result);
-    const back=el('button','linkbtn',msg('返回修改','Back'));back.type='button';back.onclick=cancelConfirmation;
+    const back=el('button','btn',msg('返回修改','Back'));back.type='button';back.onclick=cancelConfirmation;
     const save=el('button','primary-btn',msg('确认保存','Save changes'));save.type='button';
     shell.foot.append(back,el('span','spacer'),save);modal.inert=true;reveal(confirmation);save.focus();
     save.onclick=async()=>{

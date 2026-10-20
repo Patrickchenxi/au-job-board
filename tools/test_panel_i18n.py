@@ -359,11 +359,17 @@ def test_note_tag_localization() -> None:
           and i18n.display_note("zh", "优先投递；My custom note；") == "优先投递；My custom note；")
     check("展示不 trim / 不补尾",
           i18n.display_note("en", "优先投递；  未收尾") == "Prioritize;  未收尾")
-    check("英文提示说明默认本地化、自定义不翻译",
-          "default tags are shown in the UI language" in i18n.t("en", "detail.note_hint")
-          and "never translated" in i18n.t("en", "detail.note_hint"))
-    check("中文提示同样说明该边界",
-          "默认标签按界面语言显示" in i18n.t("zh", "detail.note_hint"))
+    # v1.2.2 UI-4：备注提示只留操作说明；「默认标签按界面语言显示、自定义不翻译」
+    # 这条边界改由设置 → 显示的「切换语言不会修改已保存的内容」说明。
+    check("英文：显示设置说明默认本地化、自定义不翻译",
+          "default tags display in the UI language" in i18n.t("en", "set.keep2")
+          and "custom notes stay as written" in i18n.t("en", "set.keep2"))
+    check("中文：显示设置同样说明该边界",
+          "默认标签按界面语言显示" in i18n.t("zh", "set.keep2")
+          and "自定义备注保持原样" in i18n.t("zh", "set.keep2"))
+    check("备注提示不再暴露存储细节",
+          not any(w in i18n.t(lang, "detail.note_hint")
+                  for lang in ("zh", "en") for w in ("后台", "规范化", "stored", "normalized")))
 
     with tempfile.TemporaryDirectory() as d:
         conn = database.connect(os.path.join(d, "t.db"))

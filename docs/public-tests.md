@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 25 checks: 24 Python tests
-plus one Node behavior test.
+be collected by accident. The entry currently has 28 checks: 26 Python tests
+plus two Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -30,7 +30,7 @@ applicable" on a non-macOS system.
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the panel note-separator behavior test. Node is only
+- **Node.js 24.21.0** for the two panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.
@@ -59,6 +59,8 @@ nothing in the suite fetches listings.
 | `tools/test_labels_notes.py` | Manual labels and notes | all |
 | `tools/test_panel_logic.py` | Panel core logic | all |
 | `tools/test_panel_i18n.py` | Panel English / Chinese text | all |
+| `tools/test_panel_stats_http.py` | Read-only header-count endpoint (same counts as the page, same-origin/host checks, no write path) and the rendered hooks for detail navigation, the mobile label sheet, the filter drawer and skill candidates | all |
+| `tools/test_panel_display.py` | Panel display layer: card/detail keep every score, salary and label signal (moved, not removed), `render.tags_for` output for report/CSV/search is unchanged, Display menu option order, update confirmation, settings sections | all |
 | `tools/test_panel_update.py` | Frozen fetch settings, background-run state, locks, partial failure, timeout and label preservation | all |
 | `tools/test_panel_update_http.py` | Update API, same-origin/host checks, JSON input and disabled demo | all |
 | `tools/test_skills_and_search.py` | Skill vocabulary, compatible display names and search matching | all |
@@ -66,7 +68,8 @@ nothing in the suite fetches listings.
 | `tools/test_legacy_cleanup.py` | Legacy single-path end to end | all |
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
-| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation | all |
+| `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation, update confirmation, card progress text and the unknown-outcome status line | all |
+| `tools/test_panel_navigation.mjs` | Detail previous/next and J/K over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard and skill candidates writing canonical names | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output

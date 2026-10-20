@@ -1,0 +1,144 @@
+name: Docker image
+
+# Merging into main is a push to main. PRs, dev and tag pushes do not build.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional existing vX.Y.Z tag at main HEAD; promote the tested image without rebuilding"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize publication; the publish step separately rejects stale latest updates.
+concurrency:
+  group: docker-main
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/skywingjam/au-job-board
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main' && inputs.release_tag == ''
+    name: Build and smoke / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Build a native image for runtime verification
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: au-job-board:local
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+      - name: Exercise the built image with isolated synthetic data
+        run: python3 tools/test_docker.py --no-build
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the verified platform image
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          tag="$IMAGE:sha-$GITHUB_SHA-$ARCH"
+          docker tag au-job-board:local "$tag"
+          docker push "$tag"
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish both verified platforms together
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$IMAGE:sha-$GITHUB_SHA" \
+            "$IMAGE:sha-$GITHUB_SHA-amd64" "$IMAGE:sha-$GITHUB_SHA-arm64"
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$main_sha" = "$GITHUB_SHA" ]; then
+            docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:sha-$GITHUB_SHA"
+          else
+            echo 'Main has advanced; published the SHA image without moving latest.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    if: github.ref == 'refs/heads/main' && inputs.release_tag != ''
+    name: Tag an existing main image for a release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate the release tag points to this main commit
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add a version tag without rebuilding or changing latest
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect --raw "$IMAGE:sha-$GITHUB_SHA" > source.json
+          if docker buildx imagetools inspect --raw "$IMAGE:$RELEASE_TAG" > existing.json 2> inspection-error.log; then
+            cmp source.json existing.json || { echo '::error::Release image already exists with different content'; exit 1; }
+          elif grep -Fxq "ERROR: $IMAGE:$RELEASE_TAG: not found" inspection-error.log; then
+            docker buildx imagetools create --tag "$IMAGE:$RELEASE_TAG" "$IMAGE:sha-$GITHUB_SHA"
+          else
+            cat inspection-error.log >&2
+            echo '::error::Cannot establish whether the version exists; refusing to change it.'
+            exit 1
+          fi
+          docker buildx imagetools inspect "$IMAGE:$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

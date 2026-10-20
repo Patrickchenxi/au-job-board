@@ -1,8 +1,8 @@
 # Test data policy: synthetic by default, private exports isolated
 
 The rule in one sentence: **the tests that ship with the project use only
-hand-written synthetic data; a real label export goes to the ignored `out/`
-directory and can take part in a regression only when it is named explicitly.**
+hand-written synthetic data; private inputs and every result derived from them
+stay local and require an explicitly selected validation path.**
 
 ## Synthetic data only
 
@@ -25,6 +25,31 @@ directory and can take part in a regression only when it is named explicitly.**
   supplement. It does not replace a manual read and is not a claim that a whole
   repository has passed a privacy audit.
 
+## Authorized local-copy comparisons
+
+When the task authorizes access to a specific private source, a consistent local
+copy may supplement synthetic tests to check reliability and old/new behavior,
+especially for analysis changes. Read the source without changing it; keep an
+immutable baseline and run each candidate on separate disposable local copies,
+with identical selected inputs, isolated configuration and non-production ports.
+Production fetch, analysis, repair or service changes need separate authority.
+
+Record the candidate revisions, inputs used, protected data, repeatability and
+explained versus unexplained output changes in private local evidence. Missing
+personal configuration or vocabulary limits equivalence claims. A private
+comparison neither authorizes a heuristic behavior change nor proves universal
+accuracy. Public regressions must remain independently hand-written synthetic
+cases, not edited copies of private postings.
+
+Keep the snapshots **and every derived or aggregate result local**. This includes
+counts, statistics, hashes, before/after differences, logs, reports and screenshots.
+Do not upload them to remote Git, PRs/issues/comments, CI logs/artifacts, images,
+external reviewers or other remote services; redaction or aggregation is not an
+exception. Use a private location outside the public checkout where practical.
+Git ignore rules help prevent accidents but do not grant publication permission
+or provide a backup. Public evidence may describe the method and synthetic
+checks without private-derived results.
+
 ## What the default suites cover
 
 Everything below is offline and uses temporary directories or in-memory
@@ -40,9 +65,10 @@ private label export.
 - the read-only eligibility profile:
   `tools/test_eligibility_profile.py`;
 - labels and notes: `tools/test_labels_notes.py`;
-- panel logic and text: `tools/test_panel_logic.py`,
-  `tools/test_panel_i18n.py` and
-  `tools/test_panel_note_separators.mjs`;
+- panel logic, text and navigation: `tools/test_panel_logic.py`,
+  `tools/test_panel_i18n.py`, `tools/test_panel_stats_http.py`,
+  `tools/test_panel_note_separators.mjs` and
+  `tools/test_panel_navigation.mjs`;
 - skill vocabulary and search matching:
   `tools/test_skills_and_search.py`;
 - the public example configuration and the read-only profile command:
@@ -69,10 +95,12 @@ database, a private corpus or a label export. A missing, corrupt, empty or
 schema-invalid fixture fails with a non-zero status; it is never silently
 skipped and reported as a pass.
 
-A private regression must name the file explicitly:
+A private regression must name the file explicitly. For the export example,
+select a local-only config whose database path points to a disposable private
+copy; never use the live production database as the test target:
 
 ```bash
-.venv/bin/python -m jobs.cli label --export-fixtures   # writes out/fixtures/ by default
+.venv/bin/python -m jobs.cli --config path/to/local-copy.yaml label --export-fixtures
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tools/test_citizenship_rules.py \
     --private-fixtures out/fixtures/labeled_citizenship.json
 ```
