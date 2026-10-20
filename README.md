@@ -167,9 +167,11 @@ to the agent:
 
 ## Project status
 
-AU Job Board is source-only: you install it from the repository at
-`https://github.com/SkywingJam/au-job-board` into your own virtual environment. There is no
-packaged release.
+AU Job Board is not distributed as a Python package on PyPI. On macOS, install it
+from the repository at `https://github.com/SkywingJam/au-job-board` into your own
+virtual environment; source installation remains the recommended workflow. The
+main-branch Docker workflow publishes an optional container image to GHCR, and
+Docker/Compose users can also build it locally; see the [Docker guide](docs/docker.md).
 
 - **License and scope.** MIT (see [License](#license)). The public contents are
   the 296 files of the initial public file set, built on a clean history that
