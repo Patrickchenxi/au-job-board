@@ -243,7 +243,7 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 .apply-bar{display:none}
 .d-tags{margin-top:12px}
 .rule{background:var(--bad-tint);border:1px solid var(--bad-line);padding:9px 12px;border-radius:var(--r-ctl);
- font-size:var(--fs-sm);margin:12px 0 0;color:var(--bad-ink)}
+ font-size:var(--fs-sm);margin:12px 0 0;color:var(--bad-ink);overflow-wrap:anywhere}
 .decide{margin-top:16px;border:1px solid var(--line);border-radius:var(--r-box);padding:16px 18px;display:flex;
  flex-direction:column;gap:18px;background:var(--surface2)}
 .step-block{position:relative}
@@ -518,7 +518,8 @@ body.settings{background:var(--paper)}
 .dialog-head{display:flex;align-items:center;gap:10px;padding:14px 16px 14px 20px;border-bottom:1px solid var(--line)}
 .dialog-head h3{margin:0;font-size:var(--fs-xl);flex:1 1 auto}
 .dialog-body{padding:18px 20px;display:flex;flex-direction:column;gap:20px}
-.dialog-foot{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap}
+.dialog-foot{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;
+ border-bottom-left-radius:inherit;border-bottom-right-radius:inherit}
 .sec-title{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:700;margin-bottom:8px}
 .notyet{font-size:var(--fs-xs);font-weight:600;color:var(--cue-ink);background:var(--cue-tint);border-radius:var(--r-ctl);padding:1px 6px}
 .dz{display:flex;align-items:center;gap:12px;min-height:68px;padding:12px 14px;border:2px dashed var(--line3);border-radius:var(--r-box);
@@ -812,7 +813,8 @@ body.portrait .detail.swap>*{animation:none}
 .score .tier{font-weight:600;color:var(--ink2)}
 .score .sep{color:var(--ink4);font-weight:400}
 .score b{color:var(--accent-ink)}
-.skills{min-width:0;font-size:var(--fs-xs);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-tail{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;max-width:100%}
+.skills{flex:1 1 auto;min-width:0;font-size:var(--fs-xs);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tag.raw.full{white-space:normal;text-align:left}
 .card-state{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
 .card-state .dots{margin-left:0;padding-left:0}

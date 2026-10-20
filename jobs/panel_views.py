@@ -217,7 +217,6 @@ def _dots(uid: str, label: dict, lang: str) -> str:
 # 列表卡片与详情
 # ---------------------------------------------------------------------------
 
-CARD_SKILLS = 3          # 卡片上最多几个技能名，其余收成「…」（悬停看全部，详情全展开）
 SCORE_KINDS = ("tier", "level", "adjust")    # 计分信号：卡片不显示，详情收进「为什么是 …」
 
 
@@ -279,9 +278,10 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
     tags += _salary_chip(pairs, row, lang)
     skills = [text for kind, text in pairs if kind == "skill"]
+    skills_html = ""
     if skills:
-        shown = " · ".join(skills[:CARD_SKILLS]) + (" …" if len(skills) > CARD_SKILLS else "")
-        tags += (f'<span class="skills" title="{_e(i18n.t(lang, "card.skills", list=", ".join(skills)))}">'
+        shown = " · ".join(skills)  # 由单行剩余宽度决定省略，不按技能个数截断
+        skills_html = (f'<span class="skills" title="{_e(i18n.t(lang, "card.skills", list=", ".join(skills)))}">'
                  f'{_e(shown)}</span>')
 
     tier = next((text for kind, text in pairs if kind == "tier"), None)
@@ -292,6 +292,9 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
 
     sub = " · ".join(str(x) for x in (
         row.get("company"), row.get("location"), row.get("source")) if x)
+    # 技能与进度共用一行：技能按剩余宽度省略，进度保持完整；空间不足时整组换行。
+    state = f'<span class="card-state">{_progress(uid, label, lang)}{_dots(uid, label, lang)}</span>'
+    tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
     return "".join([
         f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" role="button" tabindex="0" '
@@ -303,8 +306,7 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         f'<div class="sub">{_e(sub)}</div>',
         # 进度文字与状态点放在 tags 行内部（不是绝对定位），避免压在标签上
         # 进度文字与圆点是一组，换行时一起走，不会被拆到两行
-        f'<div class="tags">{tags}<span class="card-state">{_progress(uid, label, lang)}'
-        f'{_dots(uid, label, lang)}</span></div>',
+        f'<div class="tags">{tags}{tail}</div>',
         "</div>",
     ])
 
@@ -1018,20 +1020,20 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 # ---------------------------------------------------------------------------
 
 # 「资格与规则」从「抓取与更新」里独立出来：它决定哪些岗位被排除，与抓取无关。
-# 默认分区仍是技术栈（/settings 不带参数时的落点不变）。
+# 未指定或未知分区时进入第一个分区：资格与规则。
 SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
 # 配置编辑器（settings.js）按分区只显示自己的那几组；写入与冲突检测是同一套。
 CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
-                    section: str = "skills", lang_pref: str = "auto") -> str:
+                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto") -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
     """
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     if section not in SETTINGS_SECTIONS:
-        section = "skills"
+        section = SETTINGS_SECTIONS[0]
     nav = "".join(
         f'<a class="set-nav-item{" on" if key == section else ""}" '
         f'href="/settings?section={key}"{CURRENT if key == section else ""}>'

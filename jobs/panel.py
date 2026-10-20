@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/settings":
-                section = (qs.get("section") or ["skills"])[0]
+                section = (qs.get("section") or [SETTINGS_SECTIONS[0]])[0]
                 page = render_settings(conn, self.config, lang, theme, section,
                                        i18n.lang_pref(self.headers.get("Cookie")))
                 self._send(page.encode("utf-8"), 200,
