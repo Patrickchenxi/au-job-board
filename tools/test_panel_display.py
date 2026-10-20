@@ -128,6 +128,14 @@ def test_detail() -> None:
     plain = panel._detail_html(synthetic_row(reasons="[]", tier=None), "zh")
     check("没有计分信号：折叠区说明没有加减分", i18n.t("zh", "detail.why_empty") in plain
           and i18n.t("zh", "detail.why_plain", score=6) in plain)
+    excluded = panel._detail_html(synthetic_row(
+        is_excluded=1, rule_id="synthetic.authorization,synthetic.location,<fake>",
+        matched_text="Synthetic matching phrase"), "en")
+    rule = excluded[excluded.index('<div class="rule">'):excluded.index('<section class="decide"')]
+    check("排除规则保留逗号和完整单词",
+          "synthetic.authorization,synthetic.location," in re.sub(r"<[^>]+>", "", rule))
+    check("规则之间允许换行，规则内容仍转义", rule.count("<wbr>") == 2
+          and "&lt;fake&gt;" in rule and "<fake>" not in rule)
 
 
 def make_db(d: str):

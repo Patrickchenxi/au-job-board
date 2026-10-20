@@ -401,7 +401,11 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
     ]
 
     if row.get("is_excluded"):
-        out.append(f'<div class="rule">{_e(T("detail.rule"))}<b>{_e(row.get("rule_id"))}</b>'
+        rule_ids = ',<wbr>'.join(
+            f'<span class="rule-token">{_e(token)}</span>'
+            for token in str(row.get("rule_id") or "").split(",")
+        )
+        out.append(f'<div class="rule">{_e(T("detail.rule"))}<b>{rule_ids}</b>'
                    f'　{_e(T("detail.matched"))}{_e(row.get("matched_text"))}</div>')
 
     out.append(f'<section class="decide" aria-label="{_e(T("detail.decide"))}">')

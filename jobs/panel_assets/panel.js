@@ -109,9 +109,14 @@ async function openJob(uid){
   history.replaceState(null,'','#'+encodeURIComponent(uid));
   const pane=document.getElementById('detail');
   const seq=(OPEN_SEQ+=1);
-  // 请求很快时不闪「载入中」：160ms 内回来就直接换内容，慢了才显示骨架屏
-  const slow=setTimeout(()=>{ if(seq===OPEN_SEQ) showSkeleton(pane); },160);
-  if(document.body.classList.contains('portrait') && (!pane.classList.contains('open') || pane.classList.contains('leaving'))){
+  const mobileOpening=document.body.classList.contains('portrait') &&
+    (!pane.classList.contains('open') || pane.classList.contains('leaving'));
+  // 竖屏重新入场前清掉上一条详情；已显示的详情仍等 160ms 才显示骨架屏。
+  const slow=mobileOpening ? null : setTimeout(()=>{ if(seq===OPEN_SEQ) showSkeleton(pane); },160);
+  if(mobileOpening){
+    showSkeleton(pane);
+    pane.scrollTop=0;
+    pane.classList.remove('label-open');
     pane.classList.add('open'); pane.classList.remove('leaving');
     reveal(pane);                                   // 竖屏：详情从右侧滑入
   }
