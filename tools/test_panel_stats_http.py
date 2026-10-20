@@ -1,0 +1,242 @@
+"""Synthetic loopback checks for the read-only header-count endpoint (BUG-1) and
+the server-rendered hooks used by detail navigation, the mobile label sheet,
+the mobile filter drawer and the skill candidate list (v1.2.2 PR-B).
+
+The endpoint must reuse the same Host/Origin boundary as the write routes, open
+no write path, and report exactly the counts the page renders
+(labels.summary); /api/label write handling is exercised only as a client.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import http.client
+import json
+import re
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from jobs import db as database  # noqa: E402
+from jobs import labels as labels_mod  # noqa: E402
+from jobs import panel, panel_views, skills  # noqa: E402
+
+SKILLS_YAML = """version: 1
+skills:
+  - name: Amazon Web Services
+    display_name: AWS
+    aliases: [AWS]
+  - name: Google Cloud Platform
+    aliases: []
+  - name: Kubernetes
+    aliases: [K8s]
+"""
+
+
+def seed(conn) -> None:
+    today = dt.date.today().isoformat()
+    for sid, excluded in (("one", 0), ("two", 0), ("three", 1)):
+        database.upsert_job(conn, {
+            "source": "seek", "source_id": sid, "title": f"Synthetic Role {sid}",
+            "company": "Example Co", "location": "Melbourne VIC", "listing_date": today,
+            "description": "Synthetic description with Python and K8s.",
+            "url": f"https://example.invalid/job/{sid}"})
+        database.replace_decision(conn, f"seek:{sid}", excluded)
+        database.replace_score(conn, f"seek:{sid}", "T1", 3, 0, 0, 5, "[]", 5)
+    conn.commit()
+
+
+class StatsHTTPTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.skills_path = root / "skills.yaml"
+        self.skills_path.write_text(SKILLS_YAML, encoding="utf-8")
+        self.config = {"db_path": str(root / "synthetic.db"),
+                       "skills_path": str(self.skills_path),
+                       "panel": {"host": "panel.internal"}}
+        conn = database.connect(self.config["db_path"])
+        seed(conn)
+        conn.close()
+        handler = type("SyntheticHandler", (panel.Handler,), {"config": self.config})
+        self.server = panel.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.host = "127.0.0.1:%s" % self.server.server_port
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=3)
+        self.temp.cleanup()
+
+    def request(self, path, method="GET", body=None, headers=None):
+        client = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            client.request(method, path, body=body, headers=headers or {})
+            response = client.getresponse()
+            raw = response.read()
+            try:
+                return response.status, json.loads(raw)
+            except ValueError:
+                return response.status, raw
+        finally:
+            client.close()
+
+    def stats(self, headers=None):
+        return self.request("/api/stats", headers=headers)
+
+    def label(self, uid, field, value):
+        return self.request("/api/label", "POST", json.dumps({"uid": uid, "field": field, "value": value}),
+                            {"Content-Type": "application/json", "Origin": "http://" + self.host})
+
+    def expected(self):
+        conn = database.connect(self.config["db_path"])
+        try:
+            summary = labels_mod.summary(conn)
+        finally:
+            conn.close()
+        return {key: summary[name] for key, name in panel_views.STAT_KEYS.items()}
+
+    def dump(self):
+        conn = database.connect(self.config["db_path"])
+        try:
+            return list(conn.iterdump())
+        finally:
+            conn.close()
+
+    def test_counts_follow_label_writes_with_unchanged_semantics(self):
+        code, body = self.stats()
+        self.assertEqual(code, 200)
+        self.assertEqual(body, self.expected())
+        self.assertEqual(body, {"labelled": 0, "saved": 0, "applied": 0, "miss": 0, "false_excl": 0})
+        for uid, field, value in (("seek:one", "eligibility", "eligible"),
+                                  ("seek:one", "action", "saved"),
+                                  ("seek:two", "eligibility", "ineligible"),
+                                  ("seek:three", "eligibility", "eligible"),
+                                  ("seek:two", "action", "applied")):
+            self.assertEqual(self.label(uid, field, value)[0], 200)
+            code, body = self.stats()
+            self.assertEqual((code, body), (200, self.expected()), (uid, field, value))
+        self.assertEqual(body, {"labelled": 3, "saved": 1, "applied": 1, "miss": 1, "false_excl": 1})
+        # Clearing returns to the same per-record semantics; a note-only row still counts.
+        self.assertEqual(self.label("seek:one", "action", None)[0], 200)
+        self.assertEqual(self.stats()[1]["saved"], 0)
+        self.assertEqual(self.label("seek:new-note", "note", "Synthetic；")[0], 200)
+        self.assertEqual(self.stats()[1], self.expected())
+
+    def test_same_origin_and_host_boundary_before_database(self):
+        port = str(self.server.server_port)
+        for headers in ({"Host": "example.invalid:" + port},
+                        {"Host": "127.0.0.1:1"},
+                        {"Host": "user@127.0.0.1:" + port},
+                        {"Host": "127.0.0.1:not-a-port"},
+                        {"Origin": "http://example.invalid"},
+                        {"Origin": "null"},
+                        {"Origin": "https://" + self.host},
+                        {"Origin": "http://" + self.host + "/path"}):
+            with self.subTest(headers=headers), patch.object(
+                    panel.database, "connect", side_effect=AssertionError("DB opened")):
+                code, body = self.stats(headers)
+                self.assertEqual(code, 403)
+                self.assertEqual(body, {"error": "origin_rejected"})
+        for headers in ({}, {"Origin": "http://" + self.host}, {"Host": "localhost:" + port},
+                        {"Host": "panel.internal:" + port}):
+            with self.subTest(headers=headers):
+                self.assertEqual(self.stats(headers)[0], 200)
+
+    def test_endpoint_is_read_only(self):
+        self.assertEqual(self.label("seek:one", "eligibility", "eligible")[0], 200)
+        before = self.dump()
+        with patch.object(labels_mod, "set_label", side_effect=AssertionError("write path")):
+            for _ in range(3):
+                self.assertEqual(self.stats()[0], 200)
+        self.assertEqual(self.dump(), before)
+        code, _ = self.request("/api/stats", "POST", "{}", {
+            "Content-Type": "application/json", "Origin": "http://" + self.host})
+        self.assertEqual(code, 404)
+        self.assertEqual(self.dump(), before)
+
+
+class RenderHookTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.skills_path = root / "skills.yaml"
+        self.skills_path.write_text(SKILLS_YAML, encoding="utf-8")
+        self.config = {"db_path": str(root / "synthetic.db"), "skills_path": str(self.skills_path)}
+        self.conn = database.connect(self.config["db_path"])
+        seed(self.conn)
+        labels_mod.set_label(self.conn, "seek:one", source="panel", eligibility="eligible", action="saved")
+        labels_mod.set_label(self.conn, "seek:three", source="panel", eligibility="eligible")
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        self.temp.cleanup()
+
+    def page(self, view, lang="zh"):
+        return panel.render_page(self.conn, self.config, view, 0, 40, None, {}, lang, None)
+
+    def test_rendered_counts_carry_stat_keys_with_summary_values(self):
+        summary = labels_mod.summary(self.conn)
+        for view in ("recommend", "all", "new", "labelled", "excluded"):
+            for lang in ("zh", "en"):
+                html = self.page(view, lang)
+                found = re.findall(r'<b data-stat="([a-z_]+)">(\d+)</b>', html)
+                self.assertTrue(found, (view, lang))
+                for key, value in found:
+                    self.assertEqual(int(value), summary[panel_views.STAT_KEYS[key]], (view, lang, key))
+        self.assertIn('data-stat="miss"', self.page("excluded"))
+        self.assertIn('data-stat="false_excl"', self.page("excluded"))
+        # Drawer counters are refreshed by the same keys.
+        self.assertEqual(re.findall(r'<div><b data-stat="([a-z]+)">', self.page("all")),
+                         ["labelled", "saved", "applied"])
+
+    def test_skill_owner_embed_matches_backend_tokens(self):
+        html = self.page("all")
+        match = re.search(r"window\.__SKILL_OWNERS__=(\[.*?\]);</script>", html)
+        self.assertIsNotNone(match)
+        cfg = skills.load_skills(str(self.skills_path))
+        self.assertEqual([tuple(pair) for pair in json.loads(match.group(1))],
+                         sorted(skills.canonical_tokens(cfg).items()))
+        embedded = dict(json.loads(match.group(1)))
+        self.assertEqual(embedded["aws"], "Amazon Web Services")
+        self.assertEqual(embedded["k8s"], "Kubernetes")
+        skills_embed = json.loads(re.search(r"window\.__SKILLS__=(\[.*?\]);</script>", html).group(1))
+        aws = next(s for s in skills_embed if s["name"] == "Amazon Web Services")
+        self.assertEqual(aws["display_name"], "AWS")
+
+    def test_detail_navigation_and_single_label_sheet(self):
+        for lang in ("zh", "en"):
+            row = panel._find(self.conn, self.config, "seek:one")
+            html = panel._detail_html(row, lang)
+            self.assertEqual(html.count('data-step="-1"'), 2)
+            self.assertEqual(html.count('data-step="1"'), 2)
+            self.assertIn('aria-keyshortcuts="J"', html)
+            self.assertIn('aria-keyshortcuts="K"', html)
+            # The note input and label buttons exist once: the mobile sheet reuses them.
+            self.assertEqual(html.count("<input data-uid="), 1)
+            self.assertEqual(html.count("data-field=\"eligibility\""), 3)
+            sheet = html[html.index('id="label-sheet"'):html.index('class="label-sheet-foot"')]
+            self.assertIn("<input data-uid=", sheet)
+            self.assertIn('data-field="action"', sheet)
+            # The job description follows the sheet; on mobile it is the first content.
+            self.assertLess(html.index('id="label-sheet"'), html.index('class="jd"'))
+            self.assertIn('class="label-sum"', html)
+            self.assertIn('aria-controls="label-sheet"', html)
+
+    def test_filter_controls_defer_through_filter_changed(self):
+        for view in ("all", "labelled", "recommend", "excluded"):
+            html = self.page(view)
+            self.assertNotRegex(html, r'data-fkey="[^"]+"[^>]*onchange="applyFilter\(\)"')
+            self.assertIn('onchange="filterChanged()"', html)
+            self.assertIn('id="more-done" onclick="moreDone()"', html)
+
+
+if __name__ == "__main__":
+    unittest.main()

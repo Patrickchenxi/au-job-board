@@ -65,9 +65,10 @@ private label export.
 - the read-only eligibility profile:
   `tools/test_eligibility_profile.py`;
 - labels and notes: `tools/test_labels_notes.py`;
-- panel logic and text: `tools/test_panel_logic.py`,
-  `tools/test_panel_i18n.py` and
-  `tools/test_panel_note_separators.mjs`;
+- panel logic, text and navigation: `tools/test_panel_logic.py`,
+  `tools/test_panel_i18n.py`, `tools/test_panel_stats_http.py`,
+  `tools/test_panel_note_separators.mjs` and
+  `tools/test_panel_navigation.mjs`;
 - skill vocabulary and search matching:
   `tools/test_skills_and_search.py`;
 - the public example configuration and the read-only profile command:

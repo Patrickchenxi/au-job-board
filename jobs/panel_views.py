@@ -361,8 +361,21 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
     tags += _tags([(kind, text) for kind, text in all_pairs if kind == "skill"], lang)
     url = _e(row.get("url"))
 
+    # 上一条 / 下一条：列表顺序只有前端知道（页面载入时冻结的卡片顺序），
+    # 这里只给按钮，位置与可用状态由 panel.js 的 syncDetailNav 填。
+    def step_btn(delta: int, text: str) -> str:
+        key, name = ("J", T("detail.next")) if delta > 0 else ("K", T("detail.prev"))
+        return (f'<button type="button" class="stepbtn" data-step="{delta}" onclick="stepDetail({delta})" '
+                f'aria-label="{_e(name)}" aria-keyshortcuts="{key}" title="{_e(name)} ({key})" disabled>'
+                f'{text}</button>')
     out = [
+        '<div class="d-nav">',
         f'<button type="button" id="back" onclick="closeDetail()">{_e(T("detail.back"))}</button>',
+        '<span class="d-steps">',
+        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>K</kbd>'),
+        '<span class="d-pos"></span>',
+        step_btn(1, f'{_e(T("detail.next"))} <kbd>J</kbd> ›'),
+        '</span></div>',
         '<div class="d-head"><div class="d-title">',
         f'<h2>{_e(row.get("title"))}</h2>',
         f'<div class="sub">{_e(meta)}</div></div>',
@@ -403,6 +416,14 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
             '</div>')
         step += 1
 
+    # 标注与备注：桌面原位不动；竖屏（panel.js 的 body.portrait）这一块变成底部抽屉，
+    # 正文前置。是同一组节点，不复制 —— 备注输入框只有一个，保存队列与未保存保护照旧。
+    out.append(
+        f'<button type="button" class="label-scrim" tabindex="-1" aria-label="{_e(T("detail.sheet_close"))}" '
+        'onclick="toggleLabelSheet(false)"></button>'
+        f'<div class="label-sheet" id="label-sheet" tabindex="-1" aria-label="{_e(T("detail.decide"))}">'
+        '<div class="sheet-grab" aria-hidden="true"></div>'
+        f'<div class="label-sheet-head"><b>{_e(T("detail.decide"))}</b></div>')
     axes = []
     for field, values in (("eligibility", ("eligible", "ineligible", "unsure")),
                           ("interest", ("want", "maybe", "no")),
@@ -444,14 +465,26 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'onkeydown="noteKeys(event,this)" onblur="noteBlur(this)">'
         f'<div class="hint">{_e(T("detail.note_hint"))}</div>'
         f'</div></div>')
+    out.append(f'<div class="label-sheet-foot"><button type="button" class="primary-btn" '
+               f'onclick="toggleLabelSheet(false)">{_e(T("detail.sheet_done"))}</button></div>'
+               '</div>')
     out.append("</section>")
 
     out.append(f'<h3 class="jd-head">{_e(T("detail.jd"))} <span>· {_e(T("detail.jd_note"))}</span></h3>')
     out.append(f'<div class="jd">{render_jd_html(row.get("description"), T("detail.jd_empty"))}</div>')
     out.append(_why_section(all_pairs, row, lang))
-    # 竖屏时固定在底部的操作栏（桌面隐藏；顶部那个按钮在竖屏隐藏）
-    out.append(f'<div class="apply-bar"><a class="apply" href="{url}" target="_blank" '
-               f'rel="noopener">{_e(T("detail.open"))} ↗</a></div>')
+    # 竖屏时固定在底部的操作栏（桌面隐藏；顶部那个按钮在竖屏隐藏）：
+    # 上一条 · 标注抽屉（显示当前三项）· 打开原文 · 下一条
+    summary = " · ".join(i18n.value_label(lang, k, label.get(k)) for k in FILTER_KEYS
+                         if label.get(k)) or T("js.detail_unlabelled")
+    out.append('<div class="apply-bar">'
+               + step_btn(-1, "‹")
+               + f'<button type="button" class="label-toggle" aria-expanded="false" '
+                 f'aria-controls="label-sheet" onclick="toggleLabelSheet()">'
+                 f'<b>{_e(T("detail.labels"))} ▴</b><span class="label-sum">{_e(summary)}</span></button>'
+               + f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
+               + step_btn(1, "›")
+               + '</div>')
     return "".join(out)
 
 
@@ -520,13 +553,13 @@ def _select(key: str, label: str, options: list[tuple[str, str]], current: str) 
                    for v, t in options)
     on = " on" if current else ""
     return (f'<label class="ctl{on}"><span class="k">{_e(label)}</span>'
-            f'<select data-fkey="{key}" onchange="applyFilter()">{opts}</select></label>')
+            f'<select data-fkey="{key}" onchange="filterChanged()">{opts}</select></label>')
 
 
 def _toggle(key: str, label: str, checked: bool) -> str:
     return (f'<label class="ctl tog{" on" if checked else ""}">'
             f'<input type="checkbox" data-fkey="{key}"{" checked" if checked else ""} '
-            f'onchange="applyFilter()"> {_e(label)}</label>')
+            f'onchange="filterChanged()"> {_e(label)}</label>')
 
 
 def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=None) -> str:
@@ -547,7 +580,7 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=No
         opts.append(
             f'<label class="skillopt">'
             f'<input type="checkbox" data-fkey="{SKILL_KEY}" value="{_e(name)}"{checked} '
-            f'onchange="applyFilter()">'
+            f'onchange="filterChanged()">'
             f'<span>{_e(skill_labels.get(name, name))}</span>'
             f'<span class="skc">{counts.get(name, 0)}</span></label>')
     title = i18n.t(lang, "filter.skill")
@@ -666,7 +699,8 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
                    f'{_e(T("filter.clear_all"))}</a>')
     out.append("</div>")
 
-    # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉
+    # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉。
+    # 竖屏抽屉里的改动先留在控件上，「应用」才走一次 applyFilter（panel.js filterChanged）。
     out.append(f'<div class="more-panel" id="more-panel" data-keys="{" ".join(hidden_keys)}" hidden>'
                f'<div class="sheet-grab" aria-hidden="true"></div>'
                f'<div class="sheet-head"><b>{_e(T("filter.button"))} · {_e(T("view." + view))}</b>'
@@ -685,7 +719,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     clear_hidden = (f'<button type="button" class="linkbtn" onclick="clearHidden()">'
                     f'{_e(T("filter.clear_hidden"))}</button>') if hidden_keys else ""
     out.append(f'<div class="more-foot">{clear_hidden}'
-               f'<button type="button" class="primary-btn" onclick="toggleMore(false)">'
+               f'<button type="button" class="primary-btn" id="more-done" onclick="moreDone()">'
                f'{_e(T("filter.done"))}</button></div></div>')
 
     if hidden_active:
@@ -806,17 +840,28 @@ def _scripts(lang: str, extra: dict | None = None) -> str:
     return "".join(f"<script>window.{k}={_js(v)};</script>" for k, v in data.items())
 
 
-def _stats(view: str, stats: dict, total: int, lang: str) -> list[tuple[str, object]]:
-    T = lambda k: i18n.t(lang, k)   # noqa: E731
-    common = [(T("stat.labelled"), stats["已标注"]), (T("stat.saved"), stats["待投"]),
-              (T("stat.applied"), stats["已投递"])]
+# 顶部统计的稳定键（= i18n 的 stat.* 后缀）-> labels.summary 的口径。
+# 页面渲染与只读接口 /api/stats 共用这一张表：标注后前端按键重拉，不自行加减。
+STAT_KEYS = {"labelled": "已标注", "saved": "待投", "applied": "已投递",
+             "miss": "漏杀候选", "false_excl": "误杀候选"}
+
+
+def _stats(view: str, stats: dict, total: int, lang: str) -> list[tuple[str, object, str | None]]:
+    """(显示名, 数值, 统计键)。统计键为 None 的项（本批）不随标注变化。"""
+    def stat(key):
+        return (i18n.t(lang, "stat." + key), stats[STAT_KEYS[key]], key)
+    common = [stat("labelled"), stat("saved"), stat("applied")]
     if view == "new":
-        return [(T("stat.batch"), total)] + common
+        return [(i18n.t(lang, "stat.batch"), total, None)] + common
     if view == "excluded":
-        return [(T("stat.miss"), stats["漏杀候选"]), (T("stat.false_excl"), stats["误杀候选"])]
+        return [stat("miss"), stat("false_excl")]
     if view == "labelled":
-        return common[1:] + [(T("stat.miss"), stats["漏杀候选"])]
+        return common[1:] + [stat("miss")]
     return common
+
+
+def _stat_attr(key: str | None) -> str:
+    return f' data-stat="{key}"' if key else ""
 
 
 def render_page(conn, config: dict, view: str, offset: int, limit: int,
@@ -863,6 +908,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
     note_tags = labels_mod.note_tag_candidates(conn)
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
+    # 「已被占用」的预判直接用后端的 canonical_tokens（同一份小写口径）；
+    # 用 [token, 规范名] 数组而不是对象，避免 __proto__ 之类的词撞原型。
     skill_embed = [{"name": e.get("name"), "display_name": skills_mod.display_name(e), "aliases": e.get("aliases") or []}
                    for e in sorted(skills_cfg.get("skills") or [],
                                    key=lambda e: str(e.get("name") or "").lower())]
@@ -877,7 +924,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
             pager.append(f'<a href="{_link(view, offset + limit, filters, since)}">{_e(T("list.next"))}</a>')
 
     stat_items = _stats(view, stats, total, lang)
-    stats_html = "".join(f'<span>{_e(name)} <b>{_e(n)}</b></span>' for name, n in stat_items)
+    stats_html = "".join(f'<span>{_e(name)} <b{_stat_attr(key)}>{_e(n)}</b></span>'
+                         for name, n, key in stat_items)
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
     if page:
@@ -890,10 +938,10 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     else:
         cards = f'<div class="placeholder">{_e(T("list.empty"))}</div>'
 
-    drawer_stats = "".join(f'<div><b>{_e(n)}</b>{_e(name)}</div>'
-                           for name, n in [(T("stat.labelled"), stats["已标注"]),
-                                           (T("stat.saved"), stats["待投"]),
-                                           (T("stat.applied"), stats["已投递"])])
+    drawer_stats = "".join(f'<div><b{_stat_attr(key)}>{_e(stats[STAT_KEYS[key]])}</b>'
+                           f'{_e(T("stat." + key))}</div>'
+                           for key in ("labelled", "saved", "applied"))
+
     return "".join([
         _head(lang, theme, T("app.title") + _demo_suffix(config, lang)),
         _demo_banner(config, lang),
@@ -957,7 +1005,9 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         _update_confirm(lang),
         _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
-                        "__SKILLS__": skill_embed, "__RESULT_GENERATION__": result_generation}),
+                        "__SKILLS__": skill_embed,
+                        "__SKILL_OWNERS__": sorted(skills_mod.canonical_tokens(skills_cfg).items()),
+                        "__RESULT_GENERATION__": result_generation}),
         f"<script>{asset('panel.js')}</script>",
         "</body></html>",
     ])
