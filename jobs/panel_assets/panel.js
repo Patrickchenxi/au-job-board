@@ -213,7 +213,7 @@ async function stepDetail(delta){
   if(!OPEN_UID) target = delta>0 ? list[0] : list[list.length-1];
   else {
     const i=list.indexOf(OPEN_UID);
-    if(i<0) return;                                  // 从别处打开的岗位不在本页列表里
+    if(i<0){ toast(T('js.detail_not_in_list')); return; }   // 从别处打开的岗位不在本页列表里
     target=list[i+delta];
   }
   if(!target){ toast(T(delta>0 ? 'js.detail_last' : 'js.detail_first')); return; }
@@ -676,12 +676,15 @@ function searchTyping(ev){
   // **也不要清掉 compositionend 已经排上的那个** —— 否则组字确认后反倒搜不了。
   if(imeComposing(ev) || imeBusy(el) || imeJustComposed(el)) return;
   clearTimeout(Q_TIMER);
+  // 竖屏筛选抽屉开着：搜索词也是草稿，只更新「应用（N 项）」
+  if(filterBatching()){ filterChanged(); return; }
   Q_TIMER=setTimeout(applyFilter,380);
 }
 function searchStart(ev){ clearTimeout(Q_TIMER); imeStart(ev.target); }
 function searchEnd(ev){
   imeEnd(ev.target);
   clearTimeout(Q_TIMER);
+  if(filterBatching()){ filterChanged(); return; }
   Q_TIMER=setTimeout(applyFilter,380);
 }
 function searchKeys(ev){
@@ -907,8 +910,14 @@ function viewParams(){
   return p;
 }
 /* 所有筛选控件共用这一套：data-fkey -> URL 参数。
-   **不要给排序另起状态管理**，否则 URL 里会有两个真相。 */
+   **不要给排序另起状态管理**，否则 URL 里会有两个真相。
+   竖屏筛选抽屉开着时，任何防抖 / 直接调用都只更新草稿；只有「应用」走 commitFilter 跳转。 */
 function applyFilter(){
+  clearTimeout(Q_TIMER);
+  if(filterBatching()){ filterChanged(); return; }
+  commitFilter();
+}
+function commitFilter(){
   clearTimeout(Q_TIMER);
   const view=window.__VIEW__||'recommend';
   const p=viewParams();
@@ -919,8 +928,10 @@ function applyFilter(){
   p.set('view',view);
   navigatePanel('/'+ (p.toString()?'?'+p.toString():''));
 }
-/* 清除筛选 = 回到该视图的默认口径，并忘掉记住的那套 */
+/* 清除筛选 = 回到该视图的默认口径，并忘掉记住的那套。
+   竖屏抽屉里只把全部控件复位进草稿（「应用」才跳转，关闭即还原）。 */
 function clearFilter(){
+  if(filterBatching()){ filterDraftBegin(); filterControls().forEach(resetEl); filterChanged(); return; }
   const view=window.__VIEW__||'recommend';
   const st=filterStore(); delete st[view]; writeFilterStore(st);
   navigatePanel('/?view='+encodeURIComponent(view));
@@ -1032,6 +1043,8 @@ function toggleMore(force){
     conceal(p, ()=>document.body.classList.remove('sheet-open','sheet-closing'));
   }
   try{ if(open) sessionStorage.setItem(MORE_KEY,'1'); else sessionStorage.removeItem(MORE_KEY); }catch(e){}
+  // 草稿期间推迟的新结果：丢弃草稿后没开着岗位就立刻载入
+  if(!open && UPDATE_PENDING && !OPEN_UID) applyLatestResults();
 }
 function placeFilters(portrait){
   const slot=document.getElementById('sheet-slot'); if(!slot) return;
@@ -1047,6 +1060,15 @@ function resetControl(key){
   document.querySelectorAll('[data-fkey="'+key+'"]').forEach(el=>{
     if(el.type==='checkbox') el.checked=false; else el.value='';
   });
+}
+/* 复位成默认页渲染出的样子：下拉选「任意」（空值）项，没有空值项（排序）就选第一项 */
+function resetEl(el){
+  if(el.type==='checkbox'){ el.checked=false; return; }
+  const opts=el.tagName==='SELECT' && el.options ? Array.from(el.options) : [];
+  if(!opts.length){ el.value=''; return; }
+  if(el.multiple){ opts.forEach(o=>{ o.selected=false; }); return; }
+  const i=opts.findIndex(o=>o.value==='');
+  el.selectedIndex = i<0 ? 0 : i;
 }
 function removeFilter(key){
   resetControl(key);
@@ -1071,10 +1093,19 @@ function filterControls(){ return Array.from(document.querySelectorAll('[data-fk
 function filterBatching(){
   return document.body.classList.contains('portrait') && shown(document.getElementById('more-panel'));
 }
+/* 搜索框还没提交的字（380ms 防抖内）不算 URL 状态：基线与快照用渲染时的值，
+   这样它计入「应用（N 项）」，丢弃草稿时也一起还原。 */
+function urlValue(el){
+  return el.dataset.fkey==='q' && typeof el.defaultValue==='string' ? el.defaultValue : el.value;
+}
 function filterDraftBegin(){
   if(FILTER_DRAFT) return;
-  FILTER_DRAFT={base:viewParams(), snap:filterControls().map(el=>[el,
-    el.type==='checkbox' ? el.checked : (el.multiple ? Array.from(el.options).map(o=>o.selected) : el.value)])};
+  clearTimeout(Q_TIMER);              // 抽屉打开前排上的搜索跳转作废，搜索词进草稿
+  const base=viewParams();
+  const qi=filterControls().find(el=>el.dataset.fkey==='q');
+  if(qi){ base.delete('q'); if(urlValue(qi)) base.append('q', urlValue(qi)); }
+  FILTER_DRAFT={base, snap:filterControls().map(el=>[el,
+    el.type==='checkbox' ? el.checked : (el.multiple ? Array.from(el.options).map(o=>o.selected) : urlValue(el))])};
   syncFilterDraft();
 }
 function filterDraftDiscard(){
@@ -1129,7 +1160,7 @@ function filterChanged(){
 function moreDone(){
   if(filterBatching() && filterDraftCount()){
     try{ sessionStorage.removeItem(MORE_KEY); }catch(e){}
-    applyFilter();
+    commitFilter();
     return;
   }
   toggleMore(false);
@@ -1270,7 +1301,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && hasDetailDraft()))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();

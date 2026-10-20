@@ -13,7 +13,8 @@
   - BUG-1：标注 / 备注写入后重拉只读统计；失败保留原数字；乱序响应只认最后一次；
     /api/label 请求体不变
   - UX-11：竖屏筛选抽屉只推迟 applyFilter：改动不跳转、按钮计数、关闭即按快照还原、
-    「应用」一次跳转且不再自动展开；桌面即改即生效
+    「应用」一次跳转且不再自动展开；桌面即改即生效；有未应用草稿时新结果不整页载入、
+    信号保留，关闭后载入一次；搜索防抖与抽屉内输入只进草稿；抽屉内「清除全部」只复位草稿
   - UX-10：固定新增首行、相似优先、完整字母表不按输入过滤；已占用提前提示且不发请求；
     大小写与空白口径与后端一致；点展示名写入规范名
 
@@ -174,7 +175,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   vm.createContext(sandbox);
   const src = fs.readFileSync(PANEL_JS, "utf8") + `
 ;globalThis.__T__ = { stepDetail, syncDetailNav, openJob, closeDetail, setLabel, setNote, noteAdopt, noteBlur,
-  refreshStats, toggleLabelSheet, toggleMore, filterChanged, moreDone, clearHidden, skillRows, skillRender,
+  refreshStats, renderUpdateState, toggleLabelSheet, toggleMore, filterChanged, moreDone, clearHidden, clearFilter,
+  applyFilter, searchTyping, filterDraftCount, skillRows, skillRender,
   skillKeys, skillClean, skillOwner, LABELS,
   state(){return {uid:OPEN_UID,pending:UPDATE_PENDING,applying:UPDATE_APPLYING,gates:NAV_GATES,draft:!!FILTER_DRAFT};},
   setUpdate(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
@@ -240,6 +242,7 @@ async function testFrozenList() {
     eq("不在列表里的岗位：两个按钮都不可用、无位置", [u.prev.disabled, u.next.disabled, u.pos.textContent], [true, true, ""]);
     await u.api.stepDetail(1);
     eq("不在列表里的岗位：按键不导航", u.api.state().uid, "Z");
+    eq("不在列表里的岗位：提示不在本页列表中（不再静默）", u.ids.get("toast").textContent, "js.detail_not_in_list");
   }
   {
     const u = loadPanel();
@@ -449,9 +452,11 @@ function filterFixture(portrait) {
     const box = new El("label"); box.className = "ctl tog" + (checked ? " on" : ""); el.closestMap[".ctl"] = box; el.box = box;
     return el;
   };
-  const q = new El("input"); q.type = "search"; q.dataset.fkey = "q"; q.value = "python";
+  const q = new El("input"); q.type = "search"; q.dataset.fkey = "q"; q.value = "python"; q.defaultValue = "python";
   const interest = sel("interest", "");
   const sort = sel("sort", "score"); sort.box.className = "ctl";
+  sort.options = [{ value: "score" }, { value: "date" }];
+  Object.defineProperty(sort, "selectedIndex", { set(i) { this.value = this.options[i].value; } });
   const salary = chk("salary", false);
   const skillA = chk("skill", true, "Python"), skillB = chk("skill", false, "SQL");
   skillA.nextElementSibling = { textContent: "Python" }; skillB.nextElementSibling = { textContent: "SQL" };
@@ -466,7 +471,8 @@ function filterFixture(portrait) {
   const done = new El("button"); done.textContent = "filter.done"; t.ids.set("more-done", done);
   t.api.setUpdate({ baseline: "generation-1" });
   Object.assign(t.sandbox.location, { href: "http://localhost/?view=all&q=python&skill=Python", search: "?view=all&q=python&skill=Python", hash: "" });
-  return { t, interest, sort, salary, skillA, skillB, pickBtn, pickV, more, done };
+  t.ids.set("update-start", new El("button")); t.ids.set("update-status", new El("span"));
+  return { t, q, interest, sort, salary, skillA, skillB, pickBtn, pickV, more, done };
 }
 
 async function testFilterDrawer() {
@@ -519,6 +525,73 @@ async function testFilterDrawer() {
     const f = filterFixture(false);
     f.interest.value = "want"; f.t.api.filterChanged(); await tick(); await tick();
     eq("桌面：即改即生效", new URL(f.t.sandbox.location.href, "http://localhost").searchParams.get("interest"), "want");
+  }
+  {
+    // 新结果版本到达时抽屉里有未应用草稿（且没开岗位）：不整页载入，信号保留；关闭后载入一次
+    const f = filterFixture(true); const { t } = f;
+    t.api.toggleMore(true);
+    f.interest.value = "want"; t.api.filterChanged();
+    f.salary.checked = true; t.api.filterChanged();
+    t.api.renderUpdateState({ state: "success", generation: "generation-2" }, true); await tick();
+    eq("草稿中来了新结果：不载入", t.reloads(), 0);
+    eq("草稿中来了新结果：草稿保留、信号保留", [f.interest.value, f.salary.checked, t.api.state().pending], ["want", true, "generation-2"]);
+    t.api.renderUpdateState({ state: "success", generation: "generation-2" }, true); await tick();
+    eq("下一次轮询仍不载入", t.reloads(), 0);
+    t.api.toggleMore(false); await tick();
+    eq("关闭抽屉（丢弃草稿）：立刻载入一次", t.reloads(), 1);
+    t.api.renderUpdateState({ state: "success", generation: "generation-2" }, true); await tick();
+    eq("之后的轮询不再重复载入", t.reloads(), 1);
+  }
+  {
+    const f = filterFixture(true); const { t } = f;
+    t.api.toggleMore(true);
+    t.api.renderUpdateState({ state: "success", generation: "generation-2" }, true); await tick();
+    eq("抽屉开着但没有改动：新结果照常载入", t.reloads(), 1);
+  }
+  {
+    // 搜索防抖窗口内打开抽屉：定时器作废，搜索词进草稿
+    const f = filterFixture(true); const { t } = f;
+    const start = t.sandbox.location.href;
+    f.q.value = "python sql"; t.api.searchTyping({ target: f.q });
+    t.api.toggleMore(true);
+    await new Promise((r) => setTimeout(r, 450));
+    eq("防抖内打开抽屉：不跳转", t.sandbox.location.href, start);
+    eq("搜索词计入「应用（N）」", t.api.filterDraftCount(), 1);
+    f.q.value = "python sql aws"; t.api.searchTyping({ target: f.q });
+    t.api.applyFilter();
+    await new Promise((r) => setTimeout(r, 450));
+    eq("抽屉内继续输入 / 直接 applyFilter：只更新草稿", [t.sandbox.location.href, t.api.filterDraftCount()], [start, 1]);
+    t.api.toggleMore(false); await tick();
+    eq("丢弃：搜索框还原为 URL 里的词", f.q.value, "python");
+    f.q.value = "rust"; t.api.searchTyping({ target: f.q });
+    t.api.toggleMore(true);
+    t.api.moreDone(); await tick();
+    eq("应用：搜索词一起提交", new URL(t.sandbox.location.href, "http://localhost").searchParams.get("q"), "rust");
+  }
+  {
+    // 抽屉里的「清除全部筛选」：只复位草稿，不跳转
+    const f = filterFixture(true); const { t } = f;
+    const start = t.sandbox.location.href;
+    f.sort.value = "date";
+    t.api.toggleMore(true);
+    f.salary.checked = true; t.api.filterChanged();
+    t.api.clearFilter(); await tick();
+    eq("抽屉内清除全部：不跳转", t.sandbox.location.href, start);
+    eq("抽屉内清除全部：全部控件复位（排序回默认第一项）",
+      [f.q.value, f.interest.value, f.salary.checked, f.skillA.checked, f.sort.value], ["", "", false, false, "score"]);
+    eq("抽屉内清除全部：应用（N）计入 q、skill、sort", t.api.filterDraftCount(), 3);
+    t.api.toggleMore(false); await tick();
+    eq("关闭：清除被丢弃、控件还原",
+      [f.q.value, f.salary.checked, f.skillA.checked, f.sort.value], ["python", false, true, "date"]);
+    t.api.toggleMore(true); t.api.clearFilter(); t.api.moreDone(); await tick();
+    const url = new URL(t.sandbox.location.href, "http://localhost");
+    eq("应用清除：一次跳转到默认条件", [url.searchParams.get("q"), url.searchParams.getAll("skill"), url.searchParams.get("sort"), url.searchParams.get("view")],
+      [null, [], "score", "all"]);
+  }
+  {
+    const f = filterFixture(false);
+    f.t.api.clearFilter(); await tick();
+    eq("桌面清除全部：照旧立即跳转", f.t.sandbox.location.href, "/?view=all");
   }
 }
 
