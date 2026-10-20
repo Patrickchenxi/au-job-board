@@ -80,6 +80,8 @@ PYTHON_TESTS = (
      "panel update HTTP API and same-origin boundary (loopback)", None),
     ("tools/test_panel_i18n.py",
      "panel English / Chinese text", None),
+    ("tools/test_panel_display.py",
+     "panel display layer: evidence moved not removed, shared tags unchanged", None),
     ("tools/test_skills_and_search.py",
      "skill vocabulary and search matching", None),
     ("tools/test_demo.py",

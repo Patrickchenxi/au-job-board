@@ -71,6 +71,14 @@ function refreshDot(uid){
     d.querySelectorAll('.dot').forEach(el=>{ setDot(el, dotClass(s[el.dataset.axis])); });
     const title=dotsTitle(s); d.title=title; d.setAttribute('aria-label',title);
   });
+  // 卡片上的进度文字（待投 / 已投 / 跳过）与圆点同源：都读 LABELS[uid]（组合并后的标注）
+  document.querySelectorAll('.prog[data-prog-uid="'+uid+'"]').forEach(el=>{
+    const v=s.action;
+    el.hidden=!v;
+    el.className='prog'+(v ? ' '+(TONE[v]||'mid') : '');
+    el.textContent=v ? T('value.action.'+v) : '';
+    el.title=v ? T('field.action')+T('js.colon')+T('value.action.'+v) : '';
+  });
   // 详情里每条轴标签前的同款圆点
   AXES.forEach(k=>{
     const el=document.querySelector('#detail [data-axis-dot="'+k+'"]');
@@ -526,10 +534,12 @@ function fitLayout(){
   if(avail < MIN_LEFT+MIN_RIGHT){
     document.body.classList.add('portrait');
     placeFilters(true);
+    placeUpdate(true);
     return;
   }
   document.body.classList.remove('portrait');
   placeFilters(false);
+  placeUpdate(false);
   closeDrawer();
   const want=readStoredLeft() ?? Math.min(DEFAULT_LEFT,avail-MIN_RIGHT);
   setLeft(Math.min(Math.max(want,MIN_LEFT),avail-MIN_RIGHT));
@@ -868,6 +878,16 @@ function placeFilters(portrait){
     else if(el.previousElementSibling!==anchor){ anchor.after(el); }
   });
 }
+/* 「更新岗位」只有一个按钮（#update-start，状态机与禁用逻辑都挂在它上面）。
+   竖屏时顶栏隐藏，把整个小部件**挪进**抽屉里「上次抓取」旁边；横屏挪回顶栏。
+   和 placeFilters 一样是移动节点，不复制。 */
+function placeUpdate(portrait){
+  const w=document.getElementById('update-widget');
+  const slot=document.getElementById('drawer-update-slot'), home=document.getElementById('update-home');
+  if(!w || !slot || !home) return;
+  if(portrait){ if(w.parentNode!==slot) slot.appendChild(w); }
+  else if(home.nextElementSibling!==w){ home.after(w); }
+}
 /* 移除单个筛选：把对应控件复位，再走同一个 applyFilter（URL 仍是唯一真相） */
 function resetControl(key){
   document.querySelectorAll('[data-fkey="'+key+'"]').forEach(el=>{
@@ -930,11 +950,7 @@ function setTheme(theme){
   else { setPref('jobs_theme',theme); document.documentElement.dataset.theme=theme; }
   syncThemeUi();
 }
-function toggleTheme(){ setTheme(effectiveTheme()==='dark' ? 'light' : 'dark'); }
 function syncThemeUi(){
-  const eff=effectiveTheme();
-  const label=eff==='dark' ? T('theme.to_light') : T('theme.to_dark');
-  document.querySelectorAll('.theme-btn').forEach(b=>{ b.setAttribute('aria-label',label); b.title=label; });
   const choice=document.documentElement.dataset.theme||'auto';
   document.querySelectorAll('[data-theme-choice]').forEach(b=>{
     const on=b.dataset.themeChoice===choice;
@@ -945,6 +961,34 @@ if(window.matchMedia){
   const mq=matchMedia('(prefers-color-scheme: dark)');
   if(mq.addEventListener) mq.addEventListener('change',syncThemeUi);
 }
+
+/* ---- 顶栏「显示」菜单 ------------------------------------------------
+   语言 + 外观的弹出层（披露式按钮，不是 ARIA menu：里面是普通的切换按钮）。
+   点外面 / Esc / 焦点离开都会收起；Esc 把焦点还给「显示」按钮。 */
+function displayParts(){ return [document.getElementById('display-btn'), document.getElementById('display-pop')]; }
+function toggleDisplay(force){
+  const [btn,pop]=displayParts(); if(!btn || !pop) return;
+  const open=(force===undefined) ? pop.hidden : !!force;
+  if(open===!pop.hidden) return;
+  pop.hidden=!open;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+  if(open){ const on=pop.querySelector('button.on')||pop.querySelector('button'); if(on) on.focus(); }
+}
+document.addEventListener('click',ev=>{
+  const box=document.getElementById('display-menu');
+  if(box && ev.target instanceof Node && !box.contains(ev.target)) toggleDisplay(false);
+});
+document.addEventListener('focusout',ev=>{
+  const box=document.getElementById('display-menu');
+  if(!box || !box.contains(ev.target)) return;
+  if(ev.relatedTarget && box.contains(ev.relatedTarget)) return;
+  if(ev.relatedTarget) toggleDisplay(false);
+},true);
+document.addEventListener('keydown',ev=>{
+  if(ev.key!=='Escape') return;
+  const [btn,pop]=displayParts();
+  if(pop && !pop.hidden){ toggleDisplay(false); if(btn) btn.focus(); }
+});
 
 /* ---- 详情：? 说明与技能编辑的展开 ------------------------------------- */
 function toggleHelp(btn){
@@ -1043,7 +1087,10 @@ function relativeRunTime(data){
   const n=Math.max(1,Math.floor(seconds/(unit==='minutes'?60:unit==='hours'?3600:86400)));
   let text=T('run.ago',{ago:T('ago.'+unit,{n})});
   if(isRunStale(data))text+=T('run.stale');
-  if(data.state!=='success')text+=' · '+T('js.update_'+data.state);
+  if(data.state!=='success'){
+    const short='run.state_'+data.state;
+    text+=' · '+(Object.prototype.hasOwnProperty.call(I18N,short) ? T(short) : T('js.update_'+data.state));
+  }
   return text;
 }
 function renderUpdateState(data, fromPoll=false){
@@ -1085,7 +1132,9 @@ function renderUpdateState(data, fromPoll=false){
     const text=document.createElement('span');text.textContent=relativeRunTime(data);el.appendChild(text);
   });
   const meta=[];
-  if(data.task_id)meta.push(T('js.update_task',{id:data.task_id}));
+  const task=document.getElementById('update-task');
+  if(task){task.textContent=data.task_id?T('js.update_task',{id:data.task_id}):'';
+    if(task.parentElement)task.parentElement.hidden=!data.task_id;}
   if(data.trigger)meta.push(T('js.update_trigger',{source:T('js.update_trigger_'+data.trigger)}));
   const startedTime=updateTime(data.started_at),finished=updateTime(data.finished_at);
   if(startedTime)meta.push(T('js.update_started',{time:startedTime}));
@@ -1142,9 +1191,44 @@ async function startJobUpdate(){
   }catch(e){updateConnectionLost();}
   finally{UPDATE_REQUESTING=false;scheduleUpdatePoll(1500);}
 }
+/* 「更新岗位」会联网、要几分钟，所以先确认。确认窗只是挡在 startJobUpdate 前面：
+   按钮的禁用、请求和轮询仍走原来的状态机。确认时按钮若已被禁用（例如别的
+   页面刚开始更新），就不再发起。 */
+function updateConfirmEl(){ return document.getElementById('update-confirm'); }
+function requestJobUpdate(){
+  const box=updateConfirmEl();
+  if(!box){ startJobUpdate(); return; }
+  reveal(box);
+  const cancel=box.querySelector('[data-update-cancel]'); if(cancel) cancel.focus();
+}
+function closeUpdateConfirm(start){
+  const box=updateConfirmEl(); if(!box || !shown(box)) return;
+  if(start){   // 更新按钮运行期间会禁用、接不住焦点：先把焦点移到可见的状态文字，再收起对话框
+    const status=document.getElementById('update-status');
+    if(status && status.focus) status.focus();
+  }
+  conceal(box);
+  const button=document.getElementById('update-start');
+  if(start && button && !button.disabled) startJobUpdate();
+  else if(button && !button.disabled && button.getClientRects && button.getClientRects().length) button.focus();
+}
 document.addEventListener('DOMContentLoaded',()=>{
   const button=document.getElementById('update-start');
-  if(button){button.addEventListener('click',startJobUpdate);pollUpdateState();}
+  if(button){button.addEventListener('click',requestJobUpdate);pollUpdateState();}
+  const box=updateConfirmEl();
+  if(!box || !box.querySelector) return;
+  const ok=box.querySelector('[data-update-ok]'), cancel=box.querySelector('[data-update-cancel]');
+  if(ok) ok.addEventListener('click',()=>closeUpdateConfirm(true));
+  if(cancel) cancel.addEventListener('click',()=>closeUpdateConfirm(false));
+  box.addEventListener('click',ev=>{ if(ev.target===box) closeUpdateConfirm(false); });
+  box.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape'){ ev.preventDefault(); ev.stopPropagation(); closeUpdateConfirm(false); return; }
+    if(ev.key!=='Tab') return;
+    const items=[cancel,ok].filter(Boolean);
+    const i=items.indexOf(document.activeElement);
+    ev.preventDefault();
+    items[(i + (ev.shiftKey ? items.length-1 : 1)) % items.length].focus();
+  });
 });
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden && document.getElementById('update-start'))pollUpdateState();
