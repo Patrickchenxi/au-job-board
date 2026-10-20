@@ -144,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
                 offset = 0
             filters = parse_filters(qs)
             page = render_page(conn, self.config, view, offset, limit, started, filters,
-                               lang, theme)
+                               lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
         finally:
             conn.close()

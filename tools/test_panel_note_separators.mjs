@@ -202,6 +202,7 @@ function loadPanel(lang, tags, noteTagLabels, settingsGeneration) {
   noteCanonicalize, noteAdopt, noteSync, noteRender, noteBlur, setNote, noteKeys,
   imeComposing, imeStart, imeEnd, imeBusy, imeJustComposed, NOTE_TAGS, NOTE_TAG_LABELS, LABELS,
   renderUpdateState, openJob, closeDetail, navigatePanel, applyLatestResults, skillPick,
+  requestJobUpdate, closeUpdateConfirm, refreshDot, relativeRunTime,
   setUpdateTestState(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   getUpdateTestState(){return {uid:OPEN_UID,baseline:UPDATE_BASELINE,pending:UPDATE_PENDING};},
   addPendingNote(promise){NOTE_REQUESTS.add(promise);promise.finally(()=>NOTE_REQUESTS.delete(promise));} };
@@ -967,6 +968,85 @@ async function testRevertedPendingNote() {
   }
 }
 
+/* v1.2.2：「更新岗位」先确认；进度文字随标注就地更新；状态行的「结果未知」保持未知。 */
+async function testUpdateConfirmAndProgress() {
+  console.log("\n-- v1.2.2 更新确认 / 进度文字 / 状态行 --");
+  function fixture(withConfirm){
+    const panel=loadPanel('zh',TAGS);
+    const button=new FakeEl('button'), box=new FakeEl('div');
+    box.hidden=true;
+    panel.elements.set('update-start',button);
+    const status=new FakeEl('span');
+    panel.elements.set('update-status',status);
+    if(withConfirm) panel.elements.set('update-confirm',box);
+    panel.sandbox.AbortController=AbortController;   // updateJson 的超时控制（实现未改）
+    const posts=[];
+    panel.sandbox.fetch=async(url,opts)=>{
+      if(opts && opts.method==='POST') posts.push(url);
+      return {ok:true,json:async()=>({state:'running',accepted:true,task_id:'t-1'})};
+    };
+    return {panel,button,box,posts,status};
+  }
+  {
+    const {panel,box,posts}=fixture(true);
+    panel.api.requestJobUpdate();await tick();
+    check('点「更新岗位」只打开确认窗', box.hidden===false && posts.length===0);
+    panel.api.closeUpdateConfirm(false);await tick();
+    eq('取消：不发起更新', posts.length, 0);
+    check('取消：确认窗收起', box.classList.contains('leaving') || box.hidden===true);
+  }
+  {
+    const {panel,posts}=fixture(true);
+    panel.api.requestJobUpdate();
+    panel.api.closeUpdateConfirm(true);await tick();
+    eq('确认：走原来的 POST /api/update 一次', posts, ['/api/update']);
+  }
+  {
+    const {panel,status,box}=fixture(true);
+    panel.api.requestJobUpdate();
+    check('确认前焦点不在状态文字上', status._focused!==true);
+    panel.api.closeUpdateConfirm(true);await tick();
+    check('确认：焦点移到可见的更新状态文字（按钮运行期间禁用）', status._focused===true);
+    const {panel:p2,status:s2}=fixture(true);
+    p2.api.requestJobUpdate();p2.api.closeUpdateConfirm(false);await tick();
+    check('取消：焦点不移到状态文字', s2._focused!==true);
+  }
+  {
+    const {panel,button,posts}=fixture(true);
+    panel.api.requestJobUpdate();
+    button.disabled=true;            // 期间别处已开始更新：按钮被状态机禁用
+    panel.api.closeUpdateConfirm(true);await tick();
+    eq('确认时按钮已禁用：不再发起', posts.length, 0);
+  }
+  {
+    const {panel,posts}=fixture(false);
+    panel.api.requestJobUpdate();await tick();
+    eq('页面没有确认窗：保持原行为直接发起', posts, ['/api/update']);
+  }
+  {
+    const panel=loadPanel('zh',TAGS);
+    const prog=new FakeEl('span');prog.hidden=true;
+    panel.sandbox.document.querySelectorAll=sel=>sel==='.prog[data-prog-uid="u1"]'?[prog]:[];
+    panel.api.LABELS.u1={action:'applied'};
+    panel.api.refreshDot('u1');
+    check('标为已投：卡片进度文字出现', prog.hidden===false && prog.textContent==='value.action.applied'
+      && prog.className==='prog good');
+    panel.api.LABELS.u1={action:null};
+    panel.api.refreshDot('u1');
+    check('清除进度：进度文字隐藏', prog.hidden===true && prog.textContent==='');
+  }
+  {
+    const panel=loadPanel('zh',TAGS);
+    Object.assign(panel.sandbox.window.__I18N__,{'run.state_unknown':'结果未记录（旧版本运行）',
+      'js.update_unknown':'FULL','run.ago':'上次抓取 {ago}','ago.minutes':'{n} 分钟前'});
+    const text=panel.api.relativeRunTime({state:'unknown',finished_at:new Date().toISOString(),task_id:'legacy-2'});
+    check('状态行：旧记录显示「结果未记录」，不露任务 ID',
+      text.endsWith(' · 结果未记录（旧版本运行）') && !text.includes('legacy-2'), text);
+    const partial=panel.api.relativeRunTime({state:'partial',finished_at:new Date().toISOString()});
+    check('没有短文案的状态退回完整说明', partial.endsWith(' · js.update_partial'), partial);
+  }
+}
+
 async function main() {
   console.log("== 备注分隔符 / 默认标签本地化 JS 交互（合成数据，Node vm + 最小 DOM stub）==");
   console.log(`Node ${process.version}；加载 ${path.relative(ROOT, PANEL_JS)}`);
@@ -979,6 +1059,7 @@ async function main() {
   await testPrototypeKeys();
   testEmojiAndIme();
   await testUpdateRefreshWithDetailHash();
+  await testUpdateConfirmAndProgress();
   console.log();
   if (failures.length) {
     console.log(`失败 ${failures.length} 项：\n  - ${failures.join("\n  - ")}`);
