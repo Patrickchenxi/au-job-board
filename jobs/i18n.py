@@ -353,6 +353,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "detail.why_empty": "没有加减分项。",
         # 设置：资格与规则
         "set.rules": "资格与规则",
+        "set.rules_tab": "资格与规则",
         "set.rules_title": "资格与规则",
         "set.rules_hint": "选择与你身份相符的规则预设，它决定哪些岗位会被硬规则排除。这是软件规则，不是法律资格判断。保存只用于下一次分析，不会重算现在显示的结果。",
         # 前端脚本用到的反馈（window.__I18N__）
@@ -526,7 +527,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "value.interest.want": "Want",
         "value.interest.maybe": "Maybe",
         "value.interest.no": "No",
-        "value.action.saved": "Saved",
+        "value.action.saved": "To apply",
         "value.action.applied": "Applied",
         "value.action.skipped": "Skipped",
         "dots.unset": "not set",
@@ -696,6 +697,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "detail.why_tier": "Tier",
         "detail.why_empty": "No score adjustments.",
         "set.rules": "Eligibility & rules",
+        "set.rules_tab": "Rules",
         "set.rules_title": "Eligibility & rules",
         "set.rules_hint": "Pick the preset that matches your status; it decides which jobs hard rules exclude. These are software rules, not a legal eligibility determination. Saving applies to the next analysis and does not recompute the results shown now.",
         "js.loading": "Loading…",

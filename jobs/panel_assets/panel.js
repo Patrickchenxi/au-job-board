@@ -1203,6 +1203,10 @@ function requestJobUpdate(){
 }
 function closeUpdateConfirm(start){
   const box=updateConfirmEl(); if(!box || !shown(box)) return;
+  if(start){   // 更新按钮运行期间会禁用、接不住焦点：先把焦点移到可见的状态文字，再收起对话框
+    const status=document.getElementById('update-status');
+    if(status && status.focus) status.focus();
+  }
   conceal(box);
   const button=document.getElementById('update-start');
   if(start && button && !button.disabled) startJobUpdate();

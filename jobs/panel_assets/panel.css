@@ -94,6 +94,8 @@ header.main-header{flex:0 0 auto;z-index:20;background:var(--surface);border-bot
 .ctl.on{border-color:var(--accent);background:var(--accent-wash)}
 .ctl .k{color:var(--ink2)}
 .ctl select{border:0;background:transparent;font-size:var(--fs-sm);padding:0 4px;min-height:34px;cursor:pointer;outline:none;color:var(--ink)}
+.ctl select{-webkit-appearance:none;appearance:none}
+.ctl:has(>select)::after{content:"▾";margin-right:6px;pointer-events:none}
 .ctl select option{background:var(--surface);color:var(--ink)}
 .ctl.tog{padding:0 10px}
 .ctl input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}

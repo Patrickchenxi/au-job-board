@@ -976,7 +976,8 @@ async function testUpdateConfirmAndProgress() {
     const button=new FakeEl('button'), box=new FakeEl('div');
     box.hidden=true;
     panel.elements.set('update-start',button);
-    panel.elements.set('update-status',new FakeEl('span'));
+    const status=new FakeEl('span');
+    panel.elements.set('update-status',status);
     if(withConfirm) panel.elements.set('update-confirm',box);
     panel.sandbox.AbortController=AbortController;   // updateJson 的超时控制（实现未改）
     const posts=[];
@@ -984,7 +985,7 @@ async function testUpdateConfirmAndProgress() {
       if(opts && opts.method==='POST') posts.push(url);
       return {ok:true,json:async()=>({state:'running',accepted:true,task_id:'t-1'})};
     };
-    return {panel,button,box,posts};
+    return {panel,button,box,posts,status};
   }
   {
     const {panel,box,posts}=fixture(true);
@@ -999,6 +1000,16 @@ async function testUpdateConfirmAndProgress() {
     panel.api.requestJobUpdate();
     panel.api.closeUpdateConfirm(true);await tick();
     eq('确认：走原来的 POST /api/update 一次', posts, ['/api/update']);
+  }
+  {
+    const {panel,status,box}=fixture(true);
+    panel.api.requestJobUpdate();
+    check('确认前焦点不在状态文字上', status._focused!==true);
+    panel.api.closeUpdateConfirm(true);await tick();
+    check('确认：焦点移到可见的更新状态文字（按钮运行期间禁用）', status._focused===true);
+    const {panel:p2,status:s2}=fixture(true);
+    p2.api.requestJobUpdate();p2.api.closeUpdateConfirm(false);await tick();
+    check('取消：焦点不移到状态文字', s2._focused!==true);
   }
   {
     const {panel,button,posts}=fixture(true);

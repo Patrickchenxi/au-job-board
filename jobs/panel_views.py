@@ -110,7 +110,7 @@ def _update_widget(lang: str, *, compact: bool = False) -> str:
         f'<button type="button" class="btn update-btn" id="update-start" '
         f'title="{_e(T("set.update_hint"))}" aria-haspopup="dialog" disabled>',
         icon, f'<span>{_e(T("js.update_title"))}</span></button>',
-        '<span class="update-feedback"><span id="update-status" role="status" aria-live="polite" aria-atomic="true"></span>',
+        '<span class="update-feedback"><span id="update-status" tabindex="-1" role="status" aria-live="polite" aria-atomic="true"></span>',
         '' if compact else ('<span id="update-meta" class="muted"></span>'
                             f'<details class="update-details"><summary>{_e(T("update.details"))}</summary>'
                             '<span id="update-task" class="muted"></span></details>'),
@@ -555,7 +555,7 @@ def _skill_picker(filters: dict, counts: dict, lang: str = "zh", skill_labels=No
     return (f'<div class="skillpick" id="skillpick">'
             f'<button type="button" class="ctl{" on" if selected else ""}" aria-haspopup="true" '
             f'title="{_e(i18n.t(lang, "filter.skill_hint"))}" onclick="skillToggle(event)">'
-            f'<span class="k">{_e(title)}</span> <span class="v">{_e(value)}</span> ▾</button>'
+            f'<span class="k">{_e(title)}</span> <span class="v">{_e(value)}</span> <span class="caret" aria-hidden="true">▾</span></button>'
             f'<div class="skillpanel" id="skill-panel">{"".join(opts)}</div></div>')
 
 
@@ -985,7 +985,7 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
     nav = "".join(
         f'<a class="set-nav-item{" on" if key == section else ""}" '
         f'href="/settings?section={key}"{CURRENT if key == section else ""}>'
-        f'{_e(T("set." + key))}</a>'
+        f'{_e(T("set.rules_tab" if key == "rules" else "set." + key))}</a>'
         for key in SETTINGS_SECTIONS)
 
     if section == "skills":
