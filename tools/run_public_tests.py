@@ -80,6 +80,8 @@ PYTHON_TESTS = (
      "panel update HTTP API and same-origin boundary (loopback)", None),
     ("tools/test_panel_i18n.py",
      "panel English / Chinese text", None),
+    ("tools/test_panel_stats_http.py",
+     "read-only header counts endpoint, same-origin boundary and navigation hooks (loopback)", None),
     ("tools/test_skills_and_search.py",
      "skill vocabulary and search matching", None),
     ("tools/test_demo.py",
@@ -95,6 +97,8 @@ PYTHON_TESTS = (
 NODE_TESTS = (
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),
+    ("tools/test_panel_navigation.mjs",
+     "panel detail navigation, label sheet, filter drawer, header counts and skill candidates", None),
 )
 
 
