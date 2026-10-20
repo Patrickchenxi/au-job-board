@@ -302,7 +302,9 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         "</div>",
         f'<div class="sub">{_e(sub)}</div>',
         # 进度文字与状态点放在 tags 行内部（不是绝对定位），避免压在标签上
-        f'<div class="tags">{tags}{_progress(uid, label, lang)}{_dots(uid, label, lang)}</div>',
+        # 进度文字与圆点是一组，换行时一起走，不会被拆到两行
+        f'<div class="tags">{tags}<span class="card-state">{_progress(uid, label, lang)}'
+        f'{_dots(uid, label, lang)}</span></div>',
         "</div>",
     ])
 

@@ -769,12 +769,12 @@ body.portrait .detail.swap>*{animation:none}
 .score b{color:var(--accent-ink)}
 .skills{min-width:0;font-size:var(--fs-xs);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tag.raw.full{white-space:normal;text-align:left}
-.prog{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;min-height:20px;padding:0 8px;border-radius:999px;
+.card-state{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
+.card-state .dots{margin-left:0;padding-left:0}
+.prog{flex:0 0 auto;display:inline-flex;align-items:center;min-height:20px;padding:0 8px;border-radius:999px;
  border:1px solid var(--line3);color:var(--ink2);font-size:var(--fs-xs);white-space:nowrap}
 .prog.good{border-color:var(--good);color:var(--good-ink)}
 .prog.bad{border-color:var(--bad);color:var(--bad-ink)}
-.prog+.dots{margin-left:2px}
-.prog[hidden]+.dots{margin-left:auto}
 /* 详情底部：为什么是 T1 · N 分（卡片上拿掉的加减分在这里，默认收起） */
 .why{margin:24px 0 4px;border-top:1px solid var(--line);padding-top:10px;font-size:var(--fs-sm)}
 .why summary{cursor:pointer;color:var(--ink2);font-weight:600;min-height:32px;display:flex;align-items:center;gap:6px}
