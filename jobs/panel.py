@@ -179,18 +179,37 @@ class Handler(BaseHTTPRequestHandler):
             self._post_skills(payload, started)
             return
         uid, field, value = payload.get("uid"), payload.get("field"), payload.get("value")
+        valid_value = (isinstance(value, (bool, int, type(None))) if field == "priority"
+                       else isinstance(value, (str, type(None))))
         if (not isinstance(uid, str) or not uid or field not in labels_mod.WRITABLE
-                or not isinstance(value, (str, type(None)))):
+                or not valid_value):
             self._json({"error": "invalid_request"}, 400, started)
             return
         conn = None
         try:
             conn = database.connect(_db_path(self.config))
+            conn.execute("BEGIN IMMEDIATE")
+            row = _find(conn, self.config, uid)
+            if row is None:
+                row = {"uid": uid, "_label": labels_mod.get_labels(conn).get(uid, {})}
+            old_label = row.get("_label") or {}
+            q = labels_mod.qualification(row, old_label)
+            if field == "eligibility" and value == q["analysis"]:
+                # A machine-selected default is a read, not a human assertion.
+                if not q["corrected"]:
+                    conn.rollback()
+                    self._json({"ok": True, "field": field, "value": None,
+                                "label": old_label, "qualification": q}, 200, started)
+                    return
+                value = None
             labels_mod.set_label(conn, uid, source="panel", **{field: value})
             # 把**落库后**的值回传：note 会被规范化（补尾随「；」），
             # 前端要用它回填输入框，否则界面上和刷新后的不一致
-            stored = labels_mod.get_labels(conn).get(uid, {})
-            self._json({"ok": True, "field": field, "value": stored.get(field)}, 200, started)
+            row = _find(conn, self.config, uid) or {"_label": labels_mod.get_labels(conn).get(uid, {})}
+            stored = row.get("_label") or {}
+            self._json({"ok": True, "field": field, "value": stored.get(field),
+                        "label": stored,
+                        "qualification": labels_mod.qualification(row, stored)}, 200, started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain", started)
         except sqlite3.Error:

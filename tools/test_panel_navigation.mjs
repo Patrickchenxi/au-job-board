@@ -92,6 +92,7 @@ class El {
   appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k]; }
+  removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
   removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== fn); }
   fire(type, ev = {}) { (this.listeners[type] || []).forEach((fn) => fn({ type, target: this, preventDefault() {}, ...ev })); }
@@ -189,6 +190,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
     reloads: () => reloads,
     key: (ev) => (docListeners.get("keydown") || []).forEach((fn) => fn({ target: body, preventDefault() { this.prevented = true; }, ...ev })),
     calls: [],
+    docEvent: (type, ev) => (docListeners.get(type) || []).forEach(fn => fn(ev)),
+    winEvent: (type, ev) => (winListeners.get(type) || []).forEach(fn => fn(ev)),
   };
   /* fetch 记录：/api/job 默认立即返回该 uid 的详情；其它路由按测试覆盖 */
   t.routes = {
@@ -507,19 +510,20 @@ async function testStats() {
   const stat = (key, text) => { const el = new El("b"); el.dataset.stat = key; el.textContent = text; return el; };
   const els = [stat("labelled", "13"), stat("saved", "4"), stat("applied", "2"), stat("labelled", "13")];
   t.reg["[data-stat]"] = els;
-  const btn = new El("button"); btn.dataset.uid = "A"; btn.dataset.field = "action";
+  const btn = new El("button"); btn.dataset.uid = "A"; btn.dataset.field = "action"; btn.dataset.value = "saved";
   t.reg['[data-uid="A"][data-field="action"]'] = [btn];
+  t.reg['[data-uid="A"][data-field]'] = [btn];
   const sum = new El("span"); t.reg["#detail .label-sum"] = [sum]; t.reg['#detail [data-uid="A"]'] = [btn];
   t.routes.stats = () => ({ ok: true, json: async () => ({ labelled: 14, saved: 5, applied: 2 }) });
   await t.api.setLabel("A", "action", "saved", btn); await tick(); await tick();
   eq("写入请求体不变", t.calls.filter((c) => c.url === "/api/label").map((c) => c.body), [{ uid: "A", field: "action", value: "saved" }]);
   eq("统计按键回填（含抽屉里的同键）", els.map((e) => e.textContent), ["14", "5", "2", "14"]);
   eq("统计请求不缓存", t.calls.find((c) => c.url === "/api/stats").opts.cache, "no-store");
-  eq("底栏标注摘要同步", sum.textContent, "value.action.saved");
+  eq("底栏标注摘要同步", sum.textContent, "state.done");
   t.routes.stats = () => { throw new Error("offline"); };
   await t.api.setLabel("A", "action", "saved", btn); await tick(); await tick();
   eq("统计失败：数字保持、按钮照常切换", [els.map((e) => e.textContent), btn.classList.contains("on")], [["14", "5", "2", "14"], false]);
-  eq("取消后摘要回到未标注", sum.textContent, "js.detail_unlabelled");
+  eq("取消后摘要回到未处理", sum.textContent, "state.open");
   t.routes.stats = () => ({ ok: false, json: async () => ({}) });
   await t.api.refreshStats(); await tick();
   eq("统计非 2xx：数字保持", els[0].textContent, "14");
@@ -538,6 +542,72 @@ async function testStats() {
   const callsBefore = t.calls.length;
   await t.api.setLabel("A", "action", "applied", btn); await tick();
   eq("标注失败：不重拉统计", t.calls.slice(callsBefore).map((c) => c.url), ["/api/label"]);
+}
+
+async function testLabelLock() {
+  console.log("\n-- 主状态处理锁、重复操作与服务端回显 --");
+  const t = loadPanel();
+  const saved = new El("button"), applied = new El("button");
+  for (const [btn,value] of [[saved,"saved"],[applied,"applied"]]) {
+    btn.dataset.uid="A";btn.dataset.field="action";btn.dataset.value=value;
+  }
+  t.reg['[data-uid="A"][data-field]']=[saved,applied];
+  let release;
+  t.routes.label=()=>new Promise(resolve=>{release=resolve;});
+  const first=t.api.setLabel("A","action","saved",saved);
+  await tick();
+  eq("请求期间相关按钮锁住",[saved.disabled,applied.disabled],[true,true]);
+  const duplicate=t.api.setLabel("A","action","applied",applied);
+  await tick();
+  eq("处理中重复操作不发送第二次切换",t.calls.filter(c=>c.url==="/api/label").length,1);
+  const before=t.sandbox.location.href;
+  const link={href:'http://localhost/settings?tab=display#language',target:''};
+  const click={target:{closest:()=>link},button:0,preventDefault(){this.defaultPrevented=true;}};
+  t.docEvent('click',click);
+  const unload={preventDefault(){this.prevented=true;}};
+  t.winEvent('beforeunload',unload);
+  eq("标签写入中普通链接先拦截并保留当前位置",[click.defaultPrevented,t.sandbox.location.href],[true,before]);
+  eq("标签写入中刷新关闭会保护未确认写入",unload.prevented,true);
+  release({ok:true,json:async()=>({value:"saved"})});
+  await Promise.all([first,duplicate]);
+  await tick();
+  eq("写入确认后继续原设置URL与hash",t.sandbox.location.href,link.href);
+  eq("保存确认后解锁并回显",[saved.disabled,applied.disabled,saved.classList.contains("on")],[false,false,true]);
+  t.routes.label=()=>({ok:false,text:async()=>"synthetic failure"});
+  await t.api.setLabel("A","action","saved",saved);
+  eq("失败后解锁且保留注册状态",[saved.disabled,saved.classList.contains("on")],[false,true]);
+  t.routes.label=(body)=>({ok:true,json:async()=>({value:body.value})});
+  await t.api.setLabel("A","action","saved",saved);
+  eq("解锁后再次点击才取消",saved.classList.contains("on"),false);
+  eq("取消发送明确空值",t.calls.filter(c=>c.url==="/api/label").at(-1).body.value,null);
+  const failed=loadPanel(), failBtn=new El('button');
+  failBtn.dataset.uid='A';failBtn.dataset.field='action';failBtn.dataset.value='saved';
+  failed.reg['[data-uid="A"][data-field]']=[failBtn];
+  let failRelease;
+  failed.routes.label=()=>new Promise(resolve=>{failRelease=resolve;});
+  const write=failed.api.setLabel('A','action','saved',failBtn);
+  await tick();
+  const failURL=failed.sandbox.location.href;
+  const leave={target:{closest:()=>link},button:0,preventDefault(){this.defaultPrevented=true;}};
+  failed.docEvent('click',leave);
+  failRelease({ok:false,text:async()=>"synthetic failure"});
+  await write;await tick();
+  eq("保存失败：取消等待中的离页以便原地重试",[leave.defaultPrevented,failed.sandbox.location.href,failBtn.disabled],[true,failURL,false]);
+  const interleaved=loadPanel(), actionBtn=new El('button');
+  actionBtn.dataset.uid='A';actionBtn.dataset.field='action';actionBtn.dataset.value='saved';
+  interleaved.reg['[data-uid="A"][data-field]']=[actionBtn];
+  let labelDone,noteDone;
+  interleaved.routes.label=()=>new Promise(resolve=>{labelDone=resolve;});
+  const actionWrite=interleaved.api.setLabel('A','action','saved',actionBtn);
+  interleaved.api.addPendingNote(new Promise(resolve=>{noteDone=resolve;}));
+  await tick();
+  const original=interleaved.sandbox.location.href;
+  const nav={target:{closest:()=>link},button:0,preventDefault(){this.defaultPrevented=true;}};
+  interleaved.docEvent('click',nav);
+  labelDone({ok:false,text:async()=>"synthetic failure before note settles"});
+  await actionWrite;await tick();
+  noteDone();await tick();await tick();
+  eq("等待备注期间已完成的标签失败仍阻止离页",[nav.defaultPrevented,interleaved.sandbox.location.href,actionBtn.disabled],[true,original,false]);
 }
 
 function filterFixture(portrait) {
@@ -786,6 +856,7 @@ async function main() {
   await testOverlayKeyOwnership();
   await testLabelSheet();
   await testStats();
+  await testLabelLock();
   await testFilterDrawer();
   await testSkillCandidates();
   console.log();

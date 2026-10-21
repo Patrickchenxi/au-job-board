@@ -92,6 +92,10 @@ def _label_fields(label: dict, lang: str) -> dict:
         if key == "uid":
             continue
         out[key] = value[lang] if isinstance(value, dict) else value
+    # Historical screenshot fixtures can describe an old unsure label. A fresh
+    # demo has no third eligibility choice; leave it uncorrected instead.
+    if out.get("eligibility") == "unsure":
+        out.pop("eligibility")
     return out
 
 

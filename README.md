@@ -41,10 +41,10 @@ and notes live in your head or in a spreadsheet.
   Scores order the list; they are not a verdict on you.
 - **Read, label and follow up.** The local panel lists jobs in five views
   (Recommended, All, New, Excluded, Labelled), shows the original posting text
-  and the evidence sentence, and lets you record eligibility, interest and
-  progress (saved, applied, skipped) plus free-form notes. A Priority filter
-  lists the jobs whose notes carry the default "Prioritize" tag, giving you an
-  apply queue.
+  and the evidence sentence, and lets you record Want to apply, Applied or
+  Skipped plus free-form notes. An independent priority star forms an apply
+  queue with Want to apply. Optional qualification corrections retain the
+  original analysis evidence.
 - **Report.** Writes CSV and Markdown reports, including an excluded list for
   auditing the hard filters.
 

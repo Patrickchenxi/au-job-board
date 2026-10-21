@@ -10,7 +10,7 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 28 checks: 26 Python tests
+be collected by accident. The entry currently has 29 checks: 27 Python tests
 plus two Node behavior tests.
 
 Run it from the project root with the project interpreter:
@@ -42,6 +42,7 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_label_migration.py` | Atomic legacy upgrade, independent priority, correction provenance, concurrent partial edits and frozen action state | all |
 | `tools/test_patch_boundaries.py` | Concurrent partial labels, explicit group clears and legacy events, config candidate limit, unknown-employer grouping, detail retries and score/CSV values | all |
 | `tools/test_pipeline_boundaries.py` | Real interrupted writes, timeout finalization and competing standalone analysis | all |
 | `tools/test_render_security.py` | Markdown URL attribute injection and ordinary rendering controls | all |

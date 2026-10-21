@@ -56,22 +56,16 @@ function conceal(el, done){
 }
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
  clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),1400);}
-/* 三个圆点：可投性 · 兴趣 · 投递进度，固定顺序；空心 = 未标注。
-   之前只在标了某几项时显示一个文字徽标，看不出到底标的是哪一项。 */
-const AXES=['eligibility','interest','action'];
-const TONE={eligible:'good',ineligible:'bad',want:'good',no:'bad',applied:'good',skipped:'bad'};
-function dotClass(v){ return 'dot '+(v ? (TONE[v]||'mid') : 'unset'); }
-function dotsTitle(s){
-  return AXES.map(k=>T('field.'+k)+T('js.colon')+(s[k] ? T('value.'+k+'.'+s[k]) : T('dots.unset')))
-             .join(T('js.dots_sep'));
+/* 处理状态：想投 / 已投 / 跳过 才算处理；星标独立。卡片、详情状态行与竖屏底栏
+   都读 LABELS[uid]（组合并后的标注），与服务端 _card_state / _state_text 同口径。 */
+const TONE={eligible:'good',ineligible:'bad',saved:'want',applied:'good',skipped:'mid'};
+function stateText(s){
+  let text=s.action ? T('state.done',{status:T('value.action.'+s.action)}) : T('state.open');
+  if(s.priority) text+=' · '+T('state.star');
+  return text;
 }
 function refreshDot(uid){
   const s=LABELS[uid]||{};
-  document.querySelectorAll('.dots[data-uid="'+uid+'"]').forEach(d=>{
-    d.querySelectorAll('.dot').forEach(el=>{ setDot(el, dotClass(s[el.dataset.axis])); });
-    const title=dotsTitle(s); d.title=title; d.setAttribute('aria-label',title);
-  });
-  // 卡片上的进度文字（待投 / 已投 / 跳过）与圆点同源：都读 LABELS[uid]（组合并后的标注）
   document.querySelectorAll('.prog[data-prog-uid="'+uid+'"]').forEach(el=>{
     const v=s.action;
     el.hidden=!v;
@@ -79,22 +73,51 @@ function refreshDot(uid){
     el.textContent=v ? T('value.action.'+v) : '';
     el.title=v ? T('field.action')+T('js.colon')+T('value.action.'+v) : '';
   });
-  // 详情里每条轴标签前的同款圆点，以及竖屏底栏「标注 ▴」后的当前三项
+  document.querySelectorAll('.card-star[data-star-uid="'+uid+'"]').forEach(el=>{ el.hidden=!s.priority; });
+  document.querySelectorAll('[data-state-uid="'+uid+'"]').forEach(el=>{ el.textContent=stateText(s); });
   if(!document.querySelector('#detail [data-uid="'+uid+'"]')) return;
-  AXES.forEach(k=>{
-    const el=document.querySelector('#detail [data-axis-dot="'+k+'"]');
-    if(el) setDot(el, dotClass(s[k]));
-  });
-  const sum=AXES.filter(k=>s[k]).map(k=>T('value.'+k+'.'+s[k])).join(' · ')||T('js.detail_unlabelled');
-  document.querySelectorAll('#detail .label-sum').forEach(el=>{ el.textContent=sum; });
+  document.querySelectorAll('#detail .label-sum').forEach(el=>{ el.textContent=stateText(s); });
 }
-/* 圆点状态变化时轻轻弹一下，让人看到「标注落到了哪一颗」 */
-function setDot(el, cls){
-  if(el.className.replace(/\s*pop\b/,'')===cls) return;
-  el.className=cls;
-  if(REDUCED.matches) return;
-  void el.offsetWidth; el.classList.add('pop');
-  el.addEventListener('animationend',()=>el.classList.remove('pop'),{once:true});
+/* 资格纠错摘要：当前有效结果 · 来源（服务端 _qualification_summary 同口径） */
+function qualificationSummary(q){
+  if(!q.effective) return T('qualification.sum_unknown');
+  return T(q.corrected?'qualification.sum_manual':'qualification.sum_machine',
+           {value:T('value.eligibility.'+q.effective)});
+}
+function qualificationSourceKey(q){
+  if(q.corrected) return 'qualification.manual';
+  if(q.analysis==='ineligible') return 'qualification.machine_excluded';
+  return q.analysis ? 'qualification.machine' : 'qualification.unknown';
+}
+/* 写入失败：服务端的 write_failed / invalid_request 是代码，不直接把 JSON 摆给人看；
+   其他文本（例如校验说明）照原样附在后面。状态保持原样，可以直接重试。 */
+function labelFailure(e){
+  let msg=String(e && e.message || '');
+  try{ const d=JSON.parse(msg); if(d && d.error) msg=T('js.label_retry'); }catch(_){}
+  return T('js.label_failed')+msg;
+}
+function labelToast(field,data){
+  if(field==='action') return data.value ? T('js.action_set',{status:T('value.action.'+data.value)}) : T('js.action_cleared');
+  if(field==='priority') return T(data.value ? 'js.star_on' : 'js.star_off');
+  if(field==='eligibility'){
+    if(data.value==='ineligible') return T('js.miss_hint');
+    return data.value ? T('js.correction_eligible') : T('js.correction_cleared');
+  }
+  return data.value==null ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field);
+}
+/* 卡片上的「人工：可投/不可投」只提示与分析结果相反的人工纠正（服务端 _correction_tag 同口径） */
+function refreshCorrectionTag(uid,q){
+  document.querySelectorAll('.card[data-uid="'+uid+'"] .tags').forEach(tags=>{
+    let tag=tags.querySelector('.tag.corr');
+    if(!q || !q.corrected || !q.analysis || q.effective===q.analysis){ if(tag) tag.remove(); return; }
+    if(!tag){
+      tag=document.createElement('span'); tag.className='tag corr';
+      const before=tags.querySelector('.tag.salary,.tag.raw,.skills,.card-state');
+      tags.insertBefore(tag,before||null);
+    }
+    tag.textContent=T('card.corrected',{value:T('value.eligibility.'+q.effective)});
+    tag.title=T('qualification.manual');
+  });
 }
 async function openJob(uid){
   if(OPEN_UID && OPEN_UID!==uid){
@@ -144,6 +167,7 @@ async function openJob(uid){
 let OPEN_SEQ=0, OPEN_UID=null;
 const NOTE_REQUESTS=new Set();
 const NOTE_WRITES=new Map();
+const LABEL_WRITES=new Map();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -168,20 +192,59 @@ async function closeDetail(){
   if(!document.body.classList.contains('portrait') || REDUCED.matches){ pane.classList.remove('open'); return; }
   conceal(pane, ()=>{ pane.hidden=false; pane.classList.remove('open'); });
 }
+function labelButtons(uid){
+  return Array.from(document.querySelectorAll('[data-uid="'+uid+'"][data-field]'));
+}
 async function setLabel(uid,field,value,btn){
+  if(LABEL_WRITES.has(uid)) return LABEL_WRITES.get(uid);
   const wasOn=btn.classList.contains('on');
+  const correction=document.querySelector('[data-qualification-uid="'+uid+'"]');
+  if(field==='eligibility' && wasOn && correction && correction.dataset.corrected!=='true') return;
+  const target=wasOn ? null : (field==='priority' ? true : value);
+  labelButtons(uid).forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');});
+  // Publish the lock before any await, including a pending note save.
+  let release;
+  const locked=new Promise(resolve=>{release=resolve;});
+  LABEL_WRITES.set(uid,locked);
+  let saved=false;
   try{
+    if(NOTE_WRITES.has(uid)) await NOTE_WRITES.get(uid);
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({uid:uid,field:field,value:wasOn?null:value})});
+      body:JSON.stringify({uid:uid,field:field,value:target})});
     if(!r.ok) throw new Error(await r.text());
-  }catch(e){toast(T('js.label_failed')+e.message);return;}
-  document.querySelectorAll('[data-uid="'+uid+'"][data-field="'+field+'"]')
-    .forEach(b=>{ const on=(b===btn&&!wasOn); b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false'); });
-  LABELS[uid]=LABELS[uid]||{}; LABELS[uid][field]= wasOn?null:value;
-  refreshDot(uid);
-  refreshStats();
-  if(field==='eligibility' && !wasOn && value==='ineligible') toast(T('js.miss_hint'));
-  else toast(wasOn ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field)+T('js.colon')+T('value.'+field+'.'+value));
+    const data=await r.json();
+    LABELS[uid]=LABELS[uid]||{};
+    LABELS[uid][field]=data.value;
+    if(data.qualification && correction){
+      correction.dataset.analysis=data.qualification.analysis||'';
+      correction.dataset.corrected=String(data.qualification.corrected);
+      const source=correction.querySelector('[data-qualification-source]');
+      if(source)source.textContent=T(qualificationSourceKey(data.qualification));
+      const sum=correction.querySelector('[data-qualification-summary]');
+      if(sum)sum.textContent=qualificationSummary(data.qualification);
+      const was=correction.querySelector('[data-qualification-analysis]');
+      if(was)was.textContent=(data.qualification.corrected && data.qualification.analysis)
+        ? T('qualification.analysis_was',{value:T('value.eligibility.'+data.qualification.analysis)}) : '';
+    }
+    labelButtons(uid).filter(b=>b.dataset.field===field).forEach(b=>{
+      const chosen=field==='eligibility' && data.qualification ? data.qualification.effective : data.value;
+      const on=field==='priority' ? !!chosen : b.dataset.value===chosen;
+      b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
+    });
+    // 只有推荐视图把本次处理过的卡片变淡（与服务端 _card 的 since 口径一致）
+    if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>{
+      c.classList.toggle('done',!!LABELS[uid].action);
+    });
+    if(field==='eligibility') refreshCorrectionTag(uid,data.qualification);
+    refreshDot(uid);refreshStats();
+    saved=true;
+    toast(labelToast(field,data));
+  }catch(e){toast(labelFailure(e));}
+  finally{
+    LABEL_WRITES.delete(uid);
+    labelButtons(uid).forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy');});
+    release(saved);
+  }
 }
 /* ---- 顶部统计 -----------------------------------------------------------
    写入成功后向只读接口 /api/stats 重拉，按 data-stat 键回填。**不在前端加减**：
@@ -1279,13 +1342,7 @@ document.addEventListener('keydown',ev=>{
   if(pop && !pop.hidden){ toggleDisplay(false); if(btn) btn.focus(); }
 });
 
-/* ---- 详情：? 说明与技能编辑的展开 ------------------------------------- */
-function toggleHelp(btn){
-  const p=document.getElementById('help-panel'); if(!p) return;
-  const open=!shown(p);
-  if(open) reveal(p); else conceal(p);
-  btn.setAttribute('aria-expanded',open?'true':'false');
-}
+/* ---- 详情：技能编辑的展开 ---------------------------------------------- */
 function toggleSkillEdit(btn){
   const box=document.getElementById('skill-edit'); if(!box) return;
   const open=!shown(box);
@@ -1334,6 +1391,9 @@ function hasDetailDraft(){
 }
 async function allowDetailNavigation(){
   NAV_GATES+=1;
+  // Retain results even if a label finishes and releases its lock while notes
+  // or skills are still saving. A failed label must keep this navigation here.
+  const enteringLabels=Array.from(LABEL_WRITES.values());
   try{
     if(SKILL_REQUEST){
       SKILL_NAV_WAITING=true;
@@ -1341,6 +1401,10 @@ async function allowDetailNavigation(){
       SKILL_NAV_WAITING=false;
     }
     if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
+    if(enteringLabels.length || LABEL_WRITES.size){
+      const saved=await Promise.all(enteringLabels.concat(Array.from(LABEL_WRITES.values())));
+      if(saved.some(ok=>!ok))return false;
+    }
     return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));
   }finally{NAV_GATES-=1;}
 }
@@ -1354,7 +1418,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();
@@ -1533,13 +1597,13 @@ window.addEventListener('pageshow',()=>{if(UPDATE_STOPPED){UPDATE_STOPPED=false;
 document.addEventListener('click',event=>{
   const link=event.target.closest('a[href]');
   if(!link || event.defaultPrevented || event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target==='_blank')return;
-  if(!NOTE_REQUESTS.size && !SKILL_REQUEST && !hasDetailDraft())return;
+  if(!NOTE_REQUESTS.size && !LABEL_WRITES.size && !SKILL_REQUEST && !hasDetailDraft())return;
   event.preventDefault();
   allowDetailNavigation().then(allowed=>{if(allowed){DETAIL_LEAVING=true;location.href=link.href;}});
 });
 let DETAIL_LEAVING=false;
 window.addEventListener('beforeunload',event=>{
-  if(!DETAIL_LEAVING && (NOTE_REQUESTS.size || hasDetailDraft() || SKILL_SAVING)){event.preventDefault();event.returnValue='';}
+  if(!DETAIL_LEAVING && (NOTE_REQUESTS.size || LABEL_WRITES.size || hasDetailDraft() || SKILL_SAVING)){event.preventDefault();event.returnValue='';}
 });
 window.addEventListener('hashchange',()=>{
   if(!document.getElementById('detail'))return;

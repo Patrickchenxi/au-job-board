@@ -60,14 +60,17 @@ or rerun the update after analysis finishes.
 
 | View | What it shows |
 |---|---|
-| Recommended | Unlabelled jobs that passed the hard filters, best score first, with a small share of low-score jobs mixed in so you keep labelling a calibration sample. Jobs listed for more than 30 days are not recommended. |
+| Recommended | Unprocessed jobs that passed the hard filters, best score first, with a small share of low-score jobs mixed in. Jobs listed for more than 30 days are not recommended. Notes, stars and qualification corrections alone do not count as processed. |
 | All | Everything, including excluded jobs, with the full set of filters. |
 | New | Jobs first seen in the most recent fetch batch, excluded ones included and marked as excluded. |
 | Excluded | Jobs removed by a hard filter, with the rule id and the matched text. |
-| Labelled | Jobs you have labelled, with an extra Priority filter. |
+| Labelled | Jobs with any human record, which can overlap Recommended. The Priority filter selects Want to apply plus an independent priority star. |
 
 Filters include search over title, company, location, notes, tags and
-description, salary present, freshness, skills, tier and your own label values.
+description, salary present, freshness, skills, tier and your own records:
+status (including "not processed"), the ★ priority queue, eligibility
+correction and label status. Legacy interest sits in a separate History group
+under More filters; old `interest=` links still work.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
@@ -83,14 +86,37 @@ timing, partial failures and concurrency limits.
 
 ## Labels, notes and follow-up
 
-Each job carries three independent label axes, because one "apply or not" flag
-mixes up different questions:
+Choose one main status. Only a saved status marks a job as processed; opening
+a job or adding other information does not.
+
+In the panel, the detail pane (a bottom sheet on narrow screens) puts the three
+statuses and a separate star on one row when space permits; the star wraps on
+very narrow screens so translated status labels stay readable. A state such as
+"Processed: To apply · ★ Priority". The note follows. Eligibility correction and
+any legacy interest or unsure records are folded into one section below; its
+summary shows the current result and whether it comes from the analysis or a
+manual correction. A machine result is outlined with a dashed border and a
+manual correction is filled. Cards show the status and star; they also show a
+correction tag when it contradicts the analysis. In Recommended, jobs processed
+during the current visit stay in place and are dimmed.
 
 | Axis | Values | Meaning |
 |---|---|---|
-| Eligibility | eligible, ineligible, unsure | Can you apply? |
-| Interest | want, maybe, no | Do you want to? |
-| Progress | saved, applied, skipped | What you actually did. Setting `applied` records `applied_at`. |
+| Status | saved, applied, skipped | Want to apply (shown as “To apply”), Applied or Skipped. Setting `applied` records `applied_at`. Click the current status again to clear only progress. |
+| Priority | true, false | Independent star. Only starred `saved` jobs enter the priority queue; other statuses retain the star. |
+| Qualification correction | eligible, ineligible | Optional manual override of the displayed analysis result. New writes do not accept unsure. |
+| Legacy interest | want, maybe, no | Preserved for history, export and CLI compatibility; absent from the main controls. |
+
+Qualification controls start collapsed. Expanding them or clicking the selected
+machine result writes nothing. Choosing the other result records a manual
+correction with the original analysis, rule version and evidence. Clicking that
+correction again removes the current override while preserving history. Missing
+analysis stays unknown. An unexcluded result is not a guarantee that you meet
+all requirements. Old `unsure` values remain readable and are not guessed into
+either binary result. Re-analysis does not remove manual corrections.
+
+Status changes keep the current job open. The Recommended pool is frozen at
+entry using an event watermark; refresh or enter a new session to rebuild it.
 
 Plus a free-form note. Every change is also appended to a history table
 (`label_events`), so you can check what changed and restore a label by hand from
@@ -106,7 +132,17 @@ be reconstructed.
 
 `label` is the command-line equivalent (`--list`, `--history`, `--export`,
 `--find`, `--clear`, and `--tidy-notes` which previews note formatting changes
-and only writes with `--apply`).
+and only writes with `--apply`). Use `--priority` / `--no-priority` to set the
+star, `--clear-action` to clear only progress, or `--clear-eligibility` to remove
+only the qualification override. `--clear` still removes the entire label row.
+
+The first database connection upgrades an older database in a transaction.
+Existing progress, application dates and history are preserved. The complete
+stored Chinese note tag `优先投递` moves to the priority field and is removed
+from the note; other text stays. Similar phrases and English custom notes do
+not migrate. The upgrade runs once, so a cleared star cannot reappear from an
+old tag. Back up your database before upgrading; a code downgrade alone is not
+a database rollback.
 
 ### Note tags
 
@@ -118,9 +154,8 @@ and only writes with `--apply`).
   *displayed* with English names. Anything you type that is not exactly one of
   the defaults is stored and shown as you wrote it. It is never translated or
   guessed.
-- The Priority filter and any other tag-based logic read the stored default value
-  by exact match. A note you type in English, such as "prioritize", is plain text
-  and does not feed that filter; picking the default suggestion does.
+- Priority uses its independent star, not note text. Typing a priority-related
+  phrase into a note does not change the star or the apply queue.
 - Notes are free text. Do not assume the tool can recognise or anonymise people,
   employers or other identifying details you write into them.
 

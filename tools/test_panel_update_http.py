@@ -135,8 +135,10 @@ class UpdateHTTPTests(unittest.TestCase):
                              before)
             conn.execute("DROP TRIGGER fail_label")
             conn.commit()
-            self.assertEqual(self.edit("/api/label", payload),
-                             (200, {"ok": True, "field": "note", "value": "replacement；"}))
+            code, result = self.edit("/api/label", payload)
+            self.assertEqual((code, result["ok"], result["field"], result["value"]),
+                             (200, True, "note", "replacement；"))
+            self.assertEqual(result["label"]["note"], "replacement；")
         finally:
             conn.close()
 
@@ -157,8 +159,10 @@ class UpdateHTTPTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], 0)
             conn.rollback()
-            self.assertEqual(self.edit("/api/label", payload),
-                             (200, {"ok": True, "field": "note", "value": "after lock；"}))
+            code, result = self.edit("/api/label", payload)
+            self.assertEqual((code, result["ok"], result["field"], result["value"]),
+                             (200, True, "note", "after lock；"))
+            self.assertEqual(result["label"]["note"], "after lock；")
         finally:
             conn.close()
 

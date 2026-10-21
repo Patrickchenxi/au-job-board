@@ -42,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_label_migration.py",
+     "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",
      "human-data concurrency, explicit clears, source and report regressions", None),
     ("tools/test_pipeline_boundaries.py",
