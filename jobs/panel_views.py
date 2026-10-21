@@ -216,7 +216,7 @@ def _state_text(label: dict, lang: str) -> str:
 
 
 def _card_state(uid: str, label: dict, lang: str) -> str:
-    """卡片右下：处理状态文字 + 星标。未处理、没星标时都隐藏，不占位。
+    """卡片右下：星标 + 处理状态文字。未处理、没星标时都隐藏，不占位。
     读的是去重组合并后的标注（row['_label']）；panel.js 标注后就地更新。"""
     T = lambda key: i18n.t(lang, key)   # noqa: E731
     value = label.get("action")
@@ -225,11 +225,11 @@ def _card_state(uid: str, label: dict, lang: str) -> str:
     tone = TONE.get(value, "mid") if value else ""
     star = bool(label.get("priority"))
     return (f'<span class="card-state">'
-            f'<span class="prog {tone}" data-prog-uid="{_e(uid)}" title="{_e(title)}"'
-            f'{"" if value else " hidden"}>{_e(text)}</span>'
             f'<span class="card-star" data-star-uid="{_e(uid)}" role="img" '
             f'aria-label="{_e(T("field.priority"))}" title="{_e(T("field.priority"))}"'
-            f'{"" if star else " hidden"}>★</span></span>')
+            f'{"" if star else " hidden"}>★</span>'
+            f'<span class="prog {tone}" data-prog-uid="{_e(uid)}" title="{_e(title)}"'
+            f'{"" if value else " hidden"}>{_e(text)}</span></span>')
 
 
 def _correction_tag(row: dict, label: dict, lang: str) -> str:

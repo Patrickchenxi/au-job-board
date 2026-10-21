@@ -274,7 +274,7 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 /* 处理：三状态与星标同一行。星标是轻量开关（与分段同高、不抢主操作），选中才着琥珀色 */
 .decide-state{font-weight:500;font-size:var(--fs-xs);color:var(--ink3)}
 .status-row{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-left:28px}
-.status-segs{flex:1 1 280px;max-width:440px}
+.status-segs{flex:1 1 280px;max-width:none}
 .star-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 12px;
  border:1px solid var(--line2);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink2);
  font-size:var(--fs-sm);cursor:pointer;white-space:nowrap}

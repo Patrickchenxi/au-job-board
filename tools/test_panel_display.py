@@ -185,9 +185,10 @@ def test_page_controls() -> None:
                   '<div class="modal update-confirm" id="update-confirm" hidden>' in page
                   and i18n.t(lang, "update.confirm_ok") in page)
             check(f"{lang}：抽屉里有放更新按钮的位置", 'id="drawer-update-slot"' in page)
-            check(f"{lang}：进度文字（待投）出现在卡片上",
-                  f'>{i18n.value_label(lang, "action", "saved")}</span><span class="card-star"' in page
-                  and '<span class="card-state"><span class="prog want"' in page)
+            state = re.search(r'<span class="card-state"><span class="card-star"[^>]*>★</span>'
+                              r'<span class="prog want"[^>]*>([^<]+)</span></span>', page)
+            check(f"{lang}：卡片星标在前，想投文字在后",
+                  state is not None and state.group(1) == i18n.value_label(lang, "action", "saved"))
             fetch = panel.render_settings(conn, {}, lang, None, "fetch", lang)
             check(f"{lang}：设置·抓取也走同一个确认窗",
                   fetch.count('id="update-start"') == 1 and 'id="update-confirm"' in fetch
