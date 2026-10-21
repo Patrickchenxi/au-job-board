@@ -1369,6 +1369,9 @@ function hasDetailDraft(){
 }
 async function allowDetailNavigation(){
   NAV_GATES+=1;
+  // Retain results even if a label finishes and releases its lock while notes
+  // or skills are still saving. A failed label must keep this navigation here.
+  const enteringLabels=Array.from(LABEL_WRITES.values());
   try{
     if(SKILL_REQUEST){
       SKILL_NAV_WAITING=true;
@@ -1376,8 +1379,8 @@ async function allowDetailNavigation(){
       SKILL_NAV_WAITING=false;
     }
     if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
-    if(LABEL_WRITES.size){
-      const saved=await Promise.all(Array.from(LABEL_WRITES.values()));
+    if(enteringLabels.length || LABEL_WRITES.size){
+      const saved=await Promise.all(enteringLabels.concat(Array.from(LABEL_WRITES.values())));
       if(saved.some(ok=>!ok))return false;
     }
     return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));

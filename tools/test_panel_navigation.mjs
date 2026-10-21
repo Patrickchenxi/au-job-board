@@ -593,6 +593,21 @@ async function testLabelLock() {
   failRelease({ok:false,text:async()=>"synthetic failure"});
   await write;await tick();
   eq("保存失败：取消等待中的离页以便原地重试",[leave.defaultPrevented,failed.sandbox.location.href,failBtn.disabled],[true,failURL,false]);
+  const interleaved=loadPanel(), actionBtn=new El('button');
+  actionBtn.dataset.uid='A';actionBtn.dataset.field='action';actionBtn.dataset.value='saved';
+  interleaved.reg['[data-uid="A"][data-field]']=[actionBtn];
+  let labelDone,noteDone;
+  interleaved.routes.label=()=>new Promise(resolve=>{labelDone=resolve;});
+  const actionWrite=interleaved.api.setLabel('A','action','saved',actionBtn);
+  interleaved.api.addPendingNote(new Promise(resolve=>{noteDone=resolve;}));
+  await tick();
+  const original=interleaved.sandbox.location.href;
+  const nav={target:{closest:()=>link},button:0,preventDefault(){this.defaultPrevented=true;}};
+  interleaved.docEvent('click',nav);
+  labelDone({ok:false,text:async()=>"synthetic failure before note settles"});
+  await actionWrite;await tick();
+  noteDone();await tick();await tick();
+  eq("等待备注期间已完成的标签失败仍阻止离页",[nav.defaultPrevented,interleaved.sandbox.location.href,actionBtn.disabled],[true,original,false]);
 }
 
 function filterFixture(portrait) {
