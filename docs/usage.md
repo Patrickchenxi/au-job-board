@@ -90,7 +90,8 @@ Choose one main status. Only a saved status marks a job as processed; opening
 a job or adding other information does not.
 
 In the panel, the detail pane (a bottom sheet on narrow screens) puts the three
-statuses and a separate star on one row, with a one-line state such as
+statuses and a separate star on one row when space permits; the star wraps on
+very narrow screens so translated status labels stay readable. A state such as
 "Processed: To apply · ★ Priority". The note follows. Eligibility correction and
 any legacy interest or unsure records are folded into one section below; its
 summary shows the current result and whether it comes from the analysis or a
