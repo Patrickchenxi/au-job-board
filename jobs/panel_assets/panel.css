@@ -448,11 +448,12 @@ body.portrait .detail.label-open .label-scrim{opacity:1;pointer-events:auto}
 body.portrait .decide{padding:14px}
 body.portrait .status-row,body.portrait .decide-hint,body.portrait .qualification,body.portrait .note,
 body.portrait .snippet,body.portrait .evidence-note{margin-left:0}
-body.portrait .status-segs{flex:1 1 0;min-width:0;max-width:none}
+/* Keep enough room for three translated labels; let the star wrap when needed. */
+body.portrait .status-segs{flex:1 1 200px;min-width:0;max-width:none}
 body.portrait .status-segs .seg{padding:0 4px}
 body.portrait .label-sheet:focus{outline:none}
 body.portrait .seg{min-height:44px;font-size:var(--fs-lg)}
-body.portrait .star-btn{min-height:44px;font-size:var(--fs-md)}
+body.portrait .star-btn{min-height:44px;font-size:var(--fs-md);margin-left:auto}
 body.portrait .qualification summary{min-height:44px}
 body.portrait .q-body{padding-left:0}
 body.portrait .q-segs{flex:1 1 100%}
