@@ -539,7 +539,7 @@ def cmd_label(args) -> int:
             print(f"  {row['uid']:<24} {str(row['title'])[:46]:<46} "
                   f"{str(row['company'])[:20]:<20} {state}{mark}")
         print("\n下一步：label <uid> --eligibility eligible|ineligible "
-              "--reason \"原因\" [--interest want] [--action applied]")
+              "--reason \"原因\" [--action saved] [--priority]")
         return 0
 
     if args.list:
@@ -552,7 +552,10 @@ def cmd_label(args) -> int:
             return 0
         print(f"最近 {len(rows)} 条标注：\n")
         for row in rows:
-            bits = [f"{k}={row[k]}" for k in ("eligibility", "interest", "action") if row[k]]
+            bits = [f"{k}={labels_mod.display(k, row[k])}"
+                    for k in ("eligibility", "interest", "action") if row[k]]
+            bits += [f"priority={row['priority']}",
+                     f"processed={bool(row['action'])}"]
             print(f"  {str(row['title'])[:44]:<44} {str(row['company'])[:18]:<18} "
                   f"{' '.join(bits)}")
         print("\n" + "　".join(f"{k} {v}" for k, v in labels_mod.summary(conn).items()))
@@ -625,10 +628,16 @@ def cmd_label(args) -> int:
         return 0
 
     fields = {"eligibility": args.eligibility, "ineligible_reason": args.reason,
-              "interest": args.interest, "action": args.action, "note": args.note}
+              "interest": args.interest, "action": args.action, "note": args.note,
+              "priority": getattr(args, "priority", None)}
     fields = {k: v for k, v in fields.items() if v is not None}
+    if getattr(args, "clear_action", False):
+        fields["action"] = None
+    if getattr(args, "clear_eligibility", False):
+        fields["eligibility"] = None
+        fields["ineligible_reason"] = None
     if not fields:
-        print("没有要写入的字段。可用 --eligibility/--reason/--interest/--action/--note",
+        print("没有要写入的字段。可用 --eligibility/--reason/--interest/--action/--note/--priority/--no-priority/--clear-action/--clear-eligibility",
               file=sys.stderr)
         return 1
 
@@ -646,9 +655,11 @@ def cmd_label(args) -> int:
         return 1
 
     print(f"已标注 {job['title']} — {job['company']}")
-    for key in ("eligibility", "ineligible_reason", "interest", "action", "note"):
-        if result.get(key):
-            print(f"    {key} = {result[key]}")
+    for key in ("eligibility", "ineligible_reason", "interest", "action", "priority", "note"):
+        if result.get(key) is not None:
+            value = result[key] if key == "priority" else labels_mod.display(key, result[key])
+            print(f"    {key} = {value}")
+    print(f"    processed = {bool(result.get('action'))}")
 
     # 最有价值的信号：人工判断"不能投"，但规则并没排除它 —— 这是漏杀
     decision = conn.execute("SELECT is_excluded FROM decisions WHERE uid = ?",
@@ -915,13 +926,23 @@ def main(argv=None) -> int:
 
     p_label = sub.add_parser("label", help="人工标注（不联网）")
     p_label.add_argument("uid", nargs="?", help="要标注的 uid，占位符 seek:<job-id>；实际 uid 请用 --find 从自己的库查询")
-    p_label.add_argument("--eligibility", choices=["eligible", "ineligible", "unsure"],
+    eligibility = p_label.add_mutually_exclusive_group()
+    eligibility.add_argument("--clear-eligibility", action="store_true", help="清除人工资格纠正")
+    eligibility.add_argument("--eligibility", choices=["eligible", "ineligible"],
                          help="能不能投（ineligible 会被回流成回归用例）")
     p_label.add_argument("--reason", help="不可投的原因，尤其用于记录漏杀")
     p_label.add_argument("--interest", choices=["want", "maybe", "no"], help="想不想投")
-    p_label.add_argument("--action", choices=["saved", "applied", "skipped"], help="进度")
+    action = p_label.add_mutually_exclusive_group()
+    action.add_argument("--action", choices=["saved", "applied", "skipped"],
+                        help="进度：saved=想投，applied=已投，skipped=跳过")
+    action.add_argument("--clear-action", action="store_true", help="取消主状态，保留其他人工记录")
+    priority = p_label.add_mutually_exclusive_group()
+    priority.add_argument("--priority", dest="priority", action="store_true", default=None,
+                          help="标记优先待投（筛选同时要求 saved）")
+    priority.add_argument("--no-priority", dest="priority", action="store_false",
+                          help="取消优先标记")
     p_label.add_argument("--note", help="自由备注")
-    p_label.add_argument("--clear", action="store_true", help="清除该条标注")
+    p_label.add_argument("--clear", action="store_true", help="兼容旧行为：清除整行人工标注")
     p_label.add_argument("--find", help="按标题/公司查找 uid")
     p_label.add_argument("--list", action="store_true", help="列出最近标注")
     p_label.add_argument("--history", action="store_true",

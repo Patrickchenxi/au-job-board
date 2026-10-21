@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS labels (
     ineligible_reason TEXT,      -- 尤其用于记录「漏杀」：为什么这条不该出现
     interest          TEXT,      -- want | maybe | no
     action            TEXT,      -- saved | applied | skipped
+    priority          INTEGER CHECK (priority IN (0,1)),
+    action_at         TEXT,
+    eligibility_source TEXT,
+    eligibility_at    TEXT,
+    eligibility_analysis TEXT,
     applied_at        TEXT,
     note              TEXT,
     rules_version     INTEGER,   -- 标注时生效的规则版本，回看时避免误读
@@ -98,6 +103,7 @@ CREATE TABLE IF NOT EXISTS label_events (
     old_value    TEXT,
     new_value    TEXT,
     source       TEXT,      -- cli | panel | tidy | legacy_snapshot | row_reset
+    analysis_snapshot TEXT,
     rules_version INTEGER,
     at           TEXT NOT NULL
 );
@@ -152,14 +158,28 @@ def utcnow() -> str:
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
+    from . import migrations
+
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(p)
     conn.row_factory = sqlite3.Row
     # WAL：未来面板会一边读、fetch 一边写。默认 rollback journal 下
     # 写事务会阻塞读，容易出现 "database is locked"。
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(SCHEMA)
+    try:
+        version = migrations.check_version(conn)
+        conn.execute("PRAGMA journal_mode=WAL")
+        if version == migrations.SCHEMA_VERSION:
+            return conn
+        # Schema additions, legacy conversion, audit events and version publish
+        # form one transaction, including on the first connection to an old DB.
+        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        migrations.upgrade(conn)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        conn.close()
+        raise
     return conn
 
 

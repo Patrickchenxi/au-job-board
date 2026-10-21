@@ -63,6 +63,10 @@ def test_dictionary() -> None:
     injected = set(i18n.js_strings("en"))
     missing = sorted(k for k in used if k not in injected and not k.endswith((".", "_")))
     check("前端用到的文案键都会注入 window.__I18N__", not missing, str(missing))
+    check("动态资格来源文案也会注入中英文前端",
+          all(i18n.js_strings(lang).get("qualification." + suffix) ==
+              i18n.t(lang, "qualification." + suffix)
+              for lang in ("zh", "en") for suffix in ("manual", "machine", "unknown")))
     check("标注枚举显示名走字典、存储值不变",
           i18n.value_label("en", "interest", "want") == "Want"
           and i18n.value_label("zh", "interest", "want") == "想投"

@@ -25,7 +25,8 @@ from .render import eligibility_snippet, render_job_lines, tag_texts
 COLUMNS = ["score", "tier", "tags", "eligibility_cue", "eligibility_snippet",
            "title", "company", "location", "source", "listing_date", "salary",
            "work_type", "url", "reasons", "rule_profile", "rule_disabled",
-           "label_eligibility", "label_interest", "label_action", "label_note"]
+           "label_eligibility", "label_interest", "label_action", "label_note",
+           "label_priority"]
 
 
 def _rows(conn) -> list[dict]:
@@ -33,7 +34,7 @@ def _rows(conn) -> list[dict]:
         SELECT j.uid, j.source, j.title, j.teaser, j.company, j.location, j.url, j.salary,
                j.work_type, j.listing_date, j.classification, j.job_level,
                j.description, j.dedupe_group, j.first_seen_at, j.last_seen_at,
-               d.is_excluded, d.rule_id, d.rule_kind, d.matched_text,
+               d.is_excluded, d.rule_id, d.rule_kind, d.matched_text, d.decided_at,
                d.rules_version AS decision_rules_version,
                s.tier, s.total_score, s.tier_score, s.level_score, s.adjust_score, s.reasons,
                sal.band AS salary_band, sal.hint AS salary_hint, sal.basis AS salary_basis,
@@ -79,6 +80,10 @@ def _decorate(rows: list[dict], labels: dict[str, dict],
 
         merged = label_of(row, labels, group_index)
         row["_label"] = merged
+        row["priority"] = merged.get("priority")
+        row["label_priority"] = merged.get("priority")
+        row["processed"] = bool(merged.get("action"))
+        row["qualification"] = labels_mod.qualification(row, merged)
         for key in ("eligibility", "interest", "action", "note"):
             row[f"label_{key}"] = merged.get(key) or ""
     return rows
@@ -301,7 +306,7 @@ def write_report(conn, config: dict) -> dict:
     audit_cols = ["rule_id", "rule_kind", "matched_text", "eligibility_cue",
                   "eligibility_snippet", "rule_profile", "rule_disabled",
                   "title", "company", "location", "source",
-                  "label_eligibility", "url"]
+                  "label_eligibility", "url", "label_priority"]
     _write_csv(out_dir / f"{stamp}-excluded.csv",
                sorted(excluded, key=lambda r: (r.get("rule_id") or "", r.get("title") or "")),
                audit_cols)

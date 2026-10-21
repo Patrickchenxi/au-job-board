@@ -1,20 +1,7 @@
-"""人工标注：能不能投 / 想不想投 / 投没投。
+"""Manual application progress, priority and explicit eligibility corrections.
 
-**这是项目里唯一不可再生的数据** —— 岗位可以重抓，人的判断不能。因此：
-
-  - 存在独立的 `labels` 表，`analyze` 永不触碰（见 db.clear_decisions_and_scores）
-  - 键用 `uid`（`source:id`），**不用去重组** —— 去重组会随规则变化漂移，
-    用它做键会让标注的归属悄悄跑掉
-  - 标注时记录 `rules_version`，回看时才知道那条判断是在哪版规则下做的
-
-标注的三个字段刻意正交，因为「要不要投」这一个 bool 会混淆四件不同的事：
-
-  eligibility  能不能投   → 喂给硬过滤（ineligible 即漏杀，变成回归用例）
-  interest     想不想投   → 喂给打分权重
-  action       投没投     → 你实际的求职进度
-
-漏杀没有自动出口：过滤挡掉的岗位你看不到，也就永远不会去纠正它。
-`ineligible` 的标注会被回流成 fixtures，直接进入回归测试。
+Raw machine decisions remain separate. Interest and unsure are retained for
+legacy reading; only application action marks a job as processed.
 """
 
 from __future__ import annotations
@@ -29,7 +16,7 @@ from . import db as database
 from .render import cue_is_rule_owned, eligibility_snippet
 
 VALID = {
-    "eligibility": ("eligible", "ineligible", "unsure"),
+    "eligibility": ("eligible", "ineligible"),
     "interest": ("want", "maybe", "no"),
     "action": ("saved", "applied", "skipped"),
 }
@@ -39,7 +26,7 @@ VALID = {
 DISPLAY = {
     "eligibility": {"eligible": "可投", "ineligible": "不可投", "unsure": "待定"},
     "interest": {"want": "想投", "maybe": "也许", "no": "不投"},
-    "action": {"saved": "待投", "applied": "已投", "skipped": "跳过"},
+    "action": {"saved": "想投", "applied": "已投", "skipped": "跳过"},
 }
 FIELD_LABEL = {"eligibility": "可投性", "interest": "意向", "action": "进度", "note": "备注"}
 
@@ -50,7 +37,7 @@ def display(field: str, value: str | None) -> str:
     return DISPLAY.get(field, {}).get(value, value)
 
 # 可写入的列（不含 uid / labeled_at / rules_version，那些由代码维护）
-WRITABLE = ("eligibility", "ineligible_reason", "interest", "action", "note")
+WRITABLE = ("eligibility", "ineligible_reason", "interest", "action", "note", "priority")
 
 # 备注候选词表。
 #
@@ -188,6 +175,10 @@ FIXTURE_SNIPPET_LEN = 600
 def _validate(field: str, value) -> str | None:
     if value in (None, ""):
         return None
+    if field == "priority":
+        if not isinstance(value, (bool, int)) or value not in (0, 1):
+            raise ValueError("priority must be true, false or null")
+        return int(value)
     if field not in VALID:
         return value
     if value not in VALID[field]:
@@ -223,13 +214,25 @@ def _set_label(conn, uid, rules_version, source, touch, fields):
     current = dict(existing) if existing else {k: None for k in
                                                ("eligibility", "ineligible_reason",
                                                 "interest", "action", "applied_at",
-                                                "note", "rules_version", "labeled_at")}
+                                                "note", "rules_version", "labeled_at", "priority",
+                                                "action_at", "eligibility_source", "eligibility_at",
+                                                "eligibility_analysis")}
 
     for key in fields:
         if key not in WRITABLE:
             raise ValueError(f"不可标注的字段: {key}（可选 {WRITABLE}）")
 
     now = database.utcnow()
+    previous_action = current.get("action")
+    analysis = None
+    if "eligibility" in fields:
+        decision = conn.execute("SELECT * FROM decisions WHERE uid=?", (uid,)).fetchone()
+        if decision is not None:
+            snapshot = dict(decision)
+            job = conn.execute("SELECT description FROM jobs WHERE uid=?", (uid,)).fetchone()
+            snippet, cue = eligibility_snippet(job["description"] if job else None)
+            snapshot.update(eligibility_snippet=snippet, eligibility_cue=cue)
+            analysis = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
     if existing is None and conn.execute(
             "SELECT 1 FROM label_events WHERE uid = ? LIMIT 1", (uid,)).fetchone():
         # A deleted row's field ownership must not attach to a new row just
@@ -241,6 +244,7 @@ def _set_label(conn, uid, rules_version, source, touch, fields):
         known = {r[0] for r in conn.execute(
             "SELECT DISTINCT field FROM label_events WHERE uid = ? "
             "AND (source IS NULL OR source != 'tidy') "
+            "AND NOT (field='note' AND COALESCE(source,'')='migration') "
             "AND event_id > COALESCE((SELECT MAX(event_id) FROM label_events "
             "WHERE uid = ? AND field = '__row__' AND source = 'row_reset'), 0)",
             (uid, uid))}
@@ -262,42 +266,62 @@ def _set_label(conn, uid, rules_version, source, touch, fields):
         if old_value != new_value or new_value is None or touch:
             conn.execute(
                 """INSERT INTO label_events
-                       (uid, field, old_value, new_value, source, rules_version, at)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (uid, key, old_value, new_value, source, rules_version, now),
+                       (uid, field, old_value, new_value, source, rules_version, at, analysis_snapshot)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (uid, key, old_value, new_value, source, rules_version, now,
+                 analysis if key == "eligibility" else None),
             )
         current[key] = new_value
     if touch:
         current["labeled_at"] = now
     if rules_version is not None:
         current["rules_version"] = rules_version
-    # 首次标记为已投递时，补上时间戳
-    if current.get("action") == "applied" and not current.get("applied_at"):
-        current["applied_at"] = now
-    if current.get("action") != "applied":
-        current["applied_at"] = None
+    if "action" in fields:
+        current["action_at"] = now
+        if current.get("action") == "applied" and previous_action != "applied":
+            current["applied_at"] = now
+        elif current.get("action") != "applied":
+            current["applied_at"] = None
+    if "eligibility" in fields:
+        active = current.get("eligibility") in ("eligible", "ineligible")
+        current["eligibility_source"] = source if active else None
+        current["eligibility_at"] = now if active else None
+        current["eligibility_analysis"] = analysis if active else None
 
-    conn.execute(
-        """INSERT OR REPLACE INTO labels
-               (uid, eligibility, ineligible_reason, interest, action,
-                applied_at, note, rules_version, labeled_at)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (uid, current["eligibility"], current["ineligible_reason"], current["interest"],
-         current["action"], current["applied_at"], current["note"],
-         current["rules_version"], current["labeled_at"]),
-    )
+    columns = ("uid", "eligibility", "ineligible_reason", "interest", "action",
+               "applied_at", "note", "rules_version", "labeled_at", "priority",
+               "action_at", "eligibility_source", "eligibility_at", "eligibility_analysis")
+    current["uid"] = uid
+    conn.execute("INSERT OR REPLACE INTO labels (" + ",".join(columns) + ") VALUES ("
+                 + ",".join("?" for _ in columns) + ")",
+                 tuple(current.get(key) for key in columns))
     return current
 
 
 def clear_label(conn, uid: str) -> bool:
-    cur = conn.execute("DELETE FROM labels WHERE uid = ?", (uid,))
-    conn.commit()
-    return cur.rowcount > 0
+    """Legacy clear-all command; field cancellations use set_label instead."""
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        exists = conn.execute("SELECT 1 FROM labels WHERE uid=?", (uid,)).fetchone()
+        if exists:
+            _set_label(conn, uid, None, "clear", True, {key: None for key in WRITABLE})
+            conn.execute("DELETE FROM labels WHERE uid=?", (uid,))
+        conn.commit()
+        return bool(exists)
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
     rows = {r["uid"]: dict(r) for r in conn.execute("SELECT * FROM labels")}
     if with_events:
+        # Formatting migration is an audit fact, not a new human field edit.
+        # Compare pre-migration note events in the converted text form, retaining
+        # their original time/id so a later group clear still wins (even same-second).
+        migrated_notes = dict(conn.execute("SELECT uid,MAX(event_id) FROM label_events "
+                                          "WHERE field='note' AND source='migration' GROUP BY uid"))
         # Internal merge metadata only; exports and ordinary callers retain
         # the historical public row shape. Existing databases need no migration.
         for event in conn.execute("""
@@ -306,6 +330,7 @@ def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
                     SELECT uid, field, MAX(event_id) AS last_id
                     FROM label_events e
                     WHERE (source IS NULL OR source != 'tidy')
+                    AND NOT (field='note' AND COALESCE(source,'')='migration')
                     AND event_id > COALESCE((SELECT MAX(b.event_id)
                         FROM label_events b WHERE b.uid = e.uid
                         AND b.field = '__row__' AND b.source = 'row_reset'), 0)
@@ -315,7 +340,12 @@ def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
             if row is not None and event["field"] in WRITABLE:
                 info = dict(event)
                 if event["field"] == "note":
+                    if event["event_id"] < migrated_notes.get(event["uid"], 0):
+                        from .migrations import priority_note_conversion
+                        _, info["new_value"] = priority_note_conversion(info["new_value"])
                     info["new_value"] = normalize_note(info["new_value"])
+                elif event["field"] == "priority" and info["new_value"] is not None:
+                    info["new_value"] = int(info["new_value"])
                 row.setdefault("_field_events", {})[event["field"]] = info
     return rows
 
@@ -350,8 +380,74 @@ def merge_labels(candidates: list[dict]) -> dict | None:
         merged[key] = owner.get(key)
     merged["applied_at"] = (owners["action"].get("applied_at")
                             if merged["action"] == "applied" else None)
+    merged["action_at"] = owners["action"].get("action_at")
+    for key in ("eligibility_source", "eligibility_at", "eligibility_analysis"):
+        merged[key] = owners["eligibility"].get(key)
     merged["labeled_at"] = live[0].get("labeled_at")
     return merged
+
+
+def _analysis_snapshot(value):
+    try:
+        return json.loads(value) if value else None
+    except (ValueError, TypeError):
+        return None
+
+
+def qualification(row: dict, label: dict | None = None) -> dict:
+    """Pure presentation: selecting a machine default never writes a label."""
+    label = label or {}
+    analysis = None
+    if row.get("is_excluded") in (0, 1):
+        analysis = "ineligible" if row["is_excluded"] else "eligible"
+    manual = label.get("eligibility")
+    corrected = manual in ("eligible", "ineligible")
+    return {"analysis": analysis, "effective": manual if corrected else analysis,
+            "corrected": corrected,
+            "source": (label.get("eligibility_source") or "legacy") if corrected else None,
+            "at": label.get("eligibility_at") if corrected else None,
+            "analysis_snapshot": _analysis_snapshot(label.get("eligibility_analysis")) if corrected else None}
+
+
+def freeze_marker(conn) -> str:
+    """Event watermark distinguishes entry from an edit in the same second."""
+    event_id = conn.execute("SELECT COALESCE(MAX(event_id),0) FROM label_events").fetchone()[0]
+    return f"{database.utcnow()}|{event_id}"
+
+
+def action_states_at(conn, since: str | None) -> dict[str, dict]:
+    """Reconstruct per-source action at entry, including later clears/deletes.
+
+    Return the same internal field-owner shape that merge_labels consumes.
+    Generic note/correction timestamps never change the frozen membership.
+    """
+    if not since:
+        return get_labels(conn, with_events=True)
+    stamp, separator, marker = since.partition("|")
+    watermark = int(marker) if separator and marker.isdigit() else None
+    events = conn.execute("""SELECT * FROM label_events
+        WHERE field='action' OR (field='__row__' AND source='row_reset')
+        ORDER BY event_id""").fetchall()
+    touched = {e["uid"] for e in events if e["field"] == "action"}
+    states = {}
+    for row in conn.execute("SELECT uid,action,action_at,labeled_at FROM labels"):
+        at = row["action_at"] or row["labeled_at"] or ""
+        if row["uid"] not in touched and (not at or at <= stamp):
+            states[row["uid"]] = {"action": row["action"], "action_at": at,
+                                  "labeled_at": at}
+    for event in events:
+        legacy = event["source"] == "legacy_snapshot"
+        included = ((event["at"] or "") <= stamp if watermark is None or legacy
+                    else event["event_id"] <= watermark)
+        if not included:
+            continue
+        value = event["new_value"] if event["field"] == "action" else None
+        info = {"new_value": value, "at": event["at"], "event_id": event["event_id"],
+                "source": event["source"]}
+        states[event["uid"]] = {"action": value, "action_at": event["at"],
+                                "labeled_at": event["at"],
+                                "_field_events": {"action": info}}
+    return states
 
 
 def find_jobs(conn, query: str, limit: int = 40) -> list[dict]:
@@ -380,7 +476,9 @@ def summary(conn) -> dict:
         "不可投": one("SELECT COUNT(*) FROM labels WHERE eligibility='ineligible'"),
         "可投": one("SELECT COUNT(*) FROM labels WHERE eligibility='eligible'"),
         "待定": one("SELECT COUNT(*) FROM labels WHERE eligibility='unsure'"),
-        "想投": one("SELECT COUNT(*) FROM labels WHERE interest='want'"),
+        "想投": one("SELECT COUNT(*) FROM labels WHERE action='saved'"),
+        "已处理": one("SELECT COUNT(*) FROM labels WHERE action IN ('saved','applied','skipped')"),
+        "优先待投": one("SELECT COUNT(*) FROM labels WHERE action='saved' AND priority=1"),
         "待投": one("SELECT COUNT(*) FROM labels WHERE action='saved'"),
         "已投递": one("SELECT COUNT(*) FROM labels WHERE action='applied'"),
         # 标了"不可投"但当前并未被硬排除 —— 这些就是漏杀，最有价值
@@ -413,7 +511,8 @@ def export(conn, out_dir: Path) -> dict:
     columns = ["uid", "eligibility", "ineligible_reason", "interest", "action",
                "applied_at", "note", "title", "company", "location", "source",
                "listing_date", "total_score", "tier", "is_excluded", "rule_id",
-               "rules_version", "labeled_at", "url"]
+               "rules_version", "labeled_at", "url", "priority", "action_at",
+               "eligibility_source", "eligibility_at", "eligibility_analysis"]
     with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
@@ -432,6 +531,8 @@ def export(conn, out_dir: Path) -> dict:
             bits.append(f"意向={display('interest', row['interest'])}")
         if row.get("action"):
             bits.append(f"进度={display('action', row['action'])}")
+        if row.get("priority"):
+            bits.append("优先投递")
         md.append(f"### {row.get('title')} — {row.get('company')}")
         md.append("- " + " ｜ ".join(bits) if bits else "- （仅备注）")
         if row.get("note"):
@@ -483,6 +584,7 @@ def export_fixtures(conn, path: Path | None = None) -> dict:
     fixtures, no_snippet, unowned = [], [], []
     sql = """
         SELECT l.uid, l.eligibility, l.ineligible_reason, l.labeled_at,
+               l.eligibility_source,l.eligibility_at,l.eligibility_analysis,
                j.title, j.company, j.description
         FROM labels l JOIN jobs j ON j.uid = l.uid
         WHERE l.eligibility IN ('eligible', 'ineligible')
@@ -509,6 +611,9 @@ def export_fixtures(conn, path: Path | None = None) -> dict:
             "company": row["company"],
             "reason": row["ineligible_reason"],
             "labeled_at": row["labeled_at"],
+            "correction_source": row["eligibility_source"] or "legacy",
+            "correction_at": row["eligibility_at"],
+            "analysis_snapshot": _analysis_snapshot(row["eligibility_analysis"]),
         })
 
     target.write_text(json.dumps(fixtures, ensure_ascii=False, indent=2), encoding="utf-8")

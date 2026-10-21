@@ -15,7 +15,7 @@ from . import report as report_mod
 from . import skills as skills_mod
 from .render import tags_for
 
-# 「推荐」是默认入口：未标注 + 分数优先 + 混 10% 低分岗（校准）。
+# 「推荐」是默认入口：未处理 + 分数优先 + 混 10% 低分岗（校准）。
 # 「全部」是全库（含被规则排除的），完整筛选都在那里。
 VIEWS = {"recommend": "推荐", "all": "全部", "new": "新增",
          "excluded": "被排除", "labelled": "已标注"}
@@ -31,8 +31,8 @@ LABELED_LABELS = {LABELED_ANY: "全部", "no": "未标注", "yes": "已标注"}
 QUERY_KEY = "q"
 FRESH_KEY = "fresh"          # 「只看 30 天内的」筛选
 AGE_WARN_DAYS = 30           # 挂出超过这么久：不进推荐 + 标红（见 age_tag）
-PRIORITY_KEY = "priority"    # 「优先投递」筛选（备注里带这个标签）
-PRIORITY_TAG = "优先投递"     # 与 labels.NOTE_TAG_DEFAULTS 里的词一致
+PRIORITY_KEY = "priority"    # 优先待投：action=saved 且独立 priority 为真
+PRIORITY_TAG = "优先投递"     # 旧展示调用方兼容；筛选不再读取备注
 SKILL_KEY = "skill"          # 技能多选。值为规范名，可在 URL 里重复出现
 TIER_KEY = "tier"            # 层级下拉（T1/T2/T3）—— 把 t1 搜索从唯一入口降级
 TIER_LABELS = ("T1", "T2", "T3")
@@ -40,7 +40,7 @@ SKILL_PICK_TOP = 18          # 技能筛选器展示多少个（按实际命中�
 SINCE_KEY = "since"          # 视图的「冻结时间」，见 _resolve_since
 
 # 每个视图给哪些筛选控件。
-# 推荐视图只留搜索 + 薪资：它默认就是「未标注、分数优先」，
+# 推荐视图只留搜索 + 薪资：它默认就是「未处理、分数优先」，
 # 把可投性/意向/进度摆出来只会让人以为还有别的口径；排序和「显示未标注」
 # 对它同样没有意义。要看完整筛选去「全部」。
 ALL_FILTER_KEYS = (QUERY_KEY, "eligibility", "interest", "action", "salary",
@@ -50,7 +50,7 @@ ALL_FILTER_KEYS = (QUERY_KEY, "eligibility", "interest", "action", "salary",
 # 是「把这一页缩到我想读的」，正是推荐视图最需要的。层级下拉同时把
 # t1 搜索（此前是拿 T1 的唯一入口）降级成快捷方式。
 # 「已标注」里再给「是否显示已标注」毫无意义（整页都标过），换成「优先投递」：
-# 筛出备注里带「优先投递」的那批，这才是标注攒下来之后真正要用的队列。
+# 筛出 action=saved 且 priority 为真的那批，这才是标注攒下来之后真正要用的队列。
 LABELLED_FILTER_KEYS = (tuple(k for k in ALL_FILTER_KEYS if k != "labeled")
                         + (PRIORITY_KEY,))
 VIEW_FILTER_KEYS = {
@@ -92,7 +92,7 @@ def parse_filters(qs) -> dict:
         out[QUERY_KEY] = q[:120]          # 长度兜一下，避免超长 URL
     since = (qs.get(SINCE_KEY) or [""])[0]
     if since:
-        out[SINCE_KEY] = since[:40]
+        out[SINCE_KEY] = since[:128]
     return out
 
 
@@ -120,8 +120,7 @@ def passes_filters(row: dict, label: dict, filters: dict,
     if filters.get(FRESH_KEY) and is_stale(row):
         return False
     if filters.get(PRIORITY_KEY):
-        # 「优先投递」是备注里的标签，不是独立字段（见 labels.note_tags）
-        if PRIORITY_TAG not in labels_mod.note_tags(label.get("note")):
+        if label.get("action") != "saved" or not label.get("priority"):
             return False
     if filters.get(TIER_KEY) and (row.get("tier") or "") != filters[TIER_KEY]:
         return False
@@ -236,16 +235,13 @@ def _label_time(row: dict, labels: dict, index: dict) -> str:
 
 
 def _unlabelled_at(row: dict, labels: dict, index: dict, since: str) -> bool:
-    """在 `since` 那一刻还没被标过 —— 推荐视图的池子就是它。
+    """兼容入口：labels 必须是 action_states_at 返回的边界快照。
 
-    **为什么要用时间而不是「现在有没有标注」**：翻页时会在第一页标注。
-    如果按「现在」判，标一条池子就少一条，第二页的切片起点前移一格，
-    于是**正好跳过一条没看过的岗位**。
-    按 `since` 判，本次会话里标的仍算「在 since 时未标注」，池子在翻页期间不变。
-    代价是标过的卡片仍留在列表里 —— 前端给它们加 .done 变灰，一眼能看出已处理。
+    不能由最新 action_at 或 labeled_at 推回历史；切换、清空与重新创建
+    都需要事件重放。快照由 _query 每次统一计算一次，再按组合并。
+    since 保留供旧调用方传参，边界已经应用在 labels 上。
     """
-    t = _label_time(row, labels, index)
-    return not t or not since or t > since
+    return not bool(report_mod.label_of(row, labels, index).get("action"))
 
 
 def _search_text(row: dict, label: dict) -> str:
@@ -290,13 +286,13 @@ def _search(rows: list[dict], query: str, labels: dict, index: dict,
 def _resolve_since(conn, view: str, filters: dict) -> str | None:
     """推荐视图的「冻结时间」：进入视图时定下来，翻页必须带着走。
 
-    只推荐视图需要它 —— 池子判据是「在 since 时还没被标过」（见 _unlabelled_at），
+    只推荐视图需要它 —— 池子判据是「在 since 时 action 为空」（见 _unlabelled_at），
     这样翻页期间标注不会改变池子，第一页标掉的不会让第二页跳过项目。
     其余视图的池子由规则 / 抓取批次决定，翻页时本来就不变。
     """
     if view != "recommend":
         return None
-    return filters.get(SINCE_KEY) or database.utcnow()
+    return filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn)
 
 
 def _query(conn, config, view, offset, limit, filters=None, since=None,
@@ -304,6 +300,9 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
     """返回 (页内行[已装饰], 总数)。只装饰当前页。"""
     filters = filters or {}
     kept, excluded, labels, index = report_mod.load(conn, config)
+    frozen_labels = (labels_mod.action_states_at(
+        conn, since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn))
+        if view == "recommend" else labels)
 
     if view == "excluded":
         rows = excluded
@@ -328,7 +327,7 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
         # 挂出 >30 天的不进推荐：多半没有真实 headcount，或排在几个月积压后面。
         # **只影响推荐视图**，库、全部、被排除、已标注都不动它。
         rows = [r for r in kept
-                if _unlabelled_at(r, labels, index, since) and not is_stale(r)]
+                if _unlabelled_at(r, frozen_labels, index, since) and not is_stale(r)]
 
     rows = _ordered(rows, view, filters, config)
 

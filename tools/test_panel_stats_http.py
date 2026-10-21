@@ -102,6 +102,45 @@ class StatsHTTPTests(unittest.TestCase):
             conn.close()
         return {key: summary[name] for key, name in panel_views.STAT_KEYS.items()}
 
+    def test_machine_default_is_read_only_and_correction_is_audited(self):
+        status, reply = self.label("seek:one", "eligibility", "eligible")
+        self.assertEqual(status, 200)
+        self.assertFalse(reply["qualification"]["corrected"])
+        conn = database.connect(self.config["db_path"])
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], 0)
+        conn.close()
+        status, reply = self.label("seek:one", "eligibility", "ineligible")
+        self.assertEqual(status, 200)
+        self.assertTrue(reply["qualification"]["corrected"])
+        self.assertEqual(reply["qualification"]["source"], "panel")
+        self.assertEqual(reply["qualification"]["analysis_snapshot"]["is_excluded"], 0)
+        status, reply = self.label("seek:one", "eligibility", None)
+        self.assertEqual(status, 200)
+        self.assertFalse(reply["qualification"]["corrected"])
+        self.assertEqual(reply["qualification"]["effective"], "eligible")
+
+    def test_independent_priority_and_partial_cancel_use_stored_values(self):
+        self.assertEqual(self.label("seek:one", "note", "Synthetic note")[0], 200)
+        status, reply = self.label("seek:one", "priority", True)
+        self.assertEqual(status, 200)
+        self.assertEqual(reply["value"], 1)
+        self.assertIsNone(reply["label"]["action"])
+        self.label("seek:one", "action", "saved")
+        status, reply = self.label("seek:one", "action", None)
+        self.assertEqual(status, 200)
+        self.assertIsNone(reply["value"])
+        self.assertEqual(reply["label"]["priority"], 1)
+        self.assertEqual(reply["label"]["note"], "Synthetic note；")
+
+    def test_new_unsure_and_invalid_priority_are_rejected_without_changes(self):
+        self.assertEqual(self.label("seek:one", "eligibility", "unsure")[0], 400)
+        self.assertEqual(self.label("seek:one", "priority", "yes")[0], 400)
+        conn = database.connect(self.config["db_path"])
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM labels").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM label_events").fetchone()[0], 0)
+        conn.close()
+
     def dump(self):
         conn = database.connect(self.config["db_path"])
         try:
@@ -221,7 +260,7 @@ class RenderHookTests(unittest.TestCase):
             self.assertIn('aria-keyshortcuts="K"', html)
             # The note input and label buttons exist once: the mobile sheet reuses them.
             self.assertEqual(html.count("<input data-uid="), 1)
-            self.assertEqual(html.count("data-field=\"eligibility\""), 3)
+            self.assertEqual(html.count("data-field=\"eligibility\""), 2)
             sheet = html[html.index('id="label-sheet"'):html.index('class="label-sheet-foot"')]
             self.assertIn("<input data-uid=", sheet)
             self.assertIn('data-field="action"', sheet)

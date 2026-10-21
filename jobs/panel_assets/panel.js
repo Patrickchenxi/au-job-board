@@ -144,6 +144,7 @@ async function openJob(uid){
 let OPEN_SEQ=0, OPEN_UID=null;
 const NOTE_REQUESTS=new Set();
 const NOTE_WRITES=new Map();
+const LABEL_WRITES=new Map();
 function showSkeleton(pane){
   pane.innerHTML='<div class="skeleton" aria-busy="true" aria-label="'+T('js.loading')+'">'
     +'<i class="sk-t"></i><i class="sk-m"></i><i class="sk-chips"></i><i class="sk-box"></i>'
@@ -168,20 +169,54 @@ async function closeDetail(){
   if(!document.body.classList.contains('portrait') || REDUCED.matches){ pane.classList.remove('open'); return; }
   conceal(pane, ()=>{ pane.hidden=false; pane.classList.remove('open'); });
 }
+function labelButtons(uid){
+  return Array.from(document.querySelectorAll('[data-uid="'+uid+'"][data-field]'));
+}
 async function setLabel(uid,field,value,btn){
+  if(LABEL_WRITES.has(uid)) return LABEL_WRITES.get(uid);
   const wasOn=btn.classList.contains('on');
+  const correction=document.querySelector('[data-qualification-uid="'+uid+'"]');
+  if(field==='eligibility' && wasOn && correction && correction.dataset.corrected!=='true') return;
+  const target=wasOn ? null : (field==='priority' ? true : value);
+  labelButtons(uid).forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');});
+  // Publish the lock before any await, including a pending note save.
+  let release;
+  const locked=new Promise(resolve=>{release=resolve;});
+  LABEL_WRITES.set(uid,locked);
+  let saved=false;
   try{
+    if(NOTE_WRITES.has(uid)) await NOTE_WRITES.get(uid);
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({uid:uid,field:field,value:wasOn?null:value})});
+      body:JSON.stringify({uid:uid,field:field,value:target})});
     if(!r.ok) throw new Error(await r.text());
-  }catch(e){toast(T('js.label_failed')+e.message);return;}
-  document.querySelectorAll('[data-uid="'+uid+'"][data-field="'+field+'"]')
-    .forEach(b=>{ const on=(b===btn&&!wasOn); b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false'); });
-  LABELS[uid]=LABELS[uid]||{}; LABELS[uid][field]= wasOn?null:value;
-  refreshDot(uid);
-  refreshStats();
-  if(field==='eligibility' && !wasOn && value==='ineligible') toast(T('js.miss_hint'));
-  else toast(wasOn ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field)+T('js.colon')+T('value.'+field+'.'+value));
+    const data=await r.json();
+    LABELS[uid]=LABELS[uid]||{};
+    LABELS[uid][field]=data.value;
+    if(data.qualification && correction){
+      correction.dataset.analysis=data.qualification.analysis||'';
+      correction.dataset.corrected=String(data.qualification.corrected);
+      const source=correction.querySelector('[data-qualification-source]');
+      if(source)source.textContent=T(data.qualification.corrected?'qualification.manual':
+          (data.qualification.analysis?'qualification.machine':'qualification.unknown'));
+    }
+    labelButtons(uid).filter(b=>b.dataset.field===field).forEach(b=>{
+      const chosen=field==='eligibility' && data.qualification ? data.qualification.effective : data.value;
+      const on=field==='priority' ? !!chosen : b.dataset.value===chosen;
+      b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
+    });
+    document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>{
+      c.classList.toggle('done',!!LABELS[uid].action);
+    });
+    refreshDot(uid);refreshStats();
+    saved=true;
+    if(field==='eligibility' && data.value==='ineligible')toast(T('js.miss_hint'));
+    else toast(data.value==null ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field));
+  }catch(e){toast(T('js.label_failed')+e.message);}
+  finally{
+    LABEL_WRITES.delete(uid);
+    labelButtons(uid).forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy');});
+    release(saved);
+  }
 }
 /* ---- 顶部统计 -----------------------------------------------------------
    写入成功后向只读接口 /api/stats 重拉，按 data-stat 键回填。**不在前端加减**：
@@ -1341,6 +1376,10 @@ async function allowDetailNavigation(){
       SKILL_NAV_WAITING=false;
     }
     if(NOTE_REQUESTS.size) await Promise.allSettled(Array.from(NOTE_REQUESTS));
+    if(LABEL_WRITES.size){
+      const saved=await Promise.all(Array.from(LABEL_WRITES.values()));
+      if(saved.some(ok=>!ok))return false;
+    }
     return !hasDetailDraft() || window.confirm(T('js.unsaved_leave'));
   }finally{NAV_GATES-=1;}
 }
@@ -1354,7 +1393,7 @@ function rememberListPosition(){
     top:list.scrollTop,windowY:window.scrollY}));}catch(e){}
 }
 function applyLatestResults(hash){
-  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
+  if(!UPDATE_PENDING || UPDATE_APPLYING || document.hidden || NOTE_REQUESTS.size || LABEL_WRITES.size || SKILL_SAVING || (hash===undefined && (hasDetailDraft() || (FILTER_DRAFT && filterDraftCount()))))return;
   UPDATE_APPLYING=true;
   UPDATE_BASELINE=UPDATE_PENDING;UPDATE_PENDING=null;
   rememberListPosition();
@@ -1533,13 +1572,13 @@ window.addEventListener('pageshow',()=>{if(UPDATE_STOPPED){UPDATE_STOPPED=false;
 document.addEventListener('click',event=>{
   const link=event.target.closest('a[href]');
   if(!link || event.defaultPrevented || event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target==='_blank')return;
-  if(!NOTE_REQUESTS.size && !SKILL_REQUEST && !hasDetailDraft())return;
+  if(!NOTE_REQUESTS.size && !LABEL_WRITES.size && !SKILL_REQUEST && !hasDetailDraft())return;
   event.preventDefault();
   allowDetailNavigation().then(allowed=>{if(allowed){DETAIL_LEAVING=true;location.href=link.href;}});
 });
 let DETAIL_LEAVING=false;
 window.addEventListener('beforeunload',event=>{
-  if(!DETAIL_LEAVING && (NOTE_REQUESTS.size || hasDetailDraft() || SKILL_SAVING)){event.preventDefault();event.returnValue='';}
+  if(!DETAIL_LEAVING && (NOTE_REQUESTS.size || LABEL_WRITES.size || hasDetailDraft() || SKILL_SAVING)){event.preventDefault();event.returnValue='';}
 });
 window.addEventListener('hashchange',()=>{
   if(!document.getElementById('detail'))return;

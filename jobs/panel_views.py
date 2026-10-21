@@ -164,7 +164,7 @@ def _tags(pairs, lang: str) -> str:
 
 
 def _label_state(label: dict) -> dict:
-    return {k: label.get(k) for k in ("eligibility", "interest", "action", "note")}
+    return {k: label.get(k) for k in ("eligibility", "interest", "action", "note", "priority")}
 
 
 def _age_tag(row: dict, lang: str) -> tuple[str, str] | None:
@@ -259,8 +259,7 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     label = row.get("_label") or {}
     # 本次会话（since 之后）标过的：在推荐视图里仍然留在列表里（保证翻页不跳），
     # 但要一眼看出「已经处理过了」，否则会以为标注没生效。
-    t = label.get("labeled_at") or ""
-    done = bool(since and t and t > since)
+    done = bool(label.get("action"))
 
     # 卡片只用三类强调：状态（挂出 N 天 / 已排除）、资格线索、薪资。
     # 层级并进分数徽章；加减分移到详情的「为什么是 …」；技能是中性文字。
@@ -431,19 +430,29 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         '<div class="sheet-grab" aria-hidden="true"></div>'
         f'<div class="label-sheet-head"><b>{_e(T("detail.decide"))}</b></div>')
     axes = []
-    for field, values in (("eligibility", ("eligible", "ineligible", "unsure")),
-                          ("interest", ("want", "maybe", "no")),
-                          ("action", ("saved", "applied", "skipped"))):
-        buttons = "".join(_btn(uid, field, v, label.get(field) == v, TONE.get(v, ""), lang)
-                          for v in values)
-        axes.append(
-            f'<div class="axis" role="group" aria-label="{_e(T("field." + field))}">'
-            f'<div class="axis-label"><span class="{_dot_class(field, label.get(field))}" '
-            f'data-axis-dot="{field}"></span>{_e(T("field." + field))}</div>'
-            f'<div class="segs">{buttons}</div></div>')
+    field, values = "action", ("saved", "applied", "skipped")
+    buttons = "".join(_btn(uid, field, v, label.get(field) == v, TONE.get(v, ""), lang)
+                      for v in values)
+    axes.append(f'<div class="axis" role="group" aria-label="{_e(T("field.action"))}">'
+                f'<div class="axis-label"><span class="{_dot_class(field, label.get(field))}" '
+                f'data-axis-dot="action" aria-hidden="true"></span>{_e(T("field.action"))}</div>'
+                f'<div class="segs">{buttons}</div></div>')
+    axes.append(_btn(uid, "priority", "1", bool(label.get("priority")), "", lang))
+    q = row.get("qualification") or labels_mod.qualification(row, label)
+    correction_buttons = "".join(_btn(uid, "eligibility", v, q["effective"] == v,
+                                       TONE.get(v, ""), lang)
+                                 for v in ("eligible", "ineligible"))
+    origin = T("qualification.manual") if q["corrected"] else T(
+        "qualification.machine" if q["analysis"] else "qualification.unknown")
+    correction = (f'<details class="qualification" data-qualification-uid="{_e(uid)}" '
+                  f'data-analysis="{_e(q["analysis"] or "")}" '
+                  f'data-corrected="{str(q["corrected"]).lower()}">'
+                  f'<summary>{_e(T("qualification.title"))}</summary>'
+                  f'<div class="segs">{correction_buttons}</div>'
+                  f'<p data-qualification-source>{_e(origin)}</p></details>')
     help_items = "".join(
         f'<div><b>{_e(T("field." + k))}</b><span>{_e(T("help." + k))}</span></div>'
-        for k in FILTER_KEYS)
+        for k in ("action", "priority", "eligibility"))
     out.append(
         '<div class="step-block">'
         f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step2"))}</div>'
@@ -454,7 +463,7 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'<div class="help-panel" id="help-panel" role="note" hidden>'
         f'<div class="help-grid">{help_items}</div>'
         f'<div class="help-foot">{_e(T("help.foot"))}</div></div>'
-        '</div>')
+        f'{correction}</div>')
     step += 1
 
     out.append(
@@ -912,7 +921,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         for key in VIEWS)
 
     embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
-    note_tags = labels_mod.note_tag_candidates(conn)
+    # Priority has its own control; retain legacy note translations for reading.
+    note_tags = [tag for tag in labels_mod.note_tag_candidates(conn) if tag != "优先投递"]
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
     # 「已被占用」的预判直接用后端的 canonical_tokens（同一份小写口径）；
     # 用 [token, 规范名] 数组而不是对象，避免 __proto__ 之类的词撞原型。
