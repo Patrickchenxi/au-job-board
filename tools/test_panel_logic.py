@@ -166,6 +166,17 @@ def test_filters() -> None:
     ):
         check(f"优先待投筛选 {label}",
               panel.passes_filters({"uid": "synthetic:p"}, label, {"priority": "1"}) is expected)
+    for eligibility, expected in ((None, True), ("unsure", True),
+                                  ("eligible", False), ("ineligible", False)):
+        check(f"未纠正筛选与当前人工覆盖一致：{eligibility}",
+              panel.passes_filters({}, {"eligibility": eligibility},
+                                   {"eligibility": "none"}) is expected)
+    check("旧待定链接仍可查历史值",
+          panel.passes_filters({}, {"eligibility": "unsure"}, {"eligibility": "unsure"}))
+    check("主状态与旧兴趣的 none 仍只匹配空值",
+          not panel.passes_filters({}, {"action": "saved"}, {"action": "none"})
+          and not panel.passes_filters({}, {"interest": "maybe"}, {"interest": "none"})
+          and panel.passes_filters({}, {}, {"action": "none", "interest": "none"}))
 
 
 def test_cli() -> None:

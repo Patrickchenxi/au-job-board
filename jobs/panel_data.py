@@ -111,7 +111,9 @@ def passes_filters(row: dict, label: dict, filters: dict,
             continue
         have = label.get(key)
         if want == NONE_TOKEN:
-            if have:
+            # Legacy unsure is history, not an active binary qualification override.
+            present = have in labels_mod.VALID["eligibility"] if key == "eligibility" else bool(have)
+            if present:
                 return False
         elif have != want:
             return False
