@@ -152,7 +152,8 @@ class StatsHTTPTests(unittest.TestCase):
         code, body = self.stats()
         self.assertEqual(code, 200)
         self.assertEqual(body, self.expected())
-        self.assertEqual(body, {"labelled": 0, "saved": 0, "applied": 0, "miss": 0, "false_excl": 0})
+        self.assertEqual(body, {"processed": 0, "saved": 0, "priority": 0, "applied": 0,
+                                "labelled": 0, "miss": 0, "false_excl": 0})
         for uid, field, value in (("seek:one", "eligibility", "eligible"),
                                   ("seek:one", "action", "saved"),
                                   ("seek:two", "eligibility", "ineligible"),
@@ -161,7 +162,14 @@ class StatsHTTPTests(unittest.TestCase):
             self.assertEqual(self.label(uid, field, value)[0], 200)
             code, body = self.stats()
             self.assertEqual((code, body), (200, self.expected()), (uid, field, value))
-        self.assertEqual(body, {"labelled": 3, "saved": 1, "applied": 1, "miss": 1, "false_excl": 1})
+        self.assertEqual(body, {"processed": 2, "saved": 1, "priority": 0, "applied": 1,
+                                "labelled": 3, "miss": 1, "false_excl": 1})
+        # A star alone is labelled but not processed; the queue needs saved + star.
+        self.assertEqual(self.label("seek:three", "priority", True)[0], 200)
+        self.assertEqual({k: self.stats()[1][k] for k in ("processed", "priority", "labelled")},
+                         {"processed": 2, "priority": 0, "labelled": 3})
+        self.assertEqual(self.label("seek:one", "priority", True)[0], 200)
+        self.assertEqual(self.stats()[1]["priority"], 1)
         # Clearing returns to the same per-record semantics; a note-only row still counts.
         self.assertEqual(self.label("seek:one", "action", None)[0], 200)
         self.assertEqual(self.stats()[1]["saved"], 0)
@@ -234,7 +242,7 @@ class RenderHookTests(unittest.TestCase):
         self.assertIn('data-stat="false_excl"', self.page("excluded"))
         # Drawer counters are refreshed by the same keys.
         self.assertEqual(re.findall(r'<div><b data-stat="([a-z]+)">', self.page("all")),
-                         ["labelled", "saved", "applied"])
+                         ["processed", "saved", "priority", "applied"])
 
     def test_skill_owner_embed_matches_backend_tokens(self):
         html = self.page("all")

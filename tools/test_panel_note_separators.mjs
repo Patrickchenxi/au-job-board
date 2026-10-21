@@ -1036,6 +1036,24 @@ async function testUpdateConfirmAndProgress() {
     check('清除进度：进度文字隐藏', prog.hidden===true && prog.textContent==='');
   }
   {
+    // v1.2.3 C：星标与状态行跟随 LABELS，跳过是中性色；只有星标仍是未处理
+    const panel=loadPanel('zh',TAGS);
+    const prog=new FakeEl('span'), star=new FakeEl('span'), state=new FakeEl('span');
+    const reg={'.prog[data-prog-uid="u1"]':[prog],'.card-star[data-star-uid="u1"]':[star],'[data-state-uid="u1"]':[state]};
+    panel.sandbox.document.querySelectorAll=sel=>reg[sel]||[];
+    panel.api.LABELS.u1={action:'skipped',priority:1};
+    panel.api.refreshDot('u1');
+    check('跳过 + 星标：中性色、星标出现、状态行两者都写', prog.className==='prog mid' && star.hidden===false
+      && state.textContent==='state.done · state.star', state.textContent);
+    panel.api.LABELS.u1={action:null,priority:1,note:'x'};
+    panel.api.refreshDot('u1');
+    check('只有星标/备注：状态行仍是未处理', prog.hidden===true && star.hidden===false
+      && state.textContent==='state.open · state.star', state.textContent);
+    panel.api.LABELS.u1={action:'saved',priority:null};
+    panel.api.refreshDot('u1');
+    check('取消星标：卡片星标隐藏', star.hidden===true && prog.className==='prog want');
+  }
+  {
     const panel=loadPanel('zh',TAGS);
     Object.assign(panel.sandbox.window.__I18N__,{'run.state_unknown':'结果未记录（旧版本运行）',
       'js.update_unknown':'FULL','run.ago':'上次抓取 {ago}','ago.minutes':'{n} 分钟前'});

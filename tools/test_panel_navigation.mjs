@@ -519,11 +519,11 @@ async function testStats() {
   eq("写入请求体不变", t.calls.filter((c) => c.url === "/api/label").map((c) => c.body), [{ uid: "A", field: "action", value: "saved" }]);
   eq("统计按键回填（含抽屉里的同键）", els.map((e) => e.textContent), ["14", "5", "2", "14"]);
   eq("统计请求不缓存", t.calls.find((c) => c.url === "/api/stats").opts.cache, "no-store");
-  eq("底栏标注摘要同步", sum.textContent, "value.action.saved");
+  eq("底栏标注摘要同步", sum.textContent, "state.done");
   t.routes.stats = () => { throw new Error("offline"); };
   await t.api.setLabel("A", "action", "saved", btn); await tick(); await tick();
   eq("统计失败：数字保持、按钮照常切换", [els.map((e) => e.textContent), btn.classList.contains("on")], [["14", "5", "2", "14"], false]);
-  eq("取消后摘要回到未标注", sum.textContent, "js.detail_unlabelled");
+  eq("取消后摘要回到未处理", sum.textContent, "state.open");
   t.routes.stats = () => ({ ok: false, json: async () => ({}) });
   await t.api.refreshStats(); await tick();
   eq("统计非 2xx：数字保持", els[0].textContent, "14");

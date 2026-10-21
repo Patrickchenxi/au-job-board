@@ -9,9 +9,10 @@
     第二行是搜索 + 常驻筛选，其余筛选收进「更多筛选」，收起时把生效的条件列成
     可移除的小标签。
   - 视图说明条：一句话说明当前视图口径 + 相关统计。
-  - 卡片只有三类强调（状态、资格线索、薪资）；右侧是进度文字 + 三个圆点
-    （可投性 · 兴趣 · 投递进度），未标注是空心。
-  - 详情按步骤：资格线索（原文）→ 做标记（带 ? 说明）→ 备注；计分明细在底部折叠。
+  - 卡片只有三类强调（状态、资格线索、薪资）；右侧是处理状态（想投 / 已投 / 跳过）
+    与独立星标，未处理时不占位。旧兴趣 / 旧待定只在详情的低频区回看。
+  - 详情按步骤：资格线索（原文）→ 处理（三状态 + 星标）→ 备注；资格纠错与历史记录
+    折叠在标注区底部；计分明细在页面底部折叠。
   - 竖屏（右栏放不下，见 panel.js 的 fitLayout）：汉堡菜单 + 底部筛选抽屉。
 """
 
@@ -39,18 +40,20 @@ ASSET_DIR = Path(__file__).with_name("panel_assets")
 CURRENT = ' aria-current="page"'
 MARK = "\x00"   # 占位：先转义文案再把它换成 <b> 计数
 
-# 标注值的语义色（只用于显示）
+# 标注值的语义色（只用于显示）。处理状态：想投 = 强调色、已投 = 绿、跳过 = 中性 ——
+# 跳过只是「这条不处理了」，不是资格不符，不用红色。
 TONE = {"eligible": "good", "ineligible": "bad", "want": "good", "no": "bad",
-        "applied": "good", "skipped": "bad"}
+        "saved": "want", "applied": "good", "skipped": "mid"}
 
 # 每个视图哪些筛选常驻在工具栏，其余进「更多筛选」。**允许哪些筛选**仍以
 # panel_data.VIEW_FILTER_KEYS 为准，这里只决定摆放位置（见 filter_layout）。
 PRIMARY_FILTERS = {
     "recommend": (SKILL_KEY, TIER_KEY, "salary"),
-    "labelled": (PRIORITY_KEY, SKILL_KEY),
+    "labelled": ("action", PRIORITY_KEY, SKILL_KEY),
 }
 DEFAULT_PRIMARY = (SKILL_KEY, TIER_KEY)
-LABEL_GROUP_KEYS = ("eligibility", "interest", "action", "labeled")
+LABEL_GROUP_KEYS = ("action", "eligibility", "labeled")
+HISTORY_GROUP_KEYS = ("interest",)          # 旧兴趣轴：只读回看，旧链接参数照样生效
 TOOLBAR_FIXED = (QUERY_KEY, "sort")          # 搜索框与排序有自己的固定位置
 
 ICON_SEARCH = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -81,6 +84,9 @@ ICON_GEAR = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke
              'a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09'
              'a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 '
              '0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>')
+ICON_STAR = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+             'stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">'
+             '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>')
 ICON_BACK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
              '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>')
@@ -176,7 +182,7 @@ def _age_tag(row: dict, lang: str) -> tuple[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# 标注：分段按钮与三个圆点
+# 标注：处理状态、星标与资格纠错
 # ---------------------------------------------------------------------------
 
 def _btn(uid, field, value, on, cls="", lang: str = "zh") -> str:
@@ -188,29 +194,54 @@ def _btn(uid, field, value, on, cls="", lang: str = "zh") -> str:
             f'onclick="setLabel(\'{_e(uid)}\',\'{field}\',\'{value}\',this)">{_e(text)}</button>')
 
 
-def _dot_class(field: str, value: str | None) -> str:
-    if not value:
-        return "dot unset"
-    return "dot " + TONE.get(value, "mid")
+def _star_btn(uid: str, on: bool, lang: str) -> str:
+    """独立星标：与三状态并排但更轻。只切换 priority，不改处理状态。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    return (f'<button type="button" class="star-btn{" on" if on else ""}" '
+            f'aria-pressed="{"true" if on else "false"}" title="{_e(T("help.priority"))}" '
+            f'data-uid="{_e(uid)}" data-field="priority" data-value="1" '
+            f'onclick="setLabel(\'{_e(uid)}\',\'priority\',\'1\',this)">'
+            f'{ICON_STAR}<span>{_e(T("field.priority"))}</span></button>')
 
 
-def _dots_title(label: dict, lang: str) -> str:
-    sep = i18n.t(lang, "js.dots_sep")
-    colon = i18n.t(lang, "js.colon")
-    return sep.join(
-        i18n.t(lang, f"field.{k}") + colon
-        + (i18n.value_label(lang, k, label.get(k)) if label.get(k) else i18n.t(lang, "dots.unset"))
-        for k in FILTER_KEYS)
+def _state_text(label: dict, lang: str) -> str:
+    """一句话说明当前处理状态，详情与竖屏底栏共用（panel.js stateText 同口径）。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    action = label.get("action")
+    text = (T("state.done", status=i18n.value_label(lang, "action", action)) if action
+            else T("state.open"))
+    if label.get("priority"):
+        text += " · " + T("state.star")
+    return text
 
 
-def _dots(uid: str, label: dict, lang: str) -> str:
-    """固定三个圆点：可投性 · 兴趣 · 投递进度。空心 = 未标注。
-    之前只在标了某几项时出一个文字徽标，看不出标的是哪一项。"""
-    title = _dots_title(label, lang)
-    dots = "".join(f'<span class="{_dot_class(k, label.get(k))}" data-axis="{k}"></span>'
-                   for k in FILTER_KEYS)
-    return (f'<span class="dots" data-uid="{_e(uid)}" title="{_e(title)}" '
-            f'role="img" aria-label="{_e(title)}">{dots}</span>')
+def _card_state(uid: str, label: dict, lang: str) -> str:
+    """卡片右下：处理状态文字 + 星标。未处理、没星标时都隐藏，不占位。
+    读的是去重组合并后的标注（row['_label']）；panel.js 标注后就地更新。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    value = label.get("action")
+    text = i18n.value_label(lang, "action", value) if value else ""
+    title = T("field.action") + T("js.colon") + text if value else ""
+    tone = TONE.get(value, "mid") if value else ""
+    star = bool(label.get("priority"))
+    return (f'<span class="card-state">'
+            f'<span class="prog {tone}" data-prog-uid="{_e(uid)}" title="{_e(title)}"'
+            f'{"" if value else " hidden"}>{_e(text)}</span>'
+            f'<span class="card-star" data-star-uid="{_e(uid)}" role="img" '
+            f'aria-label="{_e(T("field.priority"))}" title="{_e(T("field.priority"))}"'
+            f'{"" if star else " hidden"}>★</span></span>')
+
+
+def _correction_tag(row: dict, label: dict, lang: str) -> str:
+    """卡片只提示与分析结果**相反**的人工纠正（误杀 / 漏杀线索）。与分析一致的旧人工
+    可投、机器默认、旧待定都不占卡片位置 —— 它们在详情的资格纠错里照样可查。"""
+    q = labels_mod.qualification(row, label)
+    if not q["corrected"] or not q["analysis"] or q["effective"] == q["analysis"]:
+        return ""
+    value = q["effective"]
+    return _tag_html("corr", i18n.t(lang, "card.corrected",
+                                    value=i18n.value_label(lang, "eligibility", value)),
+                     i18n.t(lang, "qualification.manual"))
 
 
 # ---------------------------------------------------------------------------
@@ -243,23 +274,12 @@ def _salary_chip(pairs, row: dict, lang: str) -> str:
     return ""
 
 
-def _progress(uid: str, label: dict, lang: str) -> str:
-    """投递进度的文字小标签（待投 / 已投 / 跳过）。手机没有悬停，只靠圆点看不出来。
-    读的是去重组合并后的标注（row['_label']），与圆点同源；panel.js 标注后就地更新。"""
-    value = label.get("action")
-    text = i18n.value_label(lang, "action", value) if value else ""
-    title = i18n.t(lang, "field.action") + i18n.t(lang, "js.colon") + text if value else ""
-    tone = TONE.get(value, "mid") if value else ""
-    return (f'<span class="prog {tone}" data-prog-uid="{_e(uid)}" title="{_e(title)}"'
-            f'{"" if value else " hidden"}>{_e(text)}</span>')
-
-
 def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     uid = row["uid"]
     label = row.get("_label") or {}
-    # 本次会话（since 之后）标过的：在推荐视图里仍然留在列表里（保证翻页不跳），
-    # 但要一眼看出「已经处理过了」，否则会以为标注没生效。
-    done = bool(label.get("action"))
+    # 推荐视图（有 since）里本次会话处理过的仍然留在列表里（保证翻页不跳），
+    # 变淡表示「已经处理过了」。其他视图本来就混着各种状态，不变淡。
+    done = bool(since and label.get("action"))
 
     # 卡片只用三类强调：状态（挂出 N 天 / 已排除）、资格线索、薪资。
     # 层级并进分数徽章；加减分移到详情的「为什么是 …」；技能是中性文字。
@@ -275,6 +295,7 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
                           i18n.t(lang, "card.rule", rule=row.get("rule_id") or ""))
     if row.get("eligibility_cue"):
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
+    tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
     skills = [text for kind, text in pairs if kind == "skill"]
     skills_html = ""
@@ -292,7 +313,7 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     sub = " · ".join(str(x) for x in (
         row.get("company"), row.get("location"), row.get("source")) if x)
     # 技能与进度共用一行：技能按剩余宽度省略，进度保持完整；空间不足时整组换行。
-    state = f'<span class="card-state">{_progress(uid, label, lang)}{_dots(uid, label, lang)}</span>'
+    state = _card_state(uid, label, lang)
     tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
     return "".join([
@@ -331,6 +352,64 @@ def _why_section(pairs, row: dict, lang: str) -> str:
     return (f'<details class="why"><summary>{_e(title)}</summary>'
             f'<div class="why-body"><p class="hint">{_e(T("detail.why_hint"))}</p>'
             f'<ul class="why-list">{rows}</ul></div></details>')
+
+
+def _correction_details(row: dict, uid: str, label: dict, lang: str) -> str:
+    """低频：资格纠错 + 历史记录，默认折叠。摘要行直接给出当前有效结果与来源，
+    不展开也知道是「分析结果」还是「人工纠正」。展开只是读，不写任何东西；
+    机器默认选中项是虚线描边（CSS 按 data-corrected 区分），人工纠正是实底。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    q = row.get("qualification") or labels_mod.qualification(row, label)
+    buttons = "".join(_btn(uid, "eligibility", v, q["effective"] == v, TONE.get(v, ""), lang)
+                      for v in ("eligible", "ineligible"))
+    history = []
+    if label.get("interest"):
+        history.append(T("history.interest", value=i18n.value_label(lang, "interest", label["interest"])))
+    if label.get("eligibility") == "unsure":
+        history.append(T("history.unsure"))
+    history_html = ("".join(f"<li>{_e(item)}</li>" for item in history))
+    badge = f'<span class="q-hist">{_e(T("history.badge"))}</span>' if history else ""
+    history_block = (f'<div class="history"><b>{_e(T("history.title"))}</b>'
+                     f'<ul>{history_html}</ul><p class="hint">{_e(T("history.hint"))}</p></div>'
+                     if history else "")
+    # 只有人工纠正时才单独列出原分析结果；否则摘要与来源说明已经讲清楚了。
+    analysis = (T("qualification.analysis_was",
+                  value=i18n.value_label(lang, "eligibility", q["analysis"]))
+                if q["corrected"] and q["analysis"] else "")
+    return (f'<details class="qualification" data-qualification-uid="{_e(uid)}" '
+            f'data-analysis="{_e(q["analysis"] or "")}" '
+            f'data-corrected="{str(q["corrected"]).lower()}">'
+            f'<summary><span class="q-title">{_e(T("qualification.title"))}</span>'
+            f'<span class="q-sum" data-qualification-summary>{_e(_qualification_summary(q, lang))}</span>'
+            f'{badge}</summary>'
+            '<div class="q-body">'
+            f'<div class="q-row"><div class="segs q-segs" role="group" '
+            f'aria-label="{_e(T("qualification.title"))}">{buttons}</div>'
+            f'<span class="q-analysis" data-qualification-analysis>{_e(analysis)}</span></div>'
+            f'<p class="hint" data-qualification-source>{_e(_qualification_source(q, lang))}</p>'
+            f'{history_block}</div></details>')
+
+
+def _qualification_summary(q: dict, lang: str) -> str:
+    """摘要行：当前有效结果 · 来源（panel.js qualificationSummary 同口径）。"""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    if not q["effective"]:
+        return T("qualification.sum_unknown")
+    value = i18n.value_label(lang, "eligibility", q["effective"])
+    return T("qualification.sum_manual" if q["corrected"] else "qualification.sum_machine", value=value)
+
+
+def _qualification_source(q: dict, lang: str) -> str:
+    return i18n.t(lang, _qualification_source_key(q))
+
+
+def _qualification_source_key(q: dict) -> str:
+    """来源说明（panel.js qualificationSourceKey 同口径）。"""
+    if q["corrected"]:
+        return "qualification.manual"
+    if q["analysis"] == "ineligible":
+        return "qualification.machine_excluded"
+    return "qualification.machine" if q["analysis"] else "qualification.unknown"
 
 
 def _detail_html(row: dict, lang: str = "zh") -> str:
@@ -429,43 +508,19 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'<div class="label-sheet" id="label-sheet" tabindex="-1" aria-label="{_e(T("detail.decide"))}">'
         '<div class="sheet-grab" aria-hidden="true"></div>'
         f'<div class="label-sheet-head"><b>{_e(T("detail.decide"))}</b></div>')
-    axes = []
-    field, values = "action", ("saved", "applied", "skipped")
-    buttons = "".join(_btn(uid, field, v, label.get(field) == v, TONE.get(v, ""), lang)
-                      for v in values)
-    axes.append(f'<div class="axis" role="group" aria-label="{_e(T("field.action"))}">'
-                f'<div class="axis-label"><span class="{_dot_class(field, label.get(field))}" '
-                f'data-axis-dot="action" aria-hidden="true"></span>{_e(T("field.action"))}</div>'
-                f'<div class="segs">{buttons}</div></div>')
-    axes.append(_btn(uid, "priority", "1", bool(label.get("priority")), "", lang))
-    q = row.get("qualification") or labels_mod.qualification(row, label)
-    correction_buttons = "".join(_btn(uid, "eligibility", v, q["effective"] == v,
-                                       TONE.get(v, ""), lang)
-                                 for v in ("eligible", "ineligible"))
-    origin = T("qualification.manual") if q["corrected"] else T(
-        "qualification.machine" if q["analysis"] else "qualification.unknown")
-    correction = (f'<details class="qualification" data-qualification-uid="{_e(uid)}" '
-                  f'data-analysis="{_e(q["analysis"] or "")}" '
-                  f'data-corrected="{str(q["corrected"]).lower()}">'
-                  f'<summary>{_e(T("qualification.title"))}</summary>'
-                  f'<div class="segs">{correction_buttons}</div>'
-                  f'<p data-qualification-source>{_e(origin)}</p></details>')
-    help_items = "".join(
-        f'<div><b>{_e(T("field." + k))}</b><span>{_e(T("help." + k))}</span></div>'
-        for k in ("action", "priority", "eligibility"))
+    # 高频：三状态 + 星标同一行，星标更轻；说明只留一句常驻提示。
+    buttons = "".join(_btn(uid, "action", v, label.get("action") == v, TONE.get(v, ""), lang)
+                      for v in ("saved", "applied", "skipped"))
     out.append(
         '<div class="step-block">'
-        f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step2"))}</div>'
-        f'<div class="axes">{"".join(axes)}'
-        f'<button type="button" class="help" aria-expanded="false" aria-controls="help-panel" '
-        f'aria-label="{_e(T("help.button"))}" title="{_e(T("help.button"))}" '
-        f'onclick="toggleHelp(this)">?</button></div>'
-        f'<div class="help-panel" id="help-panel" role="note" hidden>'
-        f'<div class="help-grid">{help_items}</div>'
-        f'<div class="help-foot">{_e(T("help.foot"))}</div></div>'
-        f'{correction}</div>')
+        f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step2"))}'
+        f'<span class="spacer"></span><span class="decide-state" data-state-uid="{_e(uid)}" '
+        f'role="status" aria-live="polite">{_e(_state_text(label, lang))}</span></div>'
+        '<div class="status-row">'
+        f'<div class="segs status-segs" role="group" aria-label="{_e(T("field.action"))}">{buttons}</div>'
+        f'{_star_btn(uid, bool(label.get("priority")), lang)}</div>'
+        f'<p class="hint decide-hint">{_e(T("help.action"))}</p></div>')
     step += 1
-
     out.append(
         '<div class="step-block">'
         f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step3"))}'
@@ -480,6 +535,7 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'onkeydown="noteKeys(event,this)" onblur="noteBlur(this)">'
         f'<div class="hint">{_e(T("detail.note_hint"))}</div>'
         f'</div></div>')
+    out.append(_correction_details(row, uid, label, lang))
     out.append(f'<div class="label-sheet-foot"><button type="button" class="primary-btn" '
                f'onclick="toggleLabelSheet(false)">{_e(T("detail.sheet_done"))}</button></div>'
                '</div>')
@@ -489,9 +545,8 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
     out.append(f'<div class="jd">{render_jd_html(row.get("description"), T("detail.jd_empty"))}</div>')
     out.append(_why_section(all_pairs, row, lang))
     # 竖屏时固定在底部的操作栏（桌面隐藏；顶部那个按钮在竖屏隐藏）：
-    # 上一条 · 标注抽屉（显示当前三项）· 打开原文 · 下一条
-    summary = " · ".join(i18n.value_label(lang, k, label.get(k)) for k in FILTER_KEYS
-                         if label.get(k)) or T("js.detail_unlabelled")
+    # 上一条 · 标注抽屉（显示处理状态与星标）· 打开原文 · 下一条
+    summary = _state_text(label, lang)
     out.append('<div class="apply-bar">'
                + step_btn(-1, "‹")
                + f'<button type="button" class="label-toggle" aria-expanded="false" '
@@ -547,13 +602,16 @@ def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
 
 
 def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
-    """(常驻筛选, {"label": [...], "job": [...]})。两者之和 + 搜索 + 排序
-    恰好等于该视图允许的筛选（VIEW_FILTER_KEYS），只是摆放不同。"""
+    """(常驻筛选, {"label": [...], "job": [...], "history": [...]})。三组之和 + 搜索 + 排序
+    恰好等于该视图允许的筛选（VIEW_FILTER_KEYS），只是摆放不同。
+    旧兴趣轴单独放「历史」组：旧链接参数照样生效，但不再和处理状态并列。"""
     allowed = VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS)
     primary = tuple(k for k in PRIMARY_FILTERS.get(view, DEFAULT_PRIMARY) if k in allowed)
     rest = [k for k in allowed if k not in primary and k not in TOOLBAR_FIXED]
-    return primary, {"label": [k for k in rest if k in LABEL_GROUP_KEYS],
-                     "job": [k for k in rest if k not in LABEL_GROUP_KEYS]}
+    label = [k for k in LABEL_GROUP_KEYS if k in rest]
+    history = [k for k in HISTORY_GROUP_KEYS if k in rest]
+    return primary, {"label": label, "job": [k for k in rest if k not in label and k not in history],
+                     "history": history}
 
 
 def _is_active(key: str, filters: dict) -> bool:
@@ -619,8 +677,8 @@ def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_label
     if key in FILTER_KEYS:
         options = ([("", T("filter.any"))]
                    + [(v, i18n.value_label(lang, key, v)) for v in labels_mod.VALID[key]]
-                   + [(NONE_TOKEN, T("filter.none"))])
-        return _select(key, T(f"field.{key}"), options, filters.get(key, ""))
+                   + [(NONE_TOKEN, T(f"filter.none.{key}"))])
+        return _select(key, T(f"filter.field.{key}"), options, filters.get(key, ""))
     if key == "salary":
         return _toggle("salary", T("filter.salary"), bool(filters.get("salary")))
     if key == FRESH_KEY:
@@ -643,8 +701,8 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     colon = T("js.colon")
     value = filters.get(key)
     if key in FILTER_KEYS:
-        shown = T("filter.none") if value == NONE_TOKEN else i18n.value_label(lang, key, value)
-        return T(f"field.{key}") + colon + shown
+        shown = T(f"filter.none.{key}") if value == NONE_TOKEN else i18n.value_label(lang, key, value)
+        return T(f"filter.field.{key}") + colon + shown
     if key == "labeled":
         return T("filter.labeled") + colon + T(f"labeled.{value}")
     if key == "salary":
@@ -672,7 +730,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     allowed = VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS)
     primary, groups = filter_layout(view)
-    hidden_keys = groups["label"] + groups["job"]
+    hidden_keys = groups["label"] + groups["job"] + groups["history"]
     hidden_active = [k for k in hidden_keys if _is_active(k, filters)]
     counted = [k for k in allowed if k not in TOOLBAR_FIXED]
     total_active = sum(1 for k in counted if _is_active(k, filters))
@@ -722,7 +780,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
                f'<button type="button" class="linkbtn" onclick="clearFilter()">'
                f'{_e(T("filter.clear_all"))}</button></div>'
                '<div class="sheet-slot" id="sheet-slot"></div>')
-    for group in ("label", "job"):
+    for group in ("label", "job", "history"):
         keys = groups[group]
         if not keys:
             continue
@@ -857,21 +915,25 @@ def _scripts(lang: str, extra: dict | None = None) -> str:
 
 # 顶部统计的稳定键（= i18n 的 stat.* 后缀）-> labels.summary 的口径。
 # 页面渲染与只读接口 /api/stats 共用这一张表：标注后前端按键重拉，不自行加减。
-STAT_KEYS = {"labelled": "已标注", "saved": "待投", "applied": "已投递",
+STAT_KEYS = {"processed": "已处理", "saved": "待投", "priority": "优先待投",
+             "applied": "已投递", "labelled": "已标注",
              "miss": "漏杀候选", "false_excl": "误杀候选"}
+# 顶栏与抽屉共用的处理口径：只有三种主状态算处理；「已标注」是另一回事，
+# 只在已标注视图里与「已处理」并列，避免把有备注 / 星标的未处理岗位当成做完了。
+PROCESS_STATS = ("processed", "saved", "priority", "applied")
 
 
 def _stats(view: str, stats: dict, total: int, lang: str) -> list[tuple[str, object, str | None]]:
     """(显示名, 数值, 统计键)。统计键为 None 的项（本批）不随标注变化。"""
     def stat(key):
         return (i18n.t(lang, "stat." + key), stats[STAT_KEYS[key]], key)
-    common = [stat("labelled"), stat("saved"), stat("applied")]
+    common = [stat(k) for k in PROCESS_STATS]
     if view == "new":
         return [(i18n.t(lang, "stat.batch"), total, None)] + common
     if view == "excluded":
         return [stat("miss"), stat("false_excl")]
     if view == "labelled":
-        return common[1:] + [stat("miss")]
+        return [stat("labelled")] + common
     return common
 
 
@@ -956,7 +1018,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
 
     drawer_stats = "".join(f'<div><b{_stat_attr(key)}>{_e(stats[STAT_KEYS[key]])}</b>'
                            f'{_e(T("stat." + key))}</div>'
-                           for key in ("labelled", "saved", "applied"))
+                           for key in PROCESS_STATS)
 
     return "".join([
         _head(lang, theme, T("app.title") + _demo_suffix(config, lang)),

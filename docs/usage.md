@@ -67,7 +67,10 @@ or rerun the update after analysis finishes.
 | Labelled | Jobs with any human record, which can overlap Recommended. The Priority filter selects Want to apply plus an independent priority star. |
 
 Filters include search over title, company, location, notes, tags and
-description, salary present, freshness, skills, tier and your own label values.
+description, salary present, freshness, skills, tier and your own records:
+status (including "not processed"), the ★ priority queue, eligibility
+correction and label status. Legacy interest sits in a separate History group
+under More filters; old `interest=` links still work.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
@@ -83,12 +86,22 @@ timing, partial failures and concurrency limits.
 
 ## Labels, notes and follow-up
 
-Choose one main progress status. Only a saved progress status marks a job as
-processed; opening a job or adding other information does not.
+Choose one main status. Only a saved status marks a job as processed; opening
+a job or adding other information does not.
+
+In the panel, the detail pane (a bottom sheet on narrow screens) puts the three
+statuses and a separate star on one row, with a one-line state such as
+"Processed: To apply · ★ Priority". The note follows. Eligibility correction and
+any legacy interest or unsure records are folded into one section below; its
+summary shows the current result and whether it comes from the analysis or a
+manual correction. A machine result is outlined with a dashed border and a
+manual correction is filled. Cards show the status and star; they also show a
+correction tag when it contradicts the analysis. In Recommended, jobs processed
+during the current visit stay in place and are dimmed.
 
 | Axis | Values | Meaning |
 |---|---|---|
-| Progress | saved, applied, skipped | Want to apply, Applied or Skipped. Setting `applied` records `applied_at`. Click the current status again to clear only progress. |
+| Status | saved, applied, skipped | Want to apply (shown as “To apply”), Applied or Skipped. Setting `applied` records `applied_at`. Click the current status again to clear only progress. |
 | Priority | true, false | Independent star. Only starred `saved` jobs enter the priority queue; other statuses retain the star. |
 | Qualification correction | eligible, ineligible | Optional manual override of the displayed analysis result. New writes do not accept unsure. |
 | Legacy interest | want, maybe, no | Preserved for history, export and CLI compatibility; absent from the main controls. |
@@ -101,7 +114,7 @@ analysis stays unknown. An unexcluded result is not a guarantee that you meet
 all requirements. Old `unsure` values remain readable and are not guessed into
 either binary result. Re-analysis does not remove manual corrections.
 
-Progress changes keep the current job open. The Recommended pool is frozen at
+Status changes keep the current job open. The Recommended pool is frozen at
 entry using an event watermark; refresh or enter a new session to rebuild it.
 
 Plus a free-form note. Every change is also appended to a history table

@@ -201,14 +201,11 @@ body.resizing *{user-select:none!important}
 .tag.salary{background:var(--good-tint);color:var(--good-ink);font-weight:600}
 /* 雇主的薪资原话：虚线框 + 斜体，形态上就和上面那种区分开 */
 .tag.raw{background:transparent;color:var(--ink2);font-style:italic;border:1px dashed var(--faint)}
-/* 三个圆点：可投性 · 兴趣 · 投递进度，固定顺序；空心 = 未标注。
-   **是 tags 行里的普通 flex 项，不是绝对定位**，换行时布局自己避让。 */
-.dots{margin-left:auto;flex:0 0 auto;display:inline-flex;gap:4px;align-items:center;padding:2px 0 2px 6px}
+/* 小圆点：只剩顶栏「数据过期」提示在用 */
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto;border:1.5px solid transparent}
 .dot.good{background:var(--good)}
 .dot.bad{background:var(--bad)}
 .dot.mid{background:var(--ink4)}
-.dot.unset{background:transparent;border-color:var(--ink4)}
 .pager{margin:8px 0 14px;display:flex;gap:12px;align-items:center;justify-content:center;font-size:var(--fs-sm);color:var(--ink2)}
 .pager a{text-decoration:none}
 .placeholder{color:var(--ink3);text-align:center;padding:60px 20px;font-size:var(--fs-md)}
@@ -234,6 +231,7 @@ body.resizing *{user-select:none!important}
 .d-pos:empty{display:none}
 /* 标注抽屉：桌面原位展示，这些抽屉部件不出现 */
 .label-scrim,.label-sheet-head,.label-sheet-foot,.label-sheet>.sheet-grab{display:none}
+.label-sheet{display:flex;flex-direction:column;gap:18px}
 .d-head{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
 .d-title{flex:1 1 320px;min-width:0}
 .detail h2{margin:0 0 4px;font-size:var(--fs-h);line-height:1.3}
@@ -264,21 +262,50 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 .seg:first-child{border-radius:var(--r-ctl) 0 0 var(--r-ctl);margin-left:0}
 .seg:last-child{border-radius:0 var(--r-ctl) var(--r-ctl) 0}
 .seg:hover{background:var(--paper)}
-/* 选中：可投/想投/已投（绿）、不可投/不投/跳过（红）是实底；中性项（待定、也许、待投）
-   只加深描边，免得中性比正向还醒目 */
+/* 选中：想投是强调蓝、已投 / 可投是绿、不可投是红，均为实底；跳过是中性灰底 ——
+   跳过只是不再处理，不是负面判断。 */
 .seg.on{background:var(--surface);color:var(--ink);border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);
  font-weight:600;position:relative;z-index:1}
 .seg.on.good{background:var(--good);border-color:var(--good);color:var(--on-fill);box-shadow:none}
 .seg.on.bad{background:var(--bad);border-color:var(--bad);color:var(--on-fill);box-shadow:none}
-.help{flex:0 0 auto;width:38px;height:38px;border-radius:19px;border:1px solid var(--line2);background:var(--surface);
- cursor:pointer;font-weight:700;font-size:var(--fs-lg);color:var(--ink2)}
-.help:hover,.help[aria-expanded="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-wash)}
-.help-panel{margin:10px 0 0 28px;border:1px solid var(--accent-line);background:var(--accent-wash);border-radius:var(--r-box);
- padding:12px 14px;font-size:var(--fs-sm)}
-.help-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-.help-grid b{display:block;margin-bottom:2px}
-.help-grid span{color:var(--ink2)}
-.help-foot{margin-top:10px;padding-top:8px;border-top:1px solid var(--accent-line);color:var(--accent-ink)}
+.seg.on.want{background:var(--accent);border-color:var(--accent);color:var(--on-fill);box-shadow:none}
+.seg.on.mid{background:var(--chip);border-color:var(--ink3);color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink3)}
+.seg:disabled,.star-btn:disabled{cursor:progress;opacity:.7}
+/* 处理：三状态与星标同一行。星标是轻量开关（与分段同高、不抢主操作），选中才着琥珀色 */
+.decide-state{font-weight:500;font-size:var(--fs-xs);color:var(--ink3)}
+.status-row{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-left:28px}
+.status-segs{flex:1 1 280px;max-width:440px}
+.star-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 12px;
+ border:1px solid var(--line2);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink2);
+ font-size:var(--fs-sm);cursor:pointer;white-space:nowrap}
+.star-btn:hover{border-color:var(--line3);color:var(--ink)}
+.star-btn.on{background:var(--cue-tint);border-color:var(--cue-ink2);color:var(--cue-ink);font-weight:600}
+.star-btn.on svg{fill:currentColor}
+.decide-hint{margin:6px 0 0 28px}
+/* 低频：资格纠错与旧记录，默认折叠；摘要行直接写出当前有效结果与来源 */
+.qualification{margin:-4px 0 0 28px;border-top:1px solid var(--line);padding-top:8px;font-size:var(--fs-sm)}
+.qualification summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+ min-height:32px;color:var(--ink2);border-radius:var(--r-ctl)}
+.qualification summary::-webkit-details-marker{display:none}
+.qualification summary::before{content:"▸";color:var(--ink3);transition:transform var(--t) var(--ease)}
+.qualification[open] summary::before{transform:rotate(90deg)}
+.q-title{font-weight:600}
+.q-sum{color:var(--ink3)}
+.qualification[data-corrected="true"] .q-sum{color:var(--accent-ink);font-weight:600}
+.q-hist{font-size:var(--fs-xs);padding:0 7px;border-radius:var(--r-ctl);background:var(--chip);color:var(--ink2)}
+.q-body{padding:6px 0 2px 18px;display:flex;flex-direction:column;gap:6px}
+.q-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.q-segs{flex:0 1 260px}
+.q-segs .seg{min-height:34px}
+.q-analysis{font-size:var(--fs-xs);color:var(--ink3)}
+.q-analysis:empty{display:none}
+.q-body .hint{margin:0}
+/* 机器默认选中：虚线描边，不是实底 —— 一眼区分「分析结果」与「人工纠正」 */
+.qualification[data-corrected="false"] .seg.on{background:var(--surface);color:var(--ink);font-weight:600;
+ border:1px dashed var(--ink3);box-shadow:none}
+.history{margin-top:4px;padding:8px 10px;border-radius:var(--r-ctl);background:var(--surface);border:1px dashed var(--line2)}
+.history b{font-size:var(--fs-xs);color:var(--ink2)}
+.history ul{margin:4px 0;padding-left:18px;color:var(--ink2)}
 .note{margin-left:28px;position:relative}
 .note input{width:100%;min-height:38px;padding:6px 10px;border:1px solid var(--line2);border-radius:var(--r-ctl);
  font-size:var(--fs-sm);background:var(--surface)}
@@ -340,7 +367,7 @@ a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0
 .dv.on{background:var(--accent-wash);color:var(--accent-ink)}
 .dv.on b{font-weight:700}
 .drawer-stats{margin:0 18px;padding:12px 0;border-top:1px solid var(--line);display:grid;
- grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:var(--fs-xs);color:var(--ink2)}
+ grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 8px;font-size:var(--fs-xs);color:var(--ink2)}
 .drawer-stats b{display:block;font-size:var(--fs-xl);color:var(--ink);font-family:var(--mono)}
 .drawer-sec{margin:0 18px;padding:12px 0;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;
  font-size:var(--fs-sm);color:var(--ink2)}
@@ -419,13 +446,17 @@ body.portrait .label-scrim{display:block;position:fixed;inset:0;z-index:110;bord
  opacity:0;pointer-events:none;transition:opacity var(--t) var(--ease-in)}
 body.portrait .detail.label-open .label-scrim{opacity:1;pointer-events:auto}
 body.portrait .decide{padding:14px}
-body.portrait .axes,body.portrait .note,body.portrait .snippet,body.portrait .evidence-note,body.portrait .help-panel{margin-left:0}
-body.portrait .axes{flex-direction:column;align-items:stretch}
-body.portrait .axis{flex:1 1 auto}
+body.portrait .status-row,body.portrait .decide-hint,body.portrait .qualification,body.portrait .note,
+body.portrait .snippet,body.portrait .evidence-note{margin-left:0}
+body.portrait .status-segs{flex:1 1 0;min-width:0;max-width:none}
+body.portrait .status-segs .seg{padding:0 4px}
+body.portrait .label-sheet:focus{outline:none}
 body.portrait .seg{min-height:44px;font-size:var(--fs-lg)}
-/* 竖屏把 ? 挪到「做标记」标题行右侧 */
-body.portrait .axes .help{position:absolute;top:-8px;right:0;width:44px;height:44px;border-radius:22px}
-body.portrait .help-grid{grid-template-columns:1fr}
+body.portrait .star-btn{min-height:44px;font-size:var(--fs-md)}
+body.portrait .qualification summary{min-height:44px}
+body.portrait .q-body{padding-left:0}
+body.portrait .q-segs{flex:1 1 100%}
+body.portrait .q-segs .seg{min-height:44px}
 body.portrait .more-panel{position:fixed;left:0;right:0;bottom:0;z-index:240;margin:0;border-radius:18px 18px 0 0;
  border:0;max-height:82vh;max-height:82dvh;overflow-y:auto;background:var(--surface);
  box-shadow:0 -8px 32px var(--shadow);padding:6px 18px calc(14px + env(safe-area-inset-bottom));flex-direction:column;flex-wrap:nowrap}
@@ -592,16 +623,15 @@ body.portrait .more-panel .skillpick>button.ctl{width:100%;justify-content:space
 @keyframes slide-out-right{from{transform:none;opacity:1}to{transform:translateX(24%);opacity:0}}
 @keyframes dialog-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes dialog-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.98)}}
-@keyframes dot-pop{0%{transform:scale(1)}40%{transform:scale(1.45)}100%{transform:scale(1)}}
 @keyframes chip-out{to{opacity:0;transform:scale(.9)}}
 @keyframes shimmer{from{background-position:-200% 0}to{background-position:200% 0}}
 
 /* 点按反馈：颜色 / 边框过渡，按下时轻微缩小 */
-.iconbtn,.fbtn,.ctl,.btn,.primary-btn,.linkbtn,.seg,.help,.pen,.tab,.dv,.segrow button,.set-nav-item,.opt,
+.iconbtn,.fbtn,.ctl,.btn,.primary-btn,.linkbtn,.seg,.star-btn,.pen,.tab,.dv,.segrow button,.set-nav-item,.opt,
 a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note input,.set-add input,.set-filter{
  transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease),color var(--t) var(--ease),
   box-shadow var(--t) var(--ease),transform var(--t-fast) var(--ease),opacity var(--t) var(--ease)}
-.iconbtn:active,.fbtn:active,.btn:active,.primary-btn:active,.help:active,.pen:active,a.apply:active,
+.iconbtn:active,.fbtn:active,.btn:active,.primary-btn:active,.star-btn:active,.pen:active,a.apply:active,
 .achip button:active,.danger-btn:active{transform:scale(.96)}
 .seg:active{background:var(--line-soft)}
 .seg.on:active{filter:brightness(.92)}
@@ -622,8 +652,6 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 .list>.empty,.list>.placeholder{animation:fade-in var(--t-slow) var(--ease) backwards}
 
 /* 三个圆点：状态变化时弹一下，颜色渐变 */
-.dot{transition:background-color var(--t) var(--ease),border-color var(--t) var(--ease)}
-.dot.pop{animation:dot-pop 320ms var(--ease)}
 
 /* 详情：换内容时各块依次上浮淡入 */
 .detail.swap>*{animation:rise-in var(--t-slow) var(--ease) backwards}
@@ -639,8 +667,8 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 .skeleton .sk-box{height:150px;border-radius:var(--r-box);margin:6px 0}.skeleton .sk-l.short{width:60%}
 
 /* 展开 / 收起的面板 */
-.more-panel.entering,.help-panel.entering,.skill-edit.entering{animation:drop-in var(--t) var(--ease)}
-.more-panel.leaving,.help-panel.leaving,.skill-edit.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
+.more-panel.entering,.skill-edit.entering{animation:drop-in var(--t) var(--ease)}
+.more-panel.leaving,.skill-edit.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
 .skillpanel.open{animation:pop-in var(--t-fast) var(--ease);transform-origin:top left}
 .note-menu.open{animation:fade-in var(--t-fast) var(--ease)}
 .achip{animation:pop-in var(--t) var(--ease) backwards}
@@ -809,7 +837,7 @@ body.portrait .detail.swap>*{animation:none}
 .drawer-run .update-compact{display:flex;flex-direction:column;align-items:stretch;gap:6px}
 .drawer-run .update-btn{justify-content:center;width:100%;min-height:44px;font-size:var(--fs-lg)}
 .drawer-run .update-compact .update-feedback{max-width:none}
-/* 卡片：分数徽章并入层级「T1 · 9」；技能是中性文字最多 3 个；右侧进度文字 + 圆点 */
+/* 卡片：分数徽章并入层级「T1 · 9」；技能是中性文字；右侧处理状态 + 星标 */
 .score{display:inline-flex;align-items:baseline;gap:4px}
 .score .tier{font-weight:600;color:var(--ink2)}
 .score .sep{color:var(--ink4);font-weight:400}
@@ -818,11 +846,14 @@ body.portrait .detail.swap>*{animation:none}
 .skills{flex:1 1 auto;min-width:0;font-size:var(--fs-xs);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tag.raw.full{white-space:normal;text-align:left}
 .card-state{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
-.card-state .dots{margin-left:0;padding-left:0}
 .prog{flex:0 0 auto;display:inline-flex;align-items:center;min-height:20px;padding:0 8px;border-radius:999px;
  border:1px solid var(--line3);color:var(--ink2);font-size:var(--fs-xs);white-space:nowrap}
 .prog.good{border-color:var(--good);color:var(--good-ink)}
 .prog.bad{border-color:var(--bad);color:var(--bad-ink)}
+.prog.want{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-wash)}
+.prog.mid{border-color:var(--line3);color:var(--ink3)}
+.card-star{flex:0 0 auto;color:var(--cue-ink);font-size:var(--fs-md);line-height:1}
+.tag.corr{background:transparent;border-color:var(--accent-line);color:var(--accent-ink)}
 /* 详情底部：为什么是 T1 · N 分（卡片上拿掉的加减分在这里，默认收起） */
 .why{margin:24px 0 4px;border-top:1px solid var(--line);padding-top:10px;font-size:var(--fs-sm)}
 .why summary{cursor:pointer;color:var(--ink2);font-weight:600;min-height:32px;display:flex;align-items:center;gap:6px}

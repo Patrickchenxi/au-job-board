@@ -97,9 +97,10 @@ def test_card() -> None:
               ">Python · Selenium · AWS · Docker · Git</span>" in html)
         check(f"{lang}：技能悬停列出全部", "Python, Selenium, AWS, Docker, Git" in html)
         prog = i18n.value_label(lang, "action", "applied")
-        check(f"{lang}：进度文字来自 _label（与圆点同源）",
+        check(f"{lang}：进度文字来自 _label，未加星标时星标隐藏",
               f'data-prog-uid="seek:synthetic_x" title="{i18n.t(lang, "field.action")}' in html
-              and f">{prog}</span>" in html and 'class="dot good" data-axis="action"' in html)
+              and f">{prog}</span>" in html and 'class="prog good"' in html
+              and re.search(r'class="card-star"[^>]* hidden>', html) is not None)
     bare = panel._card(synthetic_row(_label={}, salary_annual_min=None, salary_annual_max=None), None, "zh")
     check("未标进度：进度标签隐藏", re.search(r'class="prog [^"]*"[^>]* hidden>', bare) is not None)
     check("解析不出折算值：原文本身就是那一枚薪资", bare.count('class="tag raw"') == 1
@@ -185,8 +186,8 @@ def test_page_controls() -> None:
                   and i18n.t(lang, "update.confirm_ok") in page)
             check(f"{lang}：抽屉里有放更新按钮的位置", 'id="drawer-update-slot"' in page)
             check(f"{lang}：进度文字（待投）出现在卡片上",
-                  f'>{i18n.value_label(lang, "action", "saved")}</span><span class="dots"' in page
-                  and '<span class="card-state"><span class="prog' in page)
+                  f'>{i18n.value_label(lang, "action", "saved")}</span><span class="card-star"' in page
+                  and '<span class="card-state"><span class="prog want"' in page)
             fetch = panel.render_settings(conn, {}, lang, None, "fetch", lang)
             check(f"{lang}：设置·抓取也走同一个确认窗",
                   fetch.count('id="update-start"') == 1 and 'id="update-confirm"' in fetch

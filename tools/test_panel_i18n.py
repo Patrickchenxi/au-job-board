@@ -93,11 +93,17 @@ def test_layout() -> None:
     print("\n== 筛选摆放 ==")
     for view, allowed in panel.VIEW_FILTER_KEYS.items():
         primary, groups = panel.filter_layout(view)
-        placed = set(primary) | set(groups["label"]) | set(groups["job"])
+        placed = set(primary) | set(groups["label"]) | set(groups["job"]) | set(groups["history"])
         rest = set(allowed) - {"q", "sort"}
         check(f"{view}：常驻 + 更多筛选 = 允许的筛选", placed == rest,
               f"{sorted(placed)} vs {sorted(rest)}")
     check("推荐视图没有「更多筛选」", not any(panel.filter_layout("recommend")[1].values()))
+    for view in ("all", "labelled"):
+        primary, groups = panel.filter_layout(view)
+        check(f"{view}：旧兴趣只在历史组，不与处理状态并列",
+              groups["history"] == ["interest"] and "interest" not in primary + tuple(groups["label"]))
+    check("已标注视图常驻处理状态与优先待投",
+          panel.filter_layout("labelled")[0][:2] == ("action", "priority"))
 
 
 def test_render() -> None:
@@ -129,15 +135,17 @@ def test_render() -> None:
         leftovers = sorted(set(CJK.findall(shown)))
         check("英文页界面文案里没有中文", not leftovers, "".join(leftovers[:20]))
 
-        cards = re.findall(r'<span class="dots"[^>]*>(.*?)</span></div>', en)
-        check("每张卡片固定三个圆点", cards and all(c.count('class="dot') == 3 for c in cards))
-        check("标了可投 -> 第一颗实心；没标的是空心",
-              'class="dot good" data-axis="eligibility"' in en
-              and 'class="dot unset" data-axis="interest"' in en)
+        check("卡片不再有三轴圆点", 'class="dots"' not in en and "data-axis" not in en)
+        check("与分析一致的人工可投不在卡片上占位", 'class="tag corr"' not in en)
 
         row = panel._find(conn, {}, "seek:a")
         detail_en = panel._detail_html(row, "en")
-        check("英文详情：步骤与说明键", "Label it" in detail_en and 'id="help-panel"' in detail_en)
+        check("英文详情：处理步骤与常驻一句说明", "Decide" in detail_en and 'class="hint decide-hint"' in detail_en
+              and 'id="help-panel"' not in detail_en)
+        check("英文详情：星标是独立轻量开关", 'class="star-btn"' in detail_en and 'data-field="priority"' in detail_en)
+        check("英文详情：资格纠错默认折叠且摘要给出来源",
+              '<details class="qualification"' in detail_en and "<details class=\"qualification\" open" not in detail_en
+              and "Eligible · manual correction" in detail_en)
         check("英文详情：默认备注标签显示英文译名", 'value="Prioritize;"' in detail_en)
         check("中文详情：默认备注标签保持原文",
               'value="优先投递；"' in panel._detail_html(row, "zh"))
@@ -155,9 +163,35 @@ def test_render() -> None:
         conn.commit()
         skipped_page = panel.render_page(conn, {}, "all", 0, 40, None, {}, "en", "dark")
         skipped_detail = panel._detail_html(panel._find(conn, {}, "seek:a"), "en")
-        check("跳过：小卡片复用红色圆点", 'class="dot bad" data-axis="action"' in skipped_page)
-        check("跳过：详情轴复用红色圆点", 'class="dot bad" data-axis-dot="action"' in skipped_detail)
-        check("跳过：详情按钮复用红色选中样式", 'class="seg on bad"' in skipped_detail)
+        check("跳过：卡片状态是中性色", 'class="prog mid"' in skipped_page)
+        check("跳过：详情按钮中性选中样式，不再用红色", 'class="seg on mid"' in skipped_detail
+              and 'class="seg on bad"' not in skipped_detail)
+        check("跳过：状态行说明已处理", "Processed: Skipped" in skipped_detail)
+
+        # v1.2.3 C: legacy/unsure records, contradicting corrections and stars on cards
+        database.replace_decision(conn, "seek:b", 1, "synthetic.rule")
+        conn.commit()
+        labels_mod.set_label(conn, "seek:b", source="cli", interest="maybe", note="legacy")
+        conn.execute("UPDATE labels SET eligibility='unsure' WHERE uid='seek:b'")
+        conn.commit()
+        legacy = panel._detail_html(panel._find(conn, {}, "seek:b"), "zh")
+        check("旧待定/旧兴趣：只在折叠区回看，不是可选项",
+              "资格：待定" in legacy and "兴趣：也许" in legacy and "有旧记录" in legacy
+              and "'eligibility','unsure'" not in legacy and "'interest'," not in legacy)
+        check("旧待定不算人工纠正：摘要按分析结果，排除说明给出纠正方式",
+              'data-corrected="false"' in legacy and "不可投 · 分析结果" in legacy
+              and i18n.t("zh", "qualification.machine_excluded") in legacy)
+        check("只有备注/旧记录：仍是未处理", ">未处理</span>" in legacy)
+        labels_mod.set_label(conn, "seek:b", source="panel", eligibility="eligible", priority=True)
+        conn.commit()
+        page = panel.render_page(conn, {}, "all", 0, 40, None, {}, "zh", None)
+        card_b = page[page.index('data-uid="seek:b"'):]
+        card_b = card_b[:card_b.find('<div class="gutter"')]
+        check("与排除结果相反的人工可投在卡片上提示", '>人工：可投</span>' in card_b)
+        check("星标在卡片上可见（未处理也可有星标）",
+              re.search(r'class="card-star" data-star-uid="seek:b"[^>]*>★', card_b) is not None
+              and re.search(r'class="prog "[^>]* hidden>', card_b) is not None)
+        check("全部视图不把已处理卡片变淡", 'class="card done"' not in page)
         conn.close()
 
 
