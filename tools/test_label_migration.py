@@ -44,6 +44,45 @@ def old_database(path):
     return conn
 
 
+class LegacyWriter:
+    """Synthetic v1.2.2 partial writes and its tombstone-free clear.
+
+    The repair was also reproduced with the actual writer from dfa26dd.
+    Keep permanent regressions independent of Git history/shallow checkouts.
+    """
+    get_labels = staticmethod(labels.get_labels)
+    merge_labels = staticmethod(labels.merge_labels)
+
+    @staticmethod
+    def set_label(conn, uid, source='cli', touch=True, **fields):
+        old = conn.execute('SELECT * FROM labels WHERE uid=?', (uid,)).fetchone()
+        current = dict(old) if old else {'uid': uid}
+        now = db.utcnow()
+        if old is None and conn.execute('SELECT 1 FROM label_events WHERE uid=?', (uid,)).fetchone():
+            conn.execute("INSERT INTO label_events(uid,field,source,at) VALUES (?,'__row__','row_reset',?)", (uid, now))
+        for key, value in fields.items():
+            value = labels.normalize_note(value) if key == 'note' else value
+            previous = current.get(key)
+            if previous != value or value is None or touch:
+                conn.execute('INSERT INTO label_events(uid,field,old_value,new_value,source,at) VALUES (?,?,?,?,?,?)',
+                             (uid, key, previous, value, source, now))
+            current[key] = value
+        if touch:
+            current['labeled_at'] = now
+        columns = list(current)
+        conn.execute('INSERT OR REPLACE INTO labels (' + ','.join(columns) + ') VALUES ('
+                     + ','.join('?' for _ in columns) + ')', tuple(current.values()))
+        conn.commit()
+
+    @staticmethod
+    def clear_label(conn, uid):
+        conn.execute('DELETE FROM labels WHERE uid=?', (uid,)); conn.commit()
+
+
+def old_writer(_directory):
+    return LegacyWriter
+
+
 class MigrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -128,6 +167,86 @@ class MigrationTests(unittest.TestCase):
         self.assertIsNone(labels.merge_labels(list(labels.get_labels(c, with_events=True).values()))['note'])
         labels.set_label(c, 'synthetic:a', priority=False)
         self.assertIsNone(labels.merge_labels(list(labels.get_labels(c, with_events=True).values()))['note'])
+        c.close()
+
+    def test_old_writer_removed_group_priority_stays_removed(self):
+        writer = old_writer(self.tmp.name)
+        cases = [('clear', None, False), ('replace', 'Different', False),
+                 ('star_later', None, True), ('tidy', 'Different', False),
+                 ('recreate', None, True)]
+        for name, replacement, expected in cases:
+            with self.subTest(name=name):
+                path = self.path.with_name(name + '.db')
+                c = old_database(path)
+                c.execute('DELETE FROM labels'); c.commit()
+                with patch.object(db, 'utcnow', return_value=NOW):
+                    if name == 'star_later':
+                        writer.set_label(c, 'synthetic:b', note=None)
+                    writer.set_label(c, 'synthetic:a', action='saved', note='优先投递；搬迁；')
+                    if name != 'star_later':
+                        writer.set_label(c, 'synthetic:b', note=replacement)
+                    if name == 'tidy':
+                        writer.set_label(c, 'synthetic:a', source='tidy', touch=False,
+                                         note='优先投递；搬迁；')
+                    if name == 'recreate':
+                        writer.clear_label(c, 'synthetic:b')
+                        writer.set_label(c, 'synthetic:b', action='saved')
+                original = [tuple(r) for r in c.execute('SELECT * FROM label_events')]
+                before = writer.merge_labels(list(writer.get_labels(c, with_events=True).values()))
+                self.assertEqual('优先投递' in (before['note'] or ''), expected)
+                c.close(); c = db.connect(path)
+                merged = labels.merge_labels(list(labels.get_labels(c, with_events=True).values()))
+                self.assertEqual(bool(merged['priority']), expected)
+                self.assertEqual(merged['note'], migrations.priority_note_conversion(before['note'])[1])
+                self.assertEqual([tuple(r)[:-1] for r in c.execute(
+                    'SELECT * FROM label_events ORDER BY event_id LIMIT ?', (len(original),))], original)
+                with patch.object(db, 'utcnow', return_value=NOW):
+                    labels.set_label(c, 'synthetic:b', priority=not expected)
+                c.close(); c = db.connect(path)
+                self.assertEqual(bool(labels.merge_labels(list(labels.get_labels(c, with_events=True).values()))['priority']), not expected)
+                c.close()
+
+    def test_old_writer_orphan_action_and_new_delete_continuity(self):
+        writer = old_writer(self.tmp.name)
+        c = old_database(self.path)
+        c.execute('DELETE FROM labels'); c.commit()
+        with patch.object(db, 'utcnow', return_value=NOW):
+            writer.set_label(c, 'synthetic:a', action='saved')
+            writer.clear_label(c, 'synthetic:a')
+        original = [tuple(r) for r in c.execute('SELECT * FROM label_events')]
+        c.close(); c = db.connect(self.path)
+        with patch.object(db, 'utcnow', return_value=NOW):
+            marker = labels.freeze_marker(c)
+            self.assertIsNone(labels.action_states_at(c, marker).get('synthetic:a', {}).get('action'))
+            labels.set_label(c, 'synthetic:a', action='applied')
+            self.assertIsNone(labels.action_states_at(c, marker).get('synthetic:a', {}).get('action'))
+            applied_marker = labels.freeze_marker(c)
+            labels.clear_label(c, 'synthetic:a')
+            self.assertEqual(labels.action_states_at(c, applied_marker)['synthetic:a']['action'], 'applied')
+            cleared_marker = labels.freeze_marker(c)
+            self.assertIsNone(labels.action_states_at(c, cleared_marker).get('synthetic:a', {}).get('action'))
+            labels.set_label(c, 'synthetic:a', action='saved')
+            self.assertIsNone(labels.action_states_at(c, cleared_marker).get('synthetic:a', {}).get('action'))
+        self.assertEqual([tuple(r)[:-1] for r in c.execute(
+            'SELECT * FROM label_events ORDER BY event_id LIMIT ?', (len(original),))], original)
+        events = [tuple(r) for r in c.execute('SELECT * FROM label_events')]
+        c.close(); c = db.connect(self.path)
+        self.assertEqual([tuple(r) for r in c.execute('SELECT * FROM label_events')], events)
+        self.assertEqual(labels.action_states_at(c, labels.freeze_marker(c))['synthetic:a']['action'], 'saved')
+        c.close()
+
+    def test_snapshot_priority_ownership_uses_original_dates(self):
+        c = old_database(self.path)
+        c.execute('INSERT INTO labels(uid,note,labeled_at) VALUES (?,?,?)',
+                  ('synthetic:b', 'Replacement；', NOW))
+        c.commit(); c.close(); c = db.connect(self.path)
+        rows = labels.get_labels(c, with_events=True)
+        self.assertFalse(labels.merge_labels(list(rows.values()))['priority'])
+        self.assertEqual(rows['synthetic:a']['labeled_at'], OLD)
+        self.assertEqual(rows['synthetic:b']['labeled_at'], NOW)
+        labels.set_label(c, 'synthetic:a', priority=True)
+        c.close(); c = db.connect(self.path)
+        self.assertTrue(labels.merge_labels(list(labels.get_labels(c, with_events=True).values()))['priority'])
         c.close()
 
     def test_fresh_database_and_existing_action_values(self):

@@ -346,6 +346,16 @@ def get_labels(conn, *, with_events: bool = False) -> dict[str, dict]:
                     info["new_value"] = normalize_note(info["new_value"])
                 elif event["field"] == "priority" and info["new_value"] is not None:
                     info["new_value"] = int(info["new_value"])
+                    if info["source"] == "migration":
+                        # Migration priority inherits pre-upgrade note ownership,
+                        # including same-second event order and snapshot fallback.
+                        owner = conn.execute("""SELECT at,event_id,source FROM label_events
+                            WHERE uid=? AND field='note' AND event_id < ?
+                            AND (source IS NULL OR source NOT IN ('tidy','migration'))
+                            ORDER BY event_id DESC LIMIT 1""",
+                            (event["uid"], event["event_id"])).fetchone()
+                        if owner:
+                            info.update(dict(owner))
                 row.setdefault("_field_events", {})[event["field"]] = info
     return rows
 

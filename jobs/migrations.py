@@ -44,8 +44,23 @@ def priority_note_conversion(raw):
     return found, note if note.strip(" ;；\t\r\n") else None
 
 
+def _reconcile_legacy_deletions(conn):
+    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    # Old clear_label deleted the row without an event. Reconcile only absent
+    # rows; never rewrite the audit trail or invent a historical deletion date.
+    conn.execute("""INSERT INTO label_events(uid,field,new_value,source,at)
+        SELECT e.uid,'action',NULL,'legacy_deleted',? FROM label_events e
+        WHERE e.field='action' AND e.new_value IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.uid=e.uid)
+        AND e.event_id=(SELECT MAX(b.event_id) FROM label_events b
+                        WHERE b.uid=e.uid AND b.field='action')""", (now,))
+
+
 def _migrate_labels(conn):
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    _reconcile_legacy_deletions(conn)
+    from .labels import normalize_note
+
     for row in conn.execute("SELECT * FROM labels").fetchall():
         uid, stamp = row["uid"], row["labeled_at"] or ""
         # Snapshot old action identity before note conversion adds newer events.
@@ -67,25 +82,32 @@ def _migrate_labels(conn):
             conn.execute("""UPDATE labels SET eligibility_source='legacy',
                          eligibility_at=? WHERE uid=?""", (stamp, uid))
         found, new_note = priority_note_conversion(row["note"])
-        if not found:
-            continue
-        note_event = conn.execute("""SELECT 1 FROM label_events WHERE uid=? AND field='note'
-            AND (source IS NULL OR source!='tidy')
+        note_event = conn.execute("""SELECT * FROM label_events WHERE uid=? AND field='note'
+            AND (source IS NULL OR source NOT IN ('tidy','migration'))
             AND event_id > COALESCE((SELECT MAX(event_id) FROM label_events
-                WHERE uid=? AND field='__row__' AND source='row_reset'),0) LIMIT 1""",
-            (uid, uid)).fetchone()
-        if not note_event:
-            # Retain legacy note ownership even when removing the tag leaves NULL.
+                WHERE uid=? AND field='__row__' AND source='row_reset'),0)
+            ORDER BY event_id DESC LIMIT 1""", (uid, uid)).fetchone()
+        if not note_event or normalize_note(note_event["new_value"]) != normalize_note(row["note"]):
+            if not row["note"]:
+                continue
+            # Preserve fallback ownership for a snapshot without a matching edit.
             conn.execute("""INSERT INTO label_events
                 (uid,field,old_value,new_value,source,rules_version,at)
                 VALUES (?,'note',NULL,?,'legacy_snapshot',?,?)""",
                 (uid, row["note"], row["rules_version"], stamp))
-        conn.execute("UPDATE labels SET priority=1,note=? WHERE uid=?", (new_note, uid))
-        for field, old, new in (("priority", None, "1"), ("note", row["note"], new_note)):
+            note_event = conn.execute('SELECT * FROM label_events WHERE event_id=last_insert_rowid()').fetchone()
+        # A replacement or explicit clear owns false just as its old note owned
+        # the absence of the tag. Do not assign upgrade-time ownership.
+        conn.execute("UPDATE labels SET priority=?,note=? WHERE uid=?", (int(found), new_note if found else row["note"], uid))
+        conn.execute("""INSERT INTO label_events
+            (uid,field,old_value,new_value,source,rules_version,at)
+            VALUES (?,'priority',NULL,?,'migration',?,?)""",
+            (uid, str(int(found)), row["rules_version"], note_event["at"]))
+        if found:
             conn.execute("""INSERT INTO label_events
                 (uid,field,old_value,new_value,source,rules_version,at)
-                VALUES (?,?,?,?, 'migration',?,?)""",
-                (uid, field, old, new, row["rules_version"], now))
+                VALUES (?,'note',?,?,'migration',?,?)""",
+                (uid, row["note"], new_note, row["rules_version"], now))
 
 
 def upgrade(conn):
