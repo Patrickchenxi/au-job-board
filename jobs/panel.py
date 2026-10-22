@@ -87,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):                                   # noqa: N802
         started = time.perf_counter()
         parsed = urlparse(self.path)
-        qs = parse_qs(parsed.query)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
         lang, theme = self._prefs()
         if parsed.path == "/api/config-settings":
             self._config_settings(None, started)
@@ -107,12 +107,15 @@ class Handler(BaseHTTPRequestHandler):
         conn = database.connect(_db_path(self.config))
         try:
             if parsed.path == "/api/job":
+                if "location_id" in qs or "mode" in qs:
+                    raise ValueError("Unsupported location scope")
                 uid = (qs.get("uid") or [""])[0]
-                row = _find(conn, self.config, uid)
+                row = _find(conn, self.config, uid, filters=parse_filters(qs))
                 if row is None:
                     self._send(f"uid={uid} not found".encode(), 404, "text/plain; charset=utf-8", started)
                     return
-                payload = json.dumps({"html": _detail_html(row, lang)}, ensure_ascii=False)
+                payload = json.dumps({"html": _detail_html(row, lang, i18n.resolve_keys(self.headers.get("Cookie")))},
+                                     ensure_ascii=False)
                 self._send(payload.encode("utf-8"), 200,
                            "application/json; charset=utf-8", started)
                 return
@@ -124,7 +127,8 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/settings":
                 section = (qs.get("section") or [SETTINGS_SECTIONS[0]])[0]
                 page = render_settings(conn, self.config, lang, theme, section,
-                                       i18n.lang_pref(self.headers.get("Cookie")))
+                                       i18n.lang_pref(self.headers.get("Cookie")),
+                                       i18n.resolve_keys(self.headers.get("Cookie")))
                 self._send(page.encode("utf-8"), 200,
                            "text/html; charset=utf-8", started)
                 return
@@ -142,10 +146,24 @@ class Handler(BaseHTTPRequestHandler):
                 offset = max(0, int((qs.get("offset") or ["0"])[0]))
             except ValueError:
                 offset = 0
-            filters = parse_filters(qs)
+            try:
+                filters = parse_filters(qs)
+            except ValueError:
+                # Keep an invalid region editable in the HTML panel. The view
+                # renders guidance and no matches; JSON readers stay strict.
+                raw_geo = (qs.get("geo") or [""])[0].strip()[:120]
+                if not raw_geo:
+                    raise
+                filters = parse_filters({k: v for k, v in qs.items() if k != "geo"})
+                filters["geo"] = raw_geo
+            if view == "recommend":
+                filters.pop("geo", None)
+                filters.pop("mode", None)
             page = render_page(conn, self.config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
+        except ValueError as exc:
+            self._send(str(exc).encode(), 400, "text/plain; charset=utf-8", started)
         finally:
             conn.close()
 
@@ -183,6 +201,9 @@ class Handler(BaseHTTPRequestHandler):
                        else isinstance(value, (str, type(None))))
         if (not isinstance(uid, str) or not uid or field not in labels_mod.WRITABLE
                 or not valid_value):
+            self._json({"error": "invalid_request"}, 400, started)
+            return
+        if payload.get("location_id"):
             self._json({"error": "invalid_request"}, 400, started)
             return
         conn = None
@@ -345,14 +366,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
 
-def _find(conn, config, uid: str):
+def _find(conn, config, uid: str, filters=None):
     if not uid:
         return None
-    kept, excluded, labels, index = report_mod.load(conn, config)
-    for row in kept + excluded:
-        if row["uid"] == uid:
-            return report_mod.decorate([row], labels, index)[0]
-    return None
+    from .location_query import find
+    return find(conn, config, uid, filters)
 
 
 def _db_path(config: dict):
@@ -361,6 +379,11 @@ def _db_path(config: dict):
 
 
 def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> None:
+    from pathlib import Path
+    from .config import ROOT
+
+    config["rules_path"] = str(Path(rules_path).resolve() if rules_path is not None
+                               else ROOT / "rules.yaml")
     panel = config.get("panel") or {}
     host = str(panel.get("host", "")).strip()
     port = int(panel.get("port", 8090))
@@ -378,9 +401,18 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
     # inherit a runner from another listener in the same interpreter.
     handler = type("PanelHandler", (Handler,), {"config": config})
     httpd = ThreadingHTTPServer((host, port), handler)
-    httpd.config_editor = ConfigEditor(config, config_path, rules_path)
-    httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
-                                        skills_path=skills_path)
+    mcp = None
+    try:
+        from .mcp_http import start
+        mcp = start(config, httpd)
+        httpd.config_editor = ConfigEditor(config, config_path, rules_path)
+        httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
+                                            skills_path=skills_path)
+    except BaseException:
+        if mcp:
+            mcp.close()
+        httpd.server_close()
+        raise
 
     # 启动指纹：Python 在启动时就把模块加载进内存，改了代码不重启不会生效。
     # 把 panel.py 的修改时间打出来，「跑的是哪一版」就不用猜了。
@@ -390,9 +422,13 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
     print(f"  panel.py 版本时间戳 {mtime}　·　启动于 "
           f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("  Ctrl-C 停止")
+    if mcp:
+        print(f"  只读 MCP：{mcp.url}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
     finally:
         httpd.server_close()
+        if mcp:
+            mcp.close()

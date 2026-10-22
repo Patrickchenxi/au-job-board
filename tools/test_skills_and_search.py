@@ -148,7 +148,7 @@ def test_filters_and_link() -> None:
 def test_explanation_and_edit() -> None:
     print("\n== 搜索解释 & 词表编辑 ==")
     one = panel._search_explanation({"q": "c"}, CFG, 67)
-    check("单术语解释带技能名与条数", "技术词「C」" in one and "67" in one, one)
+    check("单术语解释带技能名与条数", "技能词「C」" in one and "67" in one, one)
     multi = panel._search_explanation({"q": "cyber python"}, CFG, 5)
     check("多术语解释说明 AND", "前缀「cyber」" in multi and "全部满足" in multi, multi)
 

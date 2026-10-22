@@ -44,7 +44,7 @@ SINCE_KEY = "since"          # 视图的「冻结时间」，见 _resolve_since
 # 把可投性/意向/进度摆出来只会让人以为还有别的口径；排序和「显示未标注」
 # 对它同样没有意义。要看完整筛选去「全部」。
 ALL_FILTER_KEYS = (QUERY_KEY, "eligibility", "interest", "action", "salary",
-                   FRESH_KEY, SKILL_KEY, TIER_KEY, "sort", "labeled")
+                   FRESH_KEY, SKILL_KEY, TIER_KEY, "sort", "labeled", "geo")
 # 推荐视图 = 搜索 + 薪资 + 技能 + 层级。原来只有前两个，是因为
 # 可投性/意向/进度会让人以为还有别的口径；技能与层级不是口径，
 # 是「把这一页缩到我想读的」，正是推荐视图最需要的。层级下拉同时把
@@ -90,6 +90,11 @@ def parse_filters(qs) -> dict:
     q = (qs.get(QUERY_KEY) or [""])[0].strip()
     if q:
         out[QUERY_KEY] = q[:120]          # 长度兜一下，避免超长 URL
+    geo = (qs.get("geo") or [""])[0].strip()
+    if geo:
+        from .locations import parse_target
+        parse_target(geo[:120])
+        out["geo"] = geo[:120]
     since = (qs.get(SINCE_KEY) or [""])[0]
     if since:
         out[SINCE_KEY] = since[:128]
@@ -298,38 +303,58 @@ def _resolve_since(conn, view: str, filters: dict) -> str | None:
 
 
 def _query(conn, config, view, offset, limit, filters=None, since=None,
-           skills_cfg=None):
+           skills_cfg=None, *, candidate_uids=None):
     """返回 (页内行[已装饰], 总数)。只装饰当前页。"""
     filters = filters or {}
-    kept, excluded, labels, index = report_mod.load(conn, config)
+    from . import location_query
+    if location_query.enabled(filters):
+        return location_query.query(conn, config, view, offset, limit, filters,
+                                    since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn), skills_cfg,
+                                    candidate_uids=candidate_uids)
+    kept, excluded, labels, index = report_mod.load(conn, config, deduplicate=False)
     frozen_labels = (labels_mod.action_states_at(
         conn, since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn))
         if view == "recommend" else labels)
 
+    scope_groups = None
+    if candidate_uids is not None:
+        scope_groups = {
+            row.get("dedupe_group") or row["uid"]
+            for row in kept + excluded if row["uid"] in candidate_uids
+        }
+    elif view == "new":
+        batch = database.last_batch_started_at(conn)
+        scope_groups = {
+            row.get("dedupe_group") or row["uid"]
+            for row in kept + excluded
+            if batch and (row.get("first_seen_at") or "") >= batch
+        }
+
     if view == "excluded":
+        # 排除清单不去重 —— 审计要按规则看到每一条来源记录
         rows = excluded
     elif view == "all":
         # 全库。excluded 侧本来没去重（审计要看全部），这里补一次，
         # 否则同一岗位的三个平台副本会在「全部」里并排出现
-        rows = report_mod.best_per_group(kept + excluded)
+        rows = report_mod.best_per_group(kept + excluded, config)
     elif view == "labelled":
         # 已标注视图要连被排除的一起看 —— 被排除的那一侧才是漏杀的出口
-        rows = [r for r in kept + excluded
-                if report_mod.has_labels(r, labels, index)]
+        rows = report_mod.best_per_group(
+            [r for r in kept + excluded if report_mod.has_labels(r, labels, index)], config)
     elif view == "new":
         # 最近一批抓取。**不看访问时间** —— 那套会被每次页面加载推走，
         # 基线永远晚于最近一次抓取，结果恒为空。
         # 这一批连被规则排除的一起列出：这一栏回答的是「刚才那批抓到了什么」，
         # 藏掉一部分会让人以为抓少了；被排除的卡片带「已排除」标记。
-        batch = database.last_batch_started_at(conn)
-        rows = report_mod.best_per_group(
-            [r for r in kept + excluded
-             if batch and (r.get("first_seen_at") or "") >= batch])
+        rows = report_mod.best_per_group(kept + excluded, config)
     else:                                   # recommend
         # 挂出 >30 天的不进推荐：多半没有真实 headcount，或排在几个月积压后面。
         # **只影响推荐视图**，库、全部、被排除、已标注都不动它。
-        rows = [r for r in kept
+        rows = [r for r in report_mod.best_per_group(kept, config)
                 if _unlabelled_at(r, frozen_labels, index, since) and not is_stale(r)]
+
+    if scope_groups is not None:
+        rows = [r for r in rows if (r.get("dedupe_group") or r["uid"]) in scope_groups]
 
     rows = _ordered(rows, view, filters, config)
 

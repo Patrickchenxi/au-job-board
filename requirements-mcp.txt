@@ -1,0 +1,2 @@
+# Optional stdio/Streamable HTTP adapter; not needed when panel MCP is disabled.
+mcp==2.3.0

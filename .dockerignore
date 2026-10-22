@@ -15,3 +15,6 @@
 !jobs/panel_assets/*.css
 !tools/
 !tools/docker-entrypoint.py
+!jobs/data/
+!jobs/data/au-postcodes.tsv
+!jobs/data/location-reference.json

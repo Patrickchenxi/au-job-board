@@ -132,12 +132,12 @@ def test_filters() -> None:
     print("\n== 每视图筛选 & 会话标过的卡片 ==")
     # 推荐视图除了搜索 + 薪资，再加技能与层级：两者都是「缩小这一页」，
     # 不是可投性/意向/进度那种会让人误解的口径。
-    check("推荐 = 搜索 + 薪资 + 技能 + 层级",
+    check("推荐 = 搜索 + 薪资 + 技能 + 层级，不含地点搜索",
           set(panel.VIEW_FILTER_KEYS["recommend"]) == {"q", "salary", "skill", "tier"})
     check("全部给全套",
           set(panel.VIEW_FILTER_KEYS["all"]) ==
           {"q", "eligibility", "interest", "action", "salary", "fresh", "skill",
-           "tier", "sort", "labeled"})
+           "tier", "sort", "labeled", "geo"})
     parsed = panel.parse_filters({"q": ["python"], "offset": ["40"], "view": ["all"]})
     check("offset / view 不进筛选条件", parsed == {"q": "python"}, str(parsed))
     check("since 单独带着走",

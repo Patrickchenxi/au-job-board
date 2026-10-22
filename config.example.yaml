@@ -68,6 +68,26 @@ panel:
     low_ratio: 0.1
     low_max_score: 0
 
+# Optional read-only MCP, started and stopped with `panel`. Install
+# requirements-mcp.txt before enabling. Address follows panel.host and the
+# port is panel.port + 1; --host/--port overrides apply to both listeners.
+# Create an owner-only random token file first. Relative paths use project root.
+mcp:
+  enabled: false
+  token_file: data/agent.token
+  # tls_certfile: data/server-cert.pem
+  # tls_keyfile: data/server-key.pem
+
+# Shared by the standalone read-only API and MCP's internal API. These are
+# serialized snapshot budgets, not a bound on total process RSS.
+agent_api:
+  snapshots:
+    ttl_seconds: 300
+    max_snapshots: 8
+    max_rows: 50000
+    max_snapshot_mib: 128
+    max_total_mib: 512
+
 # Filtering mode. This section is separate from eligibility. The missing
 # default is legacy: the existing folded-text rules engine in rules.yaml.
 # Only legacy is accepted; an explicit profile_v1 is rejected before the

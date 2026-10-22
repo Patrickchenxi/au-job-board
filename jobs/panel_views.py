@@ -10,8 +10,8 @@
     可移除的小标签。
   - 视图说明条：一句话说明当前视图口径 + 相关统计。
   - 卡片只有三类强调（状态、资格线索、薪资）；右侧是处理状态（想投 / 已投 / 跳过）
-    与独立星标，未处理时不占位。旧兴趣 / 旧待定只在详情的低频区回看。
-  - 详情按步骤：资格线索（原文）→ 处理（三状态 + 星标）→ 备注；资格纠错与历史记录
+    与独立星标，未处理时不占位。
+  - 详情按步骤：资格线索（原文）→ 处理（三状态 + 星标）→ 备注；资格纠错
     折叠在标注区底部；计分明细在页面底部折叠。
   - 竖屏（右栏放不下，见 panel.js 的 fitLayout）：汉堡菜单 + 底部筛选抽屉。
 """
@@ -49,11 +49,11 @@ TONE = {"eligible": "good", "ineligible": "bad", "want": "good", "no": "bad",
 # panel_data.VIEW_FILTER_KEYS 为准，这里只决定摆放位置（见 filter_layout）。
 PRIMARY_FILTERS = {
     "recommend": (SKILL_KEY, TIER_KEY, "salary"),
-    "labelled": ("action", PRIORITY_KEY, SKILL_KEY),
+    "labelled": ("geo", "action", PRIORITY_KEY, SKILL_KEY),
 }
-DEFAULT_PRIMARY = (SKILL_KEY, TIER_KEY)
+DEFAULT_PRIMARY = ("geo", SKILL_KEY, TIER_KEY)
 LABEL_GROUP_KEYS = ("action", "eligibility", "labeled")
-HISTORY_GROUP_KEYS = ("interest",)          # 旧兴趣轴：只读回看，旧链接参数照样生效
+INTERFACE_HIDDEN_KEYS = ("interest",)        # 保留后端兼容，当前界面不再宣传或展示
 TOOLBAR_FIXED = (QUERY_KEY, "sort")          # 搜索框与排序有自己的固定位置
 
 ICON_SEARCH = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -104,6 +104,22 @@ def _e(value) -> str:
 def _js(value) -> str:
     """嵌进 <script> 的 JSON。转义 </ 以免提前结束 script 标签。"""
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _copy_dialog(lang: str) -> str:
+    """「复制岗位」自动复制失败时的手动退路：只读文本框里是同一份完整文本。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    return (
+        '<div class="modal copy-modal" id="copy-modal" hidden>'
+        '<div class="dialog" role="dialog" aria-modal="true" '
+        'aria-labelledby="copy-modal-title" aria-describedby="copy-modal-body">'
+        f'<div class="dialog-head"><h3 id="copy-modal-title">{_e(T("copy.manual_title"))}</h3></div>'
+        f'<div class="dialog-body"><p id="copy-modal-body">{_e(T("copy.manual_body"))}</p>'
+        f'<textarea id="copy-modal-text" readonly spellcheck="false" aria-label="{_e(T("detail.copy"))}"></textarea></div>'
+        '<div class="dialog-foot"><span class="spacer"></span>'
+        f'<button type="button" class="btn" data-copy-select>{_e(T("copy.select"))}</button>'
+        f'<button type="button" class="primary-btn" data-copy-close>{_e(T("copy.close"))}</button>'
+        '</div></div></div>')
 
 
 def _update_widget(lang: str, *, compact: bool = False) -> str:
@@ -317,7 +333,8 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
     return "".join([
-        f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" role="button" tabindex="0" '
+        f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" '
+        f'role="button" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
@@ -355,23 +372,13 @@ def _why_section(pairs, row: dict, lang: str) -> str:
 
 
 def _correction_details(row: dict, uid: str, label: dict, lang: str) -> str:
-    """低频：资格纠错 + 历史记录，默认折叠。摘要行直接给出当前有效结果与来源，
+    """低频：资格纠错，默认折叠。摘要行直接给出当前有效结果与来源，
     不展开也知道是「分析结果」还是「人工纠正」。展开只是读，不写任何东西；
     机器默认选中项是虚线描边（CSS 按 data-corrected 区分），人工纠正是实底。"""
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
     q = row.get("qualification") or labels_mod.qualification(row, label)
     buttons = "".join(_btn(uid, "eligibility", v, q["effective"] == v, TONE.get(v, ""), lang)
                       for v in ("eligible", "ineligible"))
-    history = []
-    if label.get("interest"):
-        history.append(T("history.interest", value=i18n.value_label(lang, "interest", label["interest"])))
-    if label.get("eligibility") == "unsure":
-        history.append(T("history.unsure"))
-    history_html = ("".join(f"<li>{_e(item)}</li>" for item in history))
-    badge = f'<span class="q-hist">{_e(T("history.badge"))}</span>' if history else ""
-    history_block = (f'<div class="history"><b>{_e(T("history.title"))}</b>'
-                     f'<ul>{history_html}</ul><p class="hint">{_e(T("history.hint"))}</p></div>'
-                     if history else "")
     # 只有人工纠正时才单独列出原分析结果；否则摘要与来源说明已经讲清楚了。
     analysis = (T("qualification.analysis_was",
                   value=i18n.value_label(lang, "eligibility", q["analysis"]))
@@ -381,13 +388,13 @@ def _correction_details(row: dict, uid: str, label: dict, lang: str) -> str:
             f'data-corrected="{str(q["corrected"]).lower()}">'
             f'<summary><span class="q-title">{_e(T("qualification.title"))}</span>'
             f'<span class="q-sum" data-qualification-summary>{_e(_qualification_summary(q, lang))}</span>'
-            f'{badge}</summary>'
+            '</summary>'
             '<div class="q-body">'
             f'<div class="q-row"><div class="segs q-segs" role="group" '
             f'aria-label="{_e(T("qualification.title"))}">{buttons}</div>'
             f'<span class="q-analysis" data-qualification-analysis>{_e(analysis)}</span></div>'
             f'<p class="hint" data-qualification-source>{_e(_qualification_source(q, lang))}</p>'
-            f'{history_block}</div></details>')
+            '</div></details>')
 
 
 def _qualification_summary(q: dict, lang: str) -> str:
@@ -412,9 +419,54 @@ def _qualification_source_key(q: dict) -> str:
     return "qualification.machine" if q["analysis"] else "qualification.unknown"
 
 
-def _detail_html(row: dict, lang: str = "zh") -> str:
+def _geo_suggestions(lang: str = "zh") -> str:
+    """Custom suggestions for the supported coarse targets: states and capitals."""
+    from . import locations
+    meta = locations._reference()[0]
+    values = ["Australia"] + (["澳大利亚"] if lang == "zh" else []) + list(meta["states"]) + [
+        f"{city} {state}" for city, state in meta["cities"].items()]
+    opts = "".join(
+        f'<button type="button" class="geoopt" role="option" tabindex="-1" '
+        f'data-geo-value="{_e(v)}" onmousedown="geoOptionPick(event,this)" '
+        f'onkeydown="geoOptionKeys(event,this)">{_e(v)}</button>'
+        for v in values
+    )
+    label = _e(i18n.t(lang, "location.region"))
+    return (f'<div class="geo-suggest-panel" id="geo-suggest-panel" role="listbox" '
+            f'aria-label="{label}" hidden>{opts}</div>')
+
+
+def _geo_error(text: str) -> str | None:
+    """Translate the parser's rejection into plain guidance; None when valid."""
+    from . import locations
+    try:
+        locations.parse_target(text)
+    except ValueError as exc:
+        message = str(exc)
+        if ("one Australian place" in message or "one Australian postcode" in message
+                or "work-mode" in message):
+            return "location.geo_error.multiple"
+        return "location.geo_error.unsupported"
+    return None
+
+
+def _copy_text(row: dict, lang: str) -> str:
+    """「复制岗位」的纯文本：给外部 AI 用，所以取存储的完整 JD，不取渲染后的 DOM。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    lines = [f'{T("copy.uid")}: {row.get("uid") or ""}',
+             f'{T("copy.title")}: {row.get("title") or ""}',
+             f'{T("copy.company")}: {row.get("company") or ""}',
+             f'{T("copy.location")}: {row.get("location") or ""}']
+    lines.append(f'{T("copy.url")}: {row.get("url") or ""}')
+    body = str(row.get("description") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines += ["", f'{T("copy.jd")}:', body or T("detail.jd_empty")]
+    return "\n".join(lines) + "\n"
+
+
+def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> str:
     """右侧详情。与 md 报告同口径（都走 render.py），只在样式上更贴合面板。"""
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    prev_key, next_key = i18n.KEY_PROFILES.get(keys, i18n.KEY_PROFILES[i18n.DEFAULT_KEYS])
     uid = row["uid"]
     label = row.get("_label") or {}
 
@@ -443,23 +495,32 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
 
     # 上一条 / 下一条：列表顺序只有前端知道（页面载入时冻结的卡片顺序），
     # 这里只给按钮，位置与可用状态由 panel.js 的 syncDetailNav 填。
+    # 按键提示跟随快捷键方案（cookie jobs_keys），与 panel.js 实际响应的键一致。
     def step_btn(delta: int, text: str) -> str:
-        key, name = ("J", T("detail.next")) if delta > 0 else ("K", T("detail.prev"))
+        (glyph, aria), name = (next_key, T("detail.next")) if delta > 0 else (prev_key, T("detail.prev"))
         return (f'<button type="button" class="stepbtn" data-step="{delta}" onclick="stepDetail({delta})" '
-                f'aria-label="{_e(name)}" aria-keyshortcuts="{key}" title="{_e(name)} ({key})" disabled>'
+                f'aria-label="{_e(name)}" aria-keyshortcuts="{aria}" title="{_e(name)} ({_e(glyph)})" disabled>'
                 f'{text}</button>')
     out = [
+        f'<div data-label-scope data-uid="{_e(uid)}" '
+        f'data-scope-label="{_e(json.dumps(_label_state(label), ensure_ascii=False))}">',
         '<div class="d-nav">',
         f'<button type="button" id="back" onclick="closeDetail()">{_e(T("detail.back"))}</button>',
         '<span class="d-steps">',
-        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>K</kbd>'),
+        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>{_e(prev_key[0])}</kbd>'),
         '<span class="d-pos"></span>',
-        step_btn(1, f'{_e(T("detail.next"))} <kbd>J</kbd> ›'),
+        step_btn(1, f'{_e(T("detail.next"))} <kbd>{_e(next_key[0])}</kbd> ›'),
         '</span></div>',
         '<div class="d-head"><div class="d-title">',
         f'<h2>{_e(row.get("title"))}</h2>',
         f'<div class="sub">{_e(meta)}</div></div>',
-        f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>',
+        '<div class="d-actions">'
+        # 复制用的完整文本在转义后的属性里：按钮读它，不读渲染后的正文 DOM
+        f'<button type="button" class="btn copy-btn" onclick="copyJob(this)" '
+        f'title="{_e(T("detail.copy_title"))}" data-copy-text="{_e(_copy_text(row, lang))}">'
+        f'{_e(T("detail.copy"))}</button>'
+        f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
+        '</div>',
         "</div>",
         f'<div class="tags d-tags">{tags}'
         f'<button type="button" class="linkbtn" aria-expanded="false" aria-controls="skill-edit" '
@@ -555,6 +616,7 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
                + f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
                + step_btn(1, "›")
                + '</div>')
+    out.append('</div>')
     return "".join(out)
 
 
@@ -602,16 +664,16 @@ def _last_run_note(conn, lang: str = "zh", config: dict | None = None) -> str:
 
 
 def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
-    """(常驻筛选, {"label": [...], "job": [...], "history": [...]})。三组之和 + 搜索 + 排序
-    恰好等于该视图允许的筛选（VIEW_FILTER_KEYS），只是摆放不同。
-    旧兴趣轴单独放「历史」组：旧链接参数照样生效，但不再和处理状态并列。"""
-    allowed = VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS)
+    """(常驻筛选, {"label": [...], "job": [...]})。
+
+    后端仍兼容旧兴趣筛选，但当前界面不宣传、不传播、不展示该轴。
+    """
+    allowed = tuple(k for k in VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS)
+                    if k not in INTERFACE_HIDDEN_KEYS)
     primary = tuple(k for k in PRIMARY_FILTERS.get(view, DEFAULT_PRIMARY) if k in allowed)
     rest = [k for k in allowed if k not in primary and k not in TOOLBAR_FIXED]
     label = [k for k in LABEL_GROUP_KEYS if k in rest]
-    history = [k for k in HISTORY_GROUP_KEYS if k in rest]
-    return primary, {"label": label, "job": [k for k in rest if k not in label and k not in history],
-                     "history": history}
+    return primary, {"label": label, "job": [k for k in rest if k not in label]}
 
 
 def _is_active(key: str, filters: dict) -> bool:
@@ -621,12 +683,32 @@ def _is_active(key: str, filters: dict) -> bool:
     return bool(value)
 
 
-def _select(key: str, label: str, options: list[tuple[str, str]], current: str) -> str:
-    opts = "".join(f'<option value="{_e(v)}"{" selected" if current == v else ""}>{_e(t)}</option>'
-                   for v, t in options)
-    on = " on" if current else ""
-    return (f'<label class="ctl{on}"><span class="k">{_e(label)}</span>'
-            f'<select data-fkey="{key}" onchange="filterChanged()">{opts}</select></label>')
+def _select(key: str, label: str, options: list[tuple[str, str]], current: str, *,
+            active: bool | None = None) -> str:
+    """A single-choice control with the same custom popover language as skills."""
+    current_label = next((text for value, text in options if value == current), label)
+    on = bool(current) if active is None else active
+    option_html = "".join(
+        f'<button type="button" class="choiceopt{" sel" if value == current else ""}" '
+        f'role="option" tabindex="-1" data-choice-value="{_e(value)}" '
+        f'aria-selected="{"true" if value == current else "false"}" '
+        f'onclick="choicePick(this)" onkeydown="choiceOptionKeys(event,this)">'
+        f'<span class="choice-label">{_e(text)}</span>'
+        f'<span class="choice-check" aria-hidden="true">✓</span></button>'
+        for value, text in options
+    )
+    panel_id = f"choice-panel-{key}"
+    return (
+        f'<div class="choicepick" data-choice-default="{_e(options[0][0])}">'
+        f'<button type="button" class="ctl{" on" if on else ""}" data-fkey="{key}" '
+        f'data-choice-trigger value="{_e(current)}" aria-haspopup="listbox" '
+        f'aria-expanded="false" aria-controls="{panel_id}" aria-label="{_e(label)}" '
+        f'onclick="choiceToggle(event,this)" onkeydown="choiceTriggerKeys(event,this)">'
+        f'<span class="k">{_e(label)}</span><span class="v">{_e(current_label)}</span>'
+        f'<span class="caret" aria-hidden="true">▾</span></button>'
+        f'<div class="choicepanel" id="{panel_id}" role="listbox" aria-label="{_e(label)}" hidden>'
+        f'{option_html}</div></div>'
+    )
 
 
 def _toggle(key: str, label: str, checked: bool) -> str:
@@ -674,6 +756,20 @@ def _tier_select(filters: dict, lang: str = "zh") -> str:
 
 def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    if key == "geo":
+        error = _geo_error(filters["geo"]) if filters.get("geo") else None
+        invalid = ' aria-invalid="true" aria-describedby="geo-error"' if error else ""
+        return (f'<div class="geo-control{" invalid" if error else ""}"><label class="ctl{" on" if filters.get("geo") else ""}" '
+                f'title="{_e(T("location.region_title"))}">'
+                f'<span class="k">{_e(T("location.region"))}</span>'
+                f'<input data-fkey="geo" value="{_e(filters.get("geo", ""))}" '
+                f'placeholder="{_e(T("location.region_hint"))}" aria-label="{_e(T("location.region"))}"{invalid} '
+                'aria-autocomplete="list" aria-controls="geo-suggest-panel" aria-expanded="false" '
+                'autocomplete="off" spellcheck="false" enterkeyhint="search" '
+                'onfocus="geoFocus(this)" oninput="geoInput(this)" onkeydown="geoKeys(event)" '
+                'oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
+                f'<button type="button" class="btn geo-apply" onclick="applyGeo()" aria-label="{_e(T("location.apply"))}">'
+                f'{_e(T("location.apply_short"))}</button>{_geo_suggestions(lang)}</div>')
     if key in FILTER_KEYS:
         options = ([("", T("filter.any"))]
                    + [(v, i18n.value_label(lang, key, v)) for v in labels_mod.VALID[key]]
@@ -700,6 +796,8 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     colon = T("js.colon")
     value = filters.get(key)
+    if key == "geo":
+        return T("location.region") + colon + str(value)
     if key in FILTER_KEYS:
         shown = T(f"filter.none.{key}") if value == NONE_TOKEN else i18n.value_label(lang, key, value)
         return T(f"filter.field.{key}") + colon + shown
@@ -730,9 +828,10 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     allowed = VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS)
     primary, groups = filter_layout(view)
-    hidden_keys = groups["label"] + groups["job"] + groups["history"]
+    hidden_keys = groups["label"] + groups["job"]
     hidden_active = [k for k in hidden_keys if _is_active(k, filters)]
-    counted = [k for k in allowed if k not in TOOLBAR_FIXED]
+    counted = [k for k in allowed
+               if k not in TOOLBAR_FIXED and k not in INTERFACE_HIDDEN_KEYS]
     total_active = sum(1 for k in counted if _is_active(k, filters))
 
     out = ['<div class="toolbar">']
@@ -764,8 +863,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     if "sort" in allowed:
         sort = filters.get("sort") or "score"
         out.append(_select("sort", T("filter.sort"),
-                           [(v, T(f"sort.{v}")) for v in SORT_KEYS], sort)
-                   .replace('class="ctl on"', 'class="ctl"'))
+                           [(v, T(f"sort.{v}")) for v in SORT_KEYS], sort, active=False))
     out.append("</div>")
     if any(k != SINCE_KEY for k in filters):
         out.append(f'<a class="clear" href="#" onclick="clearFilter();return false;">'
@@ -773,14 +871,15 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
     out.append("</div>")
 
     # 「更多筛选」面板：桌面是工具栏下方的展开区，竖屏是底部抽屉。
-    # 竖屏抽屉里的改动先留在控件上，「应用」才走一次 applyFilter（panel.js filterChanged）。
-    out.append(f'<div class="more-panel" id="more-panel" data-keys="{" ".join(hidden_keys)}" hidden>'
+    # 底部的批量操作按钮只由 CSS 在竖屏显示。
+    panel_class = "more-panel" + ("" if hidden_keys else " sheet-only")
+    out.append(f'<div class="{panel_class}" id="more-panel" data-keys="{" ".join(hidden_keys)}" hidden>'
                f'<div class="sheet-grab" aria-hidden="true"></div>'
                f'<div class="sheet-head"><b>{_e(T("filter.button"))} · {_e(T("view." + view))}</b>'
                f'<button type="button" class="linkbtn" onclick="clearFilter()">'
                f'{_e(T("filter.clear_all"))}</button></div>'
                '<div class="sheet-slot" id="sheet-slot"></div>')
-    for group in ("label", "job", "history"):
+    for group in ("label", "job"):
         keys = groups[group]
         if not keys:
             continue
@@ -802,9 +901,7 @@ def _filter_bar(view: str, filters: dict, skill_counts: dict, lang: str = "zh", 
             f'onclick="removeFilter(\'{k}\')">×</button></span>'
             for k in hidden_active)
         out.append(f'<div class="chips" id="active-chips"><span class="chips-label">'
-                   f'{_e(T("filter.active"))}</span>{chips}'
-                   f'<button type="button" class="linkbtn" onclick="clearHidden()">'
-                   f'{_e(T("filter.clear_hidden"))}</button></div>')
+                   f'{_e(T("filter.active"))}</span>{chips}</div>')
     return "".join(out)
 
 
@@ -941,6 +1038,12 @@ def _stat_attr(key: str | None) -> str:
     return f' data-stat="{key}"' if key else ""
 
 
+def _filters_for_view(view: str, filters: dict) -> dict:
+    allowed = set(VIEW_FILTER_KEYS.get(view, ALL_FILTER_KEYS))
+    return {key: value for key, value in filters.items()
+            if (key in allowed and key not in INTERFACE_HIDDEN_KEYS) or key == SINCE_KEY}
+
+
 def render_page(conn, config: dict, view: str, offset: int, limit: int,
                 started: float | None = None, filters: dict | None = None,
                 lang: str = "zh", theme: str | None = None, lang_pref: str = "auto") -> str:
@@ -958,7 +1061,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
-    page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
+    # An unreadable region shows guidance in the list instead of a bare error page;
+    # the filter keeps its meaning (nothing is matched against an unknown target).
+    geo_error = _geo_error(filters["geo"]) if filters.get("geo") else None
+    page, total = (([], 0) if geo_error else
+                   _query(conn, config, view, offset, limit, filters, since, skills_cfg))
     # A new batch can shrink the filtered result set. Stay in this view and
     # use its last available page instead of showing an empty stale offset.
     if total and offset >= total:
@@ -971,12 +1078,12 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     # 点击由 gotoView() 接管 —— 它会补上该视图自己记住的筛选条件；
     # href 保持干净是为了修饰键/中键还能正常开新标签。
     nav = "".join(
-        f'<a class="tab{" on" if key == view else ""}" href="{_link(key, 0, filters)}"'
+        f'<a class="tab{" on" if key == view else ""}" href="{_link(key, 0, _filters_for_view(key, filters))}"'
         f'{CURRENT if key == view else ""}'
         f' onclick="return gotoView(\'{key}\',event)">{_e(T("view." + key))}</a>'
         for key in VIEWS)
     drawer_views = "".join(
-        f'<a class="dv{" on" if key == view else ""}" href="{_link(key, 0, filters)}"'
+        f'<a class="dv{" on" if key == view else ""}" href="{_link(key, 0, _filters_for_view(key, filters))}"'
         f'{CURRENT if key == view else ""}'
         f' onclick="return gotoView(\'{key}\',event)"><b>{_e(T("view." + key))}</b>'
         f'<small>{_e(T("viewhint." + key))}</small></a>'
@@ -1006,8 +1113,24 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                          for name, n, key in stat_items)
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
-    if page:
-        cards = "".join(_card(r, since, lang) for r in page)
+    if geo_error:
+        cards = (f'<div class="empty geo-empty" id="geo-error" role="alert">'
+                 f'<b>{_e(T("location.geo_invalid", geo=filters["geo"]))}</b>'
+                 f'<span>{_e(T(geo_error))}</span>'
+                 f'<button type="button" class="btn" onclick="removeFilter(\'geo\')">'
+                 f'{_e(T("location.clear_geo"))}</button></div>')
+    elif page:
+        if filters.get("geo"):
+            parts, previous = [], None
+            for row in page:
+                tier = row.get("_geo_match") or "unknown"
+                if previous is not None and tier != previous:
+                    parts.append('<hr class="geo-divider" aria-hidden="true">')
+                parts.append(_card(row, since, lang))
+                previous = tier
+            cards = "".join(parts)
+        else:
+            cards = "".join(_card(r, since, lang) for r in page)
     elif has_filters:
         cards = (f'<div class="empty"><b>{_e(T("list.empty_filtered"))}</b>'
                  f'<span>{_e(T("list.empty_hint"))}</span>'
@@ -1081,6 +1204,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         '<div class="note-menu" id="note-menu"></div>',
         _update_confirm(lang),
+        _copy_dialog(lang),
         _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
                         "__SKILLS__": skill_embed,
@@ -1102,7 +1226,8 @@ SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
 CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
-                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto") -> str:
+                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto",
+                    keys: str = i18n.DEFAULT_KEYS) -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
@@ -1176,6 +1301,10 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             radios("theme", theme or "auto", [("auto", T("set.theme_auto"), T("set.theme_auto_desc")),
                                               ("light", T("set.theme_light"), ""),
                                               ("dark", T("set.theme_dark"), "")], "setTheme"),
+            f'<h2 class="h2-gap">{_e(T("set.keys_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.keys_desc"))}</p>',
+            radios("keys", keys, [(code, T("set.keys_" + code), T(f"set.keys_{code}_desc"))
+                                  for code in i18n.KEY_PROFILES], "setKeys"),
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
             f'<li>{_e(T("set.keep1"))}</li><li>{_e(T("set.keep2"))}</li><li>{_e(T("set.keep3"))}</li></ul></div>',
         ])

@@ -42,6 +42,12 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
+    ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
+    ("tools/test_locations.py", "offline Australian location reference and matching", None),
+    ("tools/test_location_search.py", "group representative selection and three-block location search", None),
+    ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",
@@ -99,10 +105,18 @@ PYTHON_TESTS = (
 )
 
 NODE_TESTS = (
+    ("tools/test_panel_shortcuts.mjs", "keyboard profiles, native selection and overlay guards", None),
+    ("tools/test_panel_copy.mjs", "full JD clipboard, fallback and focus preservation", None),
+    ("tools/test_panel_locations.mjs", "group save identity and location search behavior", None),
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),
     ("tools/test_panel_navigation.mjs",
      "panel detail navigation, label sheet, filter drawer, header counts and skill candidates", None),
+)
+
+MCP_TESTS = (
+    ("tools/test_mcp.py", "optional MCP stdio / authenticated HTTP integration", None),
+    ("tools/test_mcp_http.py", "optional Streamable HTTP / app lifecycle / capacity", None),
 )
 
 
@@ -160,6 +174,7 @@ def print_inventory() -> None:
     print("Excluded from the public entry (see docs/public-tests.md):")
     print("  tools/test_public_snapshot.py      maintainer snapshot planner")
     print("  tools/regression_corpus.py         needs a private corpus")
+    print("  Optional --with-mcp: tools/test_mcp.py and tools/test_mcp_http.py (requirements-mcp.txt)")
 
 
 def main(argv=None) -> int:
@@ -167,6 +182,8 @@ def main(argv=None) -> int:
         description="Run the curated public offline test suite.")
     parser.add_argument("--list", action="store_true",
                         help="print the inventory and exit without running")
+    parser.add_argument("--with-mcp", action="store_true",
+                        help="also run the optional MCP integration test (requires requirements-mcp.txt)")
     args = parser.parse_args(argv)
 
     if args.list:
@@ -186,7 +203,8 @@ def main(argv=None) -> int:
     failed = 0
     failures: list = []
 
-    py_applicable = [(p, d, pl) for (p, d, pl) in PYTHON_TESTS if applicable(pl)]
+    python_tests = PYTHON_TESTS + (MCP_TESTS if args.with_mcp else ())
+    py_applicable = [(p, d, pl) for (p, d, pl) in python_tests if applicable(pl)]
     node_applicable = [(p, d, pl) for (p, d, pl) in NODE_TESTS if applicable(pl)]
     total = len(py_applicable) + len(node_applicable)
     index = 0

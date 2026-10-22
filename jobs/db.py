@@ -164,6 +164,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(p)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     # WAL：未来面板会一边读、fetch 一边写。默认 rollback journal 下
     # 写事务会阻塞读，容易出现 "database is locked"。
     try:
@@ -173,7 +174,12 @@ def connect(path: str | Path) -> sqlite3.Connection:
             return conn
         # Schema additions, legacy conversion, audit events and version publish
         # form one transaction, including on the first connection to an old DB.
-        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        if version < 2:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        else:
+            # Later upgrades only add their own schema, leaving existing
+            # business tables and human records untouched.
+            conn.execute("BEGIN IMMEDIATE")
         migrations.upgrade(conn)
         conn.commit()
     except BaseException:

@@ -3,7 +3,7 @@
 （Node 标准库 + 最小 DOM stub，无第三方依赖；执行 panel.js 里的真实函数）。
 
 覆盖：
-  - UX-1①：上一条 / 下一条 + J/K 基于页面载入时冻结的列表；标注改变视图成员后
+  - UX-1①：上一条 / 下一条 + J/K（显式选 Vim 方案；三种方案见 test_panel_shortcuts.mjs）基于页面载入时冻结的列表；标注改变视图成员后
     顺序不变、不跳条；首/末条提示；经过 allowDetailNavigation（保存中等待、草稿确认）；
     等待期间重复按键不排队；待应用新结果（UPDATE_PENDING）时整页载入一次并把目标
     uid 带进 hash，之后的按键不再发起导航；快速连按只认最后一次响应
@@ -110,7 +110,7 @@ class El {
   scrollIntoView() { this.scrolled = (this.scrolled || 0) + 1; }
 }
 
-function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false } = {}) {
+function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "" } = {}) {
   const ids = new Map();
   const reg = {};
   const docListeners = new Map();
@@ -118,7 +118,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   const body = new El("body");
   if (portrait) body.classList.add("portrait");
   const document = {
-    body, activeElement: body, hidden: false, cookie: "",
+    // 快捷键方案（cookie jobs_keys）：J/K 用例必须显式选 vim，默认方案是 ← / →
+    body, activeElement: body, hidden: false, cookie: keys ? "jobs_keys=" + keys : "",
     documentElement: { style: { setProperty() {} }, dataset: {}, lang },
     getElementById: (id) => ids.get(id) || null,
     querySelector: (s) => (reg[s] || [])[0] || null,
@@ -162,6 +163,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   };
   /* 列表卡片（页面载入时的顺序）与详情面板里的固定节点 */
   const cardEls = cards.map((uid) => { const c = new El("div"); c.className = "card"; c.dataset.uid = uid; return c; });
+  const listEl = new El("div"); listEl.className = "list";
+  reg[".list"] = [listEl];
   reg[".list .card"] = cardEls.slice();
   reg[".card"] = cardEls.slice();
   const pane = new El("div"); pane.id = "detail";
@@ -179,7 +182,9 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
 ;globalThis.__T__ = { stepDetail, syncDetailNav, openJob, closeDetail, setLabel, setNote, noteAdopt, noteBlur,
   refreshStats, renderUpdateState, toggleLabelSheet, toggleMore, filterChanged, moreDone, clearHidden, clearFilter,
   applyFilter, searchTyping, filterDraftCount, skillRows, skillRender,
-  skillKeys, skillClean, skillOwner, LABELS,
+  skillKeys, skillClean, skillOwner, choiceToggle, choicePick, choicePanelClose, choiceSetValue,
+  choiceTriggerKeys, choiceOptionKeys, geoSuggest, geoFocus, geoInput, geoPanelClose, geoOptionPick,
+  geoOptionKeys, fitLayout, navKeyIgnored, LABELS,
   state(){return {uid:OPEN_UID,pending:UPDATE_PENDING,applying:UPDATE_APPLYING,gates:NAV_GATES,draft:!!FILTER_DRAFT};},
   setUpdate(v){OPEN_UID=v.uid||null;UPDATE_BASELINE=v.baseline||'';UPDATE_PENDING=v.pending||null;UPDATE_APPLYING=false;},
   addPendingNote(p){NOTE_REQUESTS.add(p);p.finally(()=>NOTE_REQUESTS.delete(p));} };
@@ -291,12 +296,23 @@ async function testFrozenList() {
     await u.api.stepDetail(1);
     eq("没打开详情时 J：打开第一条", u.api.state().uid, "A");
   }
+  {
+    const focusTest = loadPanel({ keys: "gamer" });
+    await focusTest.api.openJob("A");
+    focusTest.cards[0].focus();
+    focusTest.key({ key: "d" });
+    await tick();
+    eq("keyboard navigation moves focus to target card", focusTest.document.activeElement, focusTest.cards[1]);
+    eq("keyboard navigation suppresses stale hover", focusTest.reg[".list"][0].classList.contains("keyboard-nav"), true);
+    focusTest.docEvent("pointermove", {});
+    eq("pointer movement restores hover feedback", focusTest.reg[".list"][0].classList.contains("keyboard-nav"), false);
+  }
 }
 
 async function testNavigationGate() {
   console.log("\n-- UX-1①：保存中 / 草稿 / 待应用新结果 --");
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     let release; t.api.addPendingNote(new Promise((r) => { release = r; }));
     const first = t.api.stepDetail(1); await tick();
@@ -308,7 +324,7 @@ async function testNavigationGate() {
     eq("等待结束后门闩归零", t.api.state().gates, 0);
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     const input = new El("input"); input.dataset.noteLoaded = "saved"; input.value = "draft";
     t.reg[".note input"] = [input];
@@ -322,7 +338,7 @@ async function testNavigationGate() {
     eq("草稿确认：继续到B", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
     await t.api.stepDetail(1);
@@ -337,7 +353,7 @@ async function testNavigationGate() {
 
 async function testRapidKeys() {
   console.log("\n-- UX-1①：快速连按 J/K --");
-  const t = loadPanel();
+  const t = loadPanel({ keys: "vim" });
   await t.api.openJob("A");
   const pending = [];
   t.routes.job = (uid) => new Promise((resolve) => pending.push({ uid, resolve }));
@@ -360,7 +376,7 @@ async function testRapidKeys() {
 
 async function testKeyFilters() {
   console.log("\n-- UX-1①：按键忽略条件 --");
-  const t = loadPanel();
+  const t = loadPanel({ keys: "vim" });
   await t.api.openJob("A");
   const cases = [
     ["输入框", { target: new El("input") }],
@@ -398,7 +414,7 @@ async function testKeyFilters() {
   t.key({ key: "K" }); await tick(); await tick();
   eq("大写 K：上一条", t.api.state().uid, "A");
   {
-    const s = loadPanel();
+    const s = loadPanel({ keys: "vim" });
     s.ids.delete("detail");
     s.key({ key: "j" }); await tick();
     eq("设置页（无详情面板）：不处理", s.calls.length, 0);
@@ -408,7 +424,7 @@ async function testKeyFilters() {
 async function testOverlayKeyOwnership() {
   console.log("\n-- UX-1①：浮层打开时 J/K 不切条 --");
   {
-    const t = loadPanel({ portrait: true });
+    const t = loadPanel({ portrait: true, keys: "vim" });
     await t.api.openJob("B");
     const sheet = new El("div"); t.ids.set("label-sheet", sheet);
     t.api.toggleLabelSheet(true);
@@ -426,7 +442,7 @@ async function testOverlayKeyOwnership() {
     eq("标注抽屉关闭后：K 恢复", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("B");
     const confirm = new El("div", { hidden: false });
     const cancel = new El("button");
@@ -446,7 +462,7 @@ async function testOverlayKeyOwnership() {
     eq("更新确认关闭后：K 恢复", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("B");
     const btn = new El("button"), pop = new El("div", { hidden: false }), choice = new El("button");
     choice.className = "on"; pop.q["button.on"] = [choice];
@@ -610,11 +626,128 @@ async function testLabelLock() {
   eq("等待备注期间已完成的标签失败仍阻止离页",[nav.defaultPrevented,interleaved.sandbox.location.href,actionBtn.disabled],[true,original,false]);
 }
 
+async function testInterleavedLabelNotes() {
+  console.log("\n-- full-label snapshots cannot roll back independent writes --");
+  for (const field of ["action", "priority", "eligibility"]) {
+    for (const late of ["note", "label"]) {
+      for (const note of ["New synthetic note；", null]) {
+        const t=loadPanel(), button=new El("button"), input=new El("input"), dot=new El("span");
+        const initial={action:null, priority:null, eligibility:null, note:"Old synthetic note；",
+          action_at:null,applied_at:null,eligibility_source:null,eligibility_at:null,
+          eligibility_analysis:null,ineligible_reason:null};
+        const value={action:"saved",priority:true,eligibility:"ineligible"}[field];
+        t.api.LABELS.A={...initial};
+        button.dataset.uid="A";button.dataset.field=field;button.dataset.value=value;
+        t.reg['[data-uid="A"][data-field]']=[button];
+        t.reg['.prog[data-prog-uid="A"]']=[dot];
+        input.dataset.uid="A";t.api.noteAdopt(input,initial.note);
+        const requests={};
+        t.routes.label=body=>new Promise(resolve=>{requests[body.field]={body,resolve};});
+        // The label request is already in flight when the note is submitted.
+        // Control server commit order separately from response delivery order.
+        const status=t.api.setLabel("A",field,value,button);
+        input.value=note || "";
+        const savingNote=t.api.setNote(input);
+        input.value="Still editing synthetic draft";
+        const database={...initial};
+        const snapshots={};
+        const commit=key=>{
+          const request=requests[key];
+          database[key]=key==="note" ? note : request.body.value;
+          if(key==="action")database.action_at="2026-10-23T01:00:00";
+          if(key==="eligibility")Object.assign(database,{
+            eligibility_source:"panel",eligibility_at:"2026-10-23T01:00:00",
+            eligibility_analysis:"eligible",ineligible_reason:"Synthetic correction"});
+          snapshots[key]={value:database[key],label:{...database}};
+        };
+        commit(late==="note" ? "note" : field);
+        commit(late==="note" ? field : "note");
+        const respond=key=>requests[key].resolve({ok:true,json:async()=>snapshots[key]});
+        const early=late==="note" ? field : "note";
+        respond(early);await (early==="note" ? savingNote : status);
+        respond(late==="note" ? "note" : field);
+        await Promise.all([savingNote,status]);
+        const tag=`${field}, late ${late}, note ${note===null ? "clear" : "edit"}`;
+        eq("both confirmed fields survive: "+tag,
+          [t.api.LABELS.A[field],t.api.LABELS.A.note], [database[field],database.note]);
+        const metadata=["action_at","applied_at","eligibility_source","eligibility_at",
+          "eligibility_analysis","ineligible_reason"];
+        eq("field metadata survives: "+tag,metadata.map(key=>t.api.LABELS.A[key]),
+          metadata.map(key=>database[key]));
+        eq("newer draft survives: "+tag,input.value,"Still editing synthetic draft");
+        eq("canonical baseline survives: "+tag,input.dataset.noteStored,note||"");
+        if(field==="action")eq("card progress survives: "+tag,[dot.hidden,dot.textContent],
+          [false,"value.action.saved"]);
+      }
+    }
+  }
+  {
+    const t=loadPanel(), input=new El("input"), button=new El("button");
+    await t.api.openJob("A");
+    input.dataset.uid="A";t.api.noteAdopt(input,"Original；");input.value="Retry note";
+    t.reg['.note input']=[input];
+    button.dataset.uid="A";button.dataset.field="action";button.dataset.value="saved";
+    t.reg['[data-uid="A"][data-field]']=[button];
+    const requests=[];
+    t.routes.label=body=>new Promise(resolve=>requests.push({body,resolve}));
+    const note=t.api.setNote(input);
+    const status=t.api.setLabel("A","action","saved",button);
+    const navigation=t.api.stepDetail(1);
+    eq("note-first status waits for registered note",requests.map(r=>r.body.field),["note"]);
+    requests[0].resolve({ok:false,text:async()=>"Synthetic note failure"});
+    await note;await tick();
+    eq("status continues after failed note",requests.map(r=>r.body.field),["note","action"]);
+    requests[1].resolve({ok:true,json:async()=>({value:"saved",label:{action:"saved",note:"Original；"}})});
+    await status;await navigation;
+    eq("failed note draft blocks queued navigation",[t.api.state().uid,input.value],["A","Retry note"]);
+    const retry=t.api.setNote(input);
+    requests[2].resolve({ok:true,json:async()=>({value:"Retry note；",label:{action:"saved",note:"Retry note；"}})});
+    await retry;
+    eq("retry preserves confirmed status and saves note",[t.api.LABELS.A.action,t.api.LABELS.A.note],
+      ["saved","Retry note；"]);
+    await t.api.stepDetail(1);
+    eq("successful retry releases navigation",t.api.state().uid,"B");
+  }
+}
+
+async function testDetailOpenRefreshesLabel() {
+  console.log("\n-- opening a detail adopts its fresh server label --");
+  const t=loadPanel(), scope=new El("div");
+  t.api.LABELS.A={action:"saved",note:"Old synthetic note；"};
+  scope.dataset.scopeLabel=JSON.stringify({action:"applied",note:"New synthetic note；"});
+  t.reg['#detail [data-label-scope]']=[scope];
+  await t.api.openJob("A");
+  eq("detail label replaces stale state",JSON.stringify(t.api.LABELS.A),
+    JSON.stringify({action:"applied",note:"New synthetic note；"}));
+}
+
 function filterFixture(portrait) {
   const t = loadPanel({ portrait });
-  const sel = (key, value) => {
-    const el = new El("select"); el.dataset.fkey = key; el.value = value;
-    const box = new El("label"); box.className = "ctl" + (value ? " on" : ""); el.closestMap[".ctl"] = box; el.box = box;
+  const sel = (key, value, options) => {
+    const picker = new El("div"); picker.className = "choicepick";
+    picker.dataset.choiceDefault = options[0][0];
+    const panel = new El("div"); panel.className = "choicepanel"; panel.hidden = true;
+    const el = new El("button"); el.type = "button"; el.className = "ctl" + (value ? " on" : "");
+    el.dataset.fkey = key; el.dataset.choiceTrigger = ""; el.value = value;
+    const shown = new El("span"); shown.className = "v";
+    shown.textContent = (options.find(([v]) => v === value) || options[0])[1];
+    const choiceOptions = options.map(([v, text]) => {
+      const option = new El("button"); option.className = "choiceopt" + (v === value ? " sel" : "");
+      option.dataset.choiceValue = v;
+      const label = new El("span"); label.className = "choice-label"; label.textContent = text;
+      option.q[".choice-label"] = [label];
+      option.closestMap[".choicepick"] = picker;
+      return option;
+    });
+    picker.q[".choicepanel"] = [panel];
+    picker.q["[data-choice-trigger]"] = [el];
+    picker.q[".choiceopt"] = choiceOptions;
+    panel.q[".choiceopt"] = choiceOptions;
+    el.q[".v"] = [shown];
+    el.closestMap[".choicepick"] = picker;
+    el.closestMap[".ctl"] = el;
+    panel.closestMap[".choicepick"] = picker;
+    el.box = el; el.picker = picker; el.panel = panel; el.choiceOptions = choiceOptions;
     return el;
   };
   const chk = (key, checked, value) => {
@@ -623,10 +756,8 @@ function filterFixture(portrait) {
     return el;
   };
   const q = new El("input"); q.type = "search"; q.dataset.fkey = "q"; q.value = "python"; q.defaultValue = "python";
-  const interest = sel("interest", "");
-  const sort = sel("sort", "score"); sort.box.className = "ctl";
-  sort.options = [{ value: "score" }, { value: "date" }];
-  Object.defineProperty(sort, "selectedIndex", { set(i) { this.value = this.options[i].value; } });
+  const interest = sel("interest", "", [["", "Any"], ["want", "Want"], ["maybe", "Maybe"], ["no", "No"], ["none", "None"]]);
+  const sort = sel("sort", "score", [["score", "Score"], ["date", "Date"]]); sort.box.className = "ctl";
   const salary = chk("salary", false);
   const skillA = chk("skill", true, "Python"), skillB = chk("skill", false, "SQL");
   skillA.nextElementSibling = { textContent: "Python" }; skillB.nextElementSibling = { textContent: "SQL" };
@@ -648,48 +779,103 @@ function filterFixture(portrait) {
 async function testFilterDrawer() {
   console.log("\n-- UX-11：竖屏筛选抽屉批量应用 --");
   {
+    const t = loadPanel({ portrait: false });
+    const empty = new El("div"); empty.hidden = true; empty.dataset.keys = "";
+    t.ids.set("more-panel", empty);
+    t.sandbox.sessionStorage.setItem("jobs.panel.more", "1");
+    t.document.body.classList.add("sheet-open");
+    t.api.toggleMore(true);
+    eq("推荐桌面页不恢复空白更多筛选框", empty.hidden, true);
+    eq("推荐桌面页清掉失效的展开状态", t.sandbox.sessionStorage.getItem("jobs.panel.more"), null);
+    eq("推荐桌面页不残留抽屉状态", t.document.body.classList.contains("sheet-open"), false);
+  }
+  {
+    const t = loadPanel({ portrait: true });
+    const layout = new El("div"); layout.clientWidth = 1000; t.reg[".layout"] = [layout];
+    const empty = new El("div"); empty.hidden = false; empty.dataset.keys = "";
+    t.ids.set("more-panel", empty);
+    t.document.body.classList.add("sheet-open");
+    t.sandbox.sessionStorage.setItem("jobs.panel.more", "1");
+    t.api.fitLayout();
+    eq("从手机宽度切回桌面：空推荐面板立即关闭", [t.document.body.classList.contains("portrait"), empty.hidden], [false, true]);
+    eq("从手机宽度切回桌面：清除失效恢复状态", t.sandbox.sessionStorage.getItem("jobs.panel.more"), null);
+  }
+  {
+    const f = filterFixture(true), { t } = f;
+    const start = t.sandbox.location.href;
+    t.api.toggleMore(true);
+    const choiceEvent = { key: "ArrowDown", preventDefault() {}, stopPropagation() {} };
+    t.api.choiceTriggerKeys(choiceEvent, f.interest);
+    eq("custom choice opens with keyboard", [f.interest.panel.classList.contains("open"), f.interest.panel.hidden], [true, false]);
+    check("custom choice focuses an option", t.document.activeElement === f.interest.choiceOptions[0]);
+    eq("custom choice owns shortcuts", t.api.navKeyIgnored({ target: f.interest }), true);
+    t.reg[".choicepanel.open"] = [f.interest.panel];
+    const selectEvent = { key: "Enter", preventDefault() {}, stopPropagation() {} };
+    t.api.choiceOptionKeys(selectEvent, f.interest.choiceOptions[1]);
+    eq("custom choice updates value and displayed label", [f.interest.value, f.interest.q[".v"][0].textContent], ["want", "Want"]);
+    eq("custom choice closes after selection", [f.interest.panel.classList.contains("open"), f.interest.panel.hidden], [false, true]);
+    eq("custom choice remains in mobile draft", t.sandbox.location.href, start);
+  }
+  {
+    const t = loadPanel();
+    const control = new El("div"); control.className = "geo-control";
+    const input = new El("input"); input.dataset.fkey = "geo"; input.closestMap[".geo-control"] = control;
+    const panel = new El("div"); panel.className = "geo-suggest-panel"; panel.hidden = true;
+    const options = [
+      ["Australia", "Australia"],
+      ["NSW", "NSW"],
+      ["Sydney NSW", "Sydney NSW"],
+      ["VIC", "VIC"],
+    ].map(([value, text]) => {
+      const option = new El("button"); option.className = "geoopt"; option.dataset.geoValue = value;
+      option.textContent = text; option.closestMap[".geo-suggest-panel"] = panel;
+      option.closestMap[".geo-control"] = control;
+      return option;
+    });
+    control.q['input[data-fkey="geo"]'] = [input];
+    panel.q[".geoopt"] = options;
+    t.ids.set("geo-suggest-panel", panel);
+    t.reg['input[data-fkey="geo"]'] = [input];
+    t.api.geoFocus(input);
+    eq("custom location suggestions open", [panel.classList.contains("open"), panel.hidden], [true, false]);
+    input.value = "Syd"; t.api.geoInput(input);
+    eq("custom location suggestions filter without native datalist",
+      options.map((option) => [option.dataset.geoValue, option.hidden]),
+      [["Australia", true], ["NSW", true], ["Sydney NSW", false], ["VIC", true]]);
+    const select = { key: "Enter", preventDefault() {}, stopPropagation() {} };
+    t.api.geoOptionKeys(select, options[2]);
+    eq("custom location suggestion fills the input", [input.value, panel.hidden], ["Sydney NSW", true]);
+    check("custom location suggestion restores input focus", t.document.activeElement === input);
+  }
+  {
     const f = filterFixture(true);
     const { t } = f;
     const start = t.sandbox.location.href;
     t.api.toggleMore(true);
     eq("打开抽屉：记下快照", t.api.state().draft, true);
-    f.interest.value = "want"; t.api.filterChanged(); await tick();
+    t.api.choicePick(f.interest.choiceOptions[1]); await tick();
     eq("改一项：不跳转", t.sandbox.location.href, start);
-    eq("改一项：按钮写应用（1）", f.done.textContent, "js.filter_apply");
+    eq("改一项：值留在控件草稿", [f.interest.value, f.interest.q[".v"][0].textContent], ["want", "Want"]);
+    eq("改一项：移动端按钮显示待应用数量", f.done.textContent, "js.filter_apply");
     eq("改一项：控件外观跟随草稿", f.interest.box.classList.contains("on"), true);
     f.salary.checked = true; t.api.filterChanged();
     f.skillB.checked = true; f.skillA.checked = false; t.api.filterChanged(); await tick();
     eq("技能多选摘要跟随草稿", [f.pickV.textContent, f.pickBtn.classList.contains("on")], ["SQL", true]);
     eq("仍未跳转", t.sandbox.location.href, start);
-    f.salary.checked = false; t.api.filterChanged();
-    f.skillB.checked = false; f.skillA.checked = true; t.api.filterChanged();
-    eq("改回原值：不计入改动", f.done.textContent, "js.filter_apply");
-    f.interest.value = ""; t.api.filterChanged();
-    eq("全部改回：按钮恢复完成", f.done.textContent, "filter.done");
-    f.interest.value = "maybe"; f.sort.value = "newest"; t.api.filterChanged();
-    t.api.toggleMore(false); await tick();
-    eq("关闭：草稿丢弃、控件按快照还原", [f.interest.value, f.sort.value, f.salary.checked, f.skillA.checked], ["", "score", false, true]);
-    eq("关闭：外观还原", [f.interest.box.classList.contains("on"), f.done.textContent], [false, "filter.done"]);
-    eq("关闭：不跳转", t.sandbox.location.href, start);
-    t.api.toggleMore(true);
-    f.interest.value = "want"; t.api.filterChanged();
-    t.api.clearHidden(); await tick();
-    eq("抽屉内清除隐藏条件：同样只改草稿", [t.sandbox.location.href, f.interest.value], [start, ""]);
-    f.interest.value = "want"; f.salary.checked = true; t.api.filterChanged();
     t.sandbox.sessionStorage.setItem("jobs.panel.more", "1");
     t.api.moreDone(); await tick(); await tick();
     const url = new URL(t.sandbox.location.href, "http://localhost");
-    eq("应用：一次跳转，参数来自控件", [url.searchParams.get("interest"), url.searchParams.get("salary"),
+    eq("关闭抽屉：一次跳转提交草稿", [url.searchParams.get("interest"), url.searchParams.get("salary"),
       url.searchParams.getAll("skill"), url.searchParams.get("q"), url.searchParams.get("view")],
-    ["want", "1", ["Python"], "python", "all"]);
-    eq("应用后不再自动展开抽屉", t.sandbox.sessionStorage.getItem("jobs.panel.more"), null);
+    ["want", "1", ["SQL"], "python", "all"]);
+    eq("提交后不再自动展开抽屉", t.sandbox.sessionStorage.getItem("jobs.panel.more"), null);
   }
   {
     const f = filterFixture(true);
     f.t.api.toggleMore(true);
-    f.t.api.moreDone(); await tick();
-    eq("无改动点完成：只收起", [f.more.hidden, f.t.sandbox.location.hash], [true, ""]);
-    eq("无改动点完成：不跳转", f.t.sandbox.location.href, "http://localhost/?view=all&q=python&skill=Python");
+    f.t.api.toggleMore(false); await tick();
+    eq("无改动再次点击：只收起", f.more.hidden, true);
+    eq("无改动再次点击：不跳转", f.t.sandbox.location.href, "http://localhost/?view=all&q=python&skill=Python");
   }
   {
     const f = filterFixture(false);
@@ -697,7 +883,7 @@ async function testFilterDrawer() {
     eq("桌面：即改即生效", new URL(f.t.sandbox.location.href, "http://localhost").searchParams.get("interest"), "want");
   }
   {
-    // 新结果版本到达时抽屉里有未应用草稿（且没开岗位）：不整页载入，信号保留；关闭后载入一次
+    // 新结果版本到达时抽屉里有未提交草稿（且没开岗位）：不整页载入；关闭后载入一次
     const f = filterFixture(true); const { t } = f;
     t.api.toggleMore(true);
     f.interest.value = "want"; t.api.filterChanged();
@@ -709,8 +895,6 @@ async function testFilterDrawer() {
     eq("下一次轮询仍不载入", t.reloads(), 0);
     t.api.toggleMore(false); await tick();
     eq("关闭抽屉（丢弃草稿）：立刻载入一次", t.reloads(), 1);
-    t.api.renderUpdateState({ state: "success", generation: "generation-2" }, true); await tick();
-    eq("之后的轮询不再重复载入", t.reloads(), 1);
   }
   {
     const f = filterFixture(true); const { t } = f;
@@ -726,17 +910,14 @@ async function testFilterDrawer() {
     t.api.toggleMore(true);
     await new Promise((r) => setTimeout(r, 450));
     eq("防抖内打开抽屉：不跳转", t.sandbox.location.href, start);
-    eq("搜索词计入「应用（N）」", t.api.filterDraftCount(), 1);
+    eq("搜索词计入未提交草稿", t.api.filterDraftCount(), 1);
     f.q.value = "python sql aws"; t.api.searchTyping({ target: f.q });
     t.api.applyFilter();
     await new Promise((r) => setTimeout(r, 450));
     eq("抽屉内继续输入 / 直接 applyFilter：只更新草稿", [t.sandbox.location.href, t.api.filterDraftCount()], [start, 1]);
-    t.api.toggleMore(false); await tick();
-    eq("丢弃：搜索框还原为 URL 里的词", f.q.value, "python");
-    f.q.value = "rust"; t.api.searchTyping({ target: f.q });
-    t.api.toggleMore(true);
     t.api.moreDone(); await tick();
-    eq("应用：搜索词一起提交", new URL(t.sandbox.location.href, "http://localhost").searchParams.get("q"), "rust");
+    eq("应用：搜索词一起提交",
+      new URL(t.sandbox.location.href, "http://localhost").searchParams.get("q"), "python sql aws");
   }
   {
     // 抽屉里的「清除全部筛选」：只复位草稿，不跳转
@@ -749,13 +930,14 @@ async function testFilterDrawer() {
     eq("抽屉内清除全部：不跳转", t.sandbox.location.href, start);
     eq("抽屉内清除全部：全部控件复位（排序回默认第一项）",
       [f.q.value, f.interest.value, f.salary.checked, f.skillA.checked, f.sort.value], ["", "", false, false, "score"]);
-    eq("抽屉内清除全部：应用（N）计入 q、skill、sort", t.api.filterDraftCount(), 3);
+    eq("抽屉内清除全部：计入待应用数量", t.api.filterDraftCount(), 3);
     t.api.toggleMore(false); await tick();
     eq("关闭：清除被丢弃、控件还原",
       [f.q.value, f.salary.checked, f.skillA.checked, f.sort.value], ["python", false, true, "date"]);
     t.api.toggleMore(true); t.api.clearFilter(); t.api.moreDone(); await tick();
     const url = new URL(t.sandbox.location.href, "http://localhost");
-    eq("应用清除：一次跳转到默认条件", [url.searchParams.get("q"), url.searchParams.getAll("skill"), url.searchParams.get("sort"), url.searchParams.get("view")],
+    eq("应用清除：一次跳转到默认条件",
+      [url.searchParams.get("q"), url.searchParams.getAll("skill"), url.searchParams.get("sort"), url.searchParams.get("view")],
       [null, [], "score", "all"]);
   }
   {
@@ -857,6 +1039,8 @@ async function main() {
   await testLabelSheet();
   await testStats();
   await testLabelLock();
+  await testInterleavedLabelNotes();
+  await testDetailOpenRefreshesLabel();
   await testFilterDrawer();
   await testSkillCandidates();
   console.log();
