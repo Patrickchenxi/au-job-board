@@ -145,7 +145,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         proc = subprocess.Popen([sys.executable,'-B','-m','jobs.cli','--config',str(path),
             '--rules',str(root/'rules.yaml'),'--skills',str(root/'skills.yaml'),
             'panel','--host','127.0.0.1','--port',str(port)], cwd=ROOT,
-            stdout=output,stderr=subprocess.STDOUT,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1'))
+            stdout=output,stderr=subprocess.STDOUT,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1'))
         def cleanup():
             if proc.poll() is None:
                 proc.send_signal(signal.SIGINT)
@@ -153,7 +153,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 except subprocess.TimeoutExpired: proc.kill();proc.wait(timeout=5)
         self.addCleanup(cleanup)
         # Cold CI runners import the full CLI stack slowly; bound by wall time.
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 120
         while True:
             if proc.poll() is not None:
                 self.fail('Application exited: '+(root/'app.log').read_text())
