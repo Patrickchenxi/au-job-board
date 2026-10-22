@@ -1,16 +1,107 @@
-# Experimental read-only MCP adapter
+# Optional read-only MCP
 
-This local proof of concept is based on the v1.3 integration baseline. It uses
-the official Python MCP SDK, pinned separately in `requirements-mcp.txt`.
-The existing panel and HTTP API need no MCP dependency.
+AU Job Board can expose its read-only agent data to MCP clients. MCP is
+optional: the panel, CLI and [HTTP API](agent-api.md) need none of it, and its
+SDK is pinned separately in `requirements-mcp.txt`.
 
-The stdio path is: MCP host → local subprocess → authenticated HTTP API →
-read-only SQLite. The adapter reads only its owner-only token file and makes
-fixed GET requests. It never opens a database, loads personal application
-configuration, runs an LLM, changes labels or starts collection/analysis.
+Two transports provide the same four read-only tools:
+
+- **Streamable HTTP owned by the application** (recommended): starts and stops
+  with `panel`, on the panel address and the panel port plus one.
+- **Local stdio**: the MCP host starts a subprocess that talks to an already
+  running standalone HTTP API over loopback.
+
+Neither path opens the database for writing, loads personal configuration into
+the client, runs an LLM, changes labels or starts collection/analysis.
 Geography, grouping, filters and sorting remain owned by the existing API.
 
-## Run locally
+## Streamable HTTP with the application (recommended)
+
+Install the normal runtime requirements and `requirements-mcp.txt` into the
+interpreter used to launch the panel. Create an owner-only random token file
+from the project root, without echoing it:
+
+```sh
+(umask 077 && .venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))' > data/agent.token)
+```
+
+Then enable MCP in the selected application config:
+
+```yaml
+panel:
+  host: 127.0.0.1
+  port: 8090
+mcp:
+  enabled: true
+  token_file: data/agent.token
+agent_api:
+  snapshots:
+    ttl_seconds: 300
+    max_snapshots: 8
+    max_rows: 50000
+    max_snapshot_mib: 128
+    max_total_mib: 512
+```
+
+Start the normal `python -m jobs.cli --config <config> panel` command. The MCP
+endpoint is `http://127.0.0.1:8091/mcp`: its address inherits `panel.host` and its
+port is always the actual panel port plus one. CLI `panel --host/--port` overrides
+apply to both. Do not repeat host/port in `mcp`; unknown settings are rejected.
+The derived port must be free and the panel cannot use port 65535. Wildcard
+listeners are refused for MCP. All relative file paths above use project root.
+
+Both listeners are owned by the application process. Startup failure closes
+partially opened resources; stopping the application releases MCP as well. The
+MCP dependency is optional when disabled. MCP starts a private ephemeral loopback
+HTTP reader internally, so no internal API port needs configuration or exposure.
+That reader uses SQLite read-only mode and the shared snapshot configuration.
+The panel keeps its existing behavior and access policy, including its existing
+write routes; a read-only MCP does not authenticate or make the panel read-only.
+
+Every MCP HTTP request requires `Authorization: Bearer <token>`. Host must name
+the configured address and derived port; browser Origin headers are rejected.
+No CORS permissions are provided. The SDK uses stateless Streamable HTTP with
+JSON responses; application snapshots still persist in the internal reader for
+the configured TTL. A 64 KiB request-body limit protects the protocol endpoint.
+It exposes the same four read-only tools and error semantics as stdio.
+
+For private data on a remote network, enable TLS with both `mcp.tls_certfile` and
+`mcp.tls_keyfile`, and use an HTTPS URL trusted by the client. The certificate
+must cover the address used by the client. Without TLS, the token and job data
+cross the network in clear text, so use plain HTTP only on a network you trust
+or keep the listener on loopback. Tailscale subnet routing provides
+reachability; it does not change listener bindings, TLS or Bearer requirements.
+No public listener, firewall rule or production service is configured by merely
+adding this code. Set `panel.host` to a specific reachable address when deploying.
+
+### Connecting a client
+
+Clients that support Streamable HTTP need the endpoint URL and an
+`Authorization: Bearer <token>` header. A generic example:
+
+```json
+{
+  "mcpServers": {
+    "au-job-board": {
+      "url": "http://127.0.0.1:8091/mcp",
+      "headers": {"Authorization": "Bearer <contents of the token file>"}
+    }
+  }
+}
+```
+
+Use the host's own documented way to add a remote MCP server, and prefer its
+secret or environment-variable mechanism over pasting the token into a shared
+file. Never commit the token or a client configuration containing it. Rotate it
+by replacing the token file, restarting the panel and updating the client. A
+client that has only stdio support can use the stdio path below.
+
+`tools/test_mcp_http.py` tests real HTTP tools, auth/Host/Origin rejection, body
+limits, verified TLS, startup rollback, inherited CLI listener settings, stopping
+the actual application, configurable budgets and a synthetic snapshot exceeding
+the former 16 MiB default. It is the second opt-in public entry.
+
+## Local stdio
 
 First start the existing [read-only HTTP API](agent-api.md). It requires an
 already upgraded database and a private token file. For a remote installation,
@@ -38,7 +129,7 @@ directory. Use the environment's actual executable, not a shell activation.
 ```json
 {
   "mcpServers": {
-    "au-job-board-poc": {
+    "au-job-board": {
       "command": "/absolute/path/au-job-board/.runtime/mcp-venv/bin/python",
       "args": [
         "-B", "-m", "jobs.mcp_server",
@@ -52,8 +143,8 @@ directory. Use the environment's actual executable, not a shell activation.
 ```
 
 Host-specific registration and production deployment remain separate operations.
-There is no plugin UI or write tool. For an app-owned remote listener, use the
-Streamable HTTP mode below.
+There is no plugin UI or write tool. For a listener owned by the application, use
+the Streamable HTTP mode above.
 
 ## Tools and a first read
 
@@ -116,63 +207,6 @@ python -B tools/test_mcp.py
 python -B tools/run_public_tests.py --with-mcp
 ```
 
-The default public suite remains unchanged at 38 entries; `--with-mcp` adds two
+The default public suite runs 38 entries; `--with-mcp` adds two
 entries and fails if its SDK is missing. A passing SDK client test proves the
 protocol/HTTP path, not that a particular desktop agent has installed the tools.
-
-## Streamable HTTP with the application
-
-Install the normal runtime requirements and `requirements-mcp.txt` into the
-interpreter used to launch the panel. Create an owner-only random token file,
-then enable MCP in the selected application config:
-
-```yaml
-panel:
-  host: 127.0.0.1
-  port: 8090
-mcp:
-  enabled: true
-  token_file: data/agent.token
-agent_api:
-  snapshots:
-    ttl_seconds: 300
-    max_snapshots: 8
-    max_rows: 50000
-    max_snapshot_mib: 128
-    max_total_mib: 512
-```
-
-Start the normal `python -m jobs.cli --config <config> panel` command. The MCP
-endpoint is `http://127.0.0.1:8091/mcp`: its address inherits `panel.host` and its
-port is always the actual panel port plus one. CLI `panel --host/--port` overrides
-apply to both. Do not repeat host/port in `mcp`; unknown settings are rejected.
-The derived port must be free and the panel cannot use port 65535. Wildcard
-listeners are refused for MCP. All relative file paths above use project root.
-
-Both listeners are owned by the application process. Startup failure closes
-partially opened resources; stopping the application releases MCP as well. The
-MCP dependency is optional when disabled. MCP starts a private ephemeral loopback
-HTTP reader internally, so no internal API port needs configuration or exposure.
-That reader uses SQLite read-only mode and the shared snapshot configuration.
-The panel keeps its existing behavior and access policy, including its existing
-write routes; a read-only MCP does not authenticate or make the panel read-only.
-
-Every MCP HTTP request requires `Authorization: Bearer <token>`. Host must name
-the configured address and derived port; browser Origin headers are rejected.
-No CORS permissions are provided. The SDK uses stateless Streamable HTTP with
-JSON responses; application snapshots still persist in the internal reader for
-the configured TTL. A 64 KiB request-body limit protects the protocol endpoint.
-It exposes the same four read-only tools and error semantics as stdio.
-
-For private data on a remote network, enable TLS with both `mcp.tls_certfile` and
-`mcp.tls_keyfile`, and use an HTTPS URL trusted by the client. The certificate
-must cover the address used by the client. Plain LAN HTTP is suitable only for
-a deliberately isolated synthetic experiment. Tailscale subnet routing provides
-reachability; it does not change listener bindings, TLS or Bearer requirements.
-No public listener, firewall rule or production service is configured by merely
-adding this code. Set `panel.host` to a specific reachable address when deploying.
-
-`tools/test_mcp_http.py` tests real HTTP tools, auth/Host/Origin rejection, body
-limits, verified TLS, startup rollback, inherited CLI listener settings, stopping
-the actual application, configurable budgets and a synthetic snapshot exceeding
-the former 16 MiB default. It is the second opt-in public entry.

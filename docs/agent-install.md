@@ -34,8 +34,11 @@ tested and keep network fetching and scheduling as separate user choices.
 > automatic updates through launchd and at what local time. Explain that daily
 > updates fetch, analyze and write reports. Both options are off unless I
 > explicitly choose them; do not treat silence as approval. On other systems,
-> do not offer or configure an unverified scheduler by default. Do not expose
-> the panel or push anything to GitHub.
+> do not offer or configure an unverified scheduler by default. Also ask whether
+> I want you, the installing agent, connected to this installation through its
+> optional read-only MCP; it stays off unless I choose it, and you must not edit
+> any other client's configuration. Do not expose the panel or push anything to
+> GitHub.
 
 ## Getting the source
 
@@ -137,14 +140,15 @@ configuration is still pending. Do not fill it in with guessed values.
    database. Do not leave a server running.
 8. **Offer optional use after verification.** Only once offline verification
    has passed and the user has confirmed the personal configuration, follow
-   "Optional fetching and macOS automation" below. Ask only about choices that
-   the user has not already made. Declining these options does not make the
+   "Optional fetching and macOS automation" and then "Optional MCP connection
+   for this agent" below. Ask only about choices that the user has not already
+   made. Declining these options does not make the
    installation incomplete.
 9. **Report, then stop.** Give the install path, the exact start and stop
    commands, the resolved Python and dependency versions, a pass/fail line for
    each check, and which personal settings remain unconfirmed. Report whether
-   the optional fetch and scheduled updates were declined, left pending or
-   explicitly enabled. Do not perform further operations.
+   the optional fetch, scheduled updates and MCP connection were declined, left
+   pending or explicitly enabled. Do not perform further operations.
 
 ## Optional fetching and macOS automation
 
@@ -176,6 +180,47 @@ A source being enabled in YAML is not permission to fetch immediately. Permissio
 for one-off fetching does not enable daily updates, and enabling daily updates
 does not grant permission to expose the panel or upload data.
 
+## Optional MCP connection for this agent
+
+The installation can expose four read-only tools through [MCP](mcp.md), so an
+agent can later read jobs, full JDs and batch facts without SSH or database
+access. Offer it only after offline verification and personal configuration
+are complete, and keep it off unless the user explicitly chooses it.
+
+Ask one question: whether the user wants **you, the installing agent**, to be
+configured as an MCP client of this installation. Explain briefly that MCP:
+
+- installs the extra `requirements-mcp.txt` dependencies (network use),
+- enables `mcp` in their `config.yaml` and creates an owner-only token file,
+- listens with the panel on the same address and the panel port plus one,
+- is read-only, but plain HTTP beyond loopback sends the token and job data in
+  clear text unless TLS is configured.
+
+If the user agrees:
+
+1. Install `requirements-mcp.txt` into the project `.venv`.
+2. Create the token file as shown in [mcp.md](mcp.md), and add only the `mcp`
+   section to the existing `config.yaml`, preserving every other value and
+   comment. Keep `panel.host` on loopback unless the user separately chose
+   another protected address.
+3. Restart the user's panel only if they already run it; otherwise tell them the
+   endpoint becomes available on the next `panel` start.
+4. Register the endpoint in **your own** client configuration using that
+   client's documented method, preferring its secret or environment-variable
+   support for the token. If you cannot configure yourself, give the user the
+   URL and steps instead of guessing a file format. Do not modify other agents'
+   or applications' configuration.
+5. Verify with one `list_jobs` call returning a snapshot, without printing JD
+   bodies, notes or the token. On an empty database, an empty successful list
+   is a valid result.
+6. Report the endpoint URL, the token file path (never its contents), and how to
+   undo it: remove your client registration, set `mcp.enabled: false`, delete
+   the token file and restart the panel.
+
+Declining MCP does not make the installation incomplete. Enabling it does not
+grant permission to fetch, schedule, expose the panel or read data beyond the
+verification call.
+
 ## Guardrails
 
 - Do **not** read, copy or return private job descriptions or notes. Use only
@@ -191,8 +236,9 @@ does not grant permission to expose the panel or upload data.
 - Do **not** escalate privileges, modify system settings, install background
   services, or change product logic, rules or vocabulary.
 - Do **not** bypass a platform's terms or anti-bot protections.
-- **Fetching listings, enabling a scheduled service (`launchd`), and exposing
-  the panel beyond loopback each require the user's explicit choice.** The
+- **Fetching listings, enabling a scheduled service (`launchd`), enabling MCP
+  or registering an MCP client, and exposing the panel beyond loopback each
+  require the user's explicit choice.** The
   default verification performs none of them.
 - Treat the panel as unauthenticated: loopback only unless the user has their own
   protected access layer.
