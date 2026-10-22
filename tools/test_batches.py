@@ -18,7 +18,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from jobs import RunTimeout, batches, cli, db, labels, location_store, migrations, sources
+from jobs import RunTimeout, batches, cli, db, labels, migrations, sources
 
 
 def job(number, source="seek"):
@@ -159,8 +159,6 @@ class BatchTests(unittest.TestCase):
             self.assertIsNotNone(value["finished_at"])
             self.assertEqual(value["counts"]["seen"], 1)
             self.assertEqual([r[0] for r in conn.execute("SELECT uid FROM jobs")], ["seek:committed"])
-            self.assertEqual([r[0] for r in conn.execute("SELECT DISTINCT uid FROM job_locations")],
-                             ["seek:committed"])
             self.assertEqual([r[0] for r in conn.execute("SELECT uid FROM fetch_batch_members")],
                              ["seek:committed"])
 
@@ -176,7 +174,7 @@ class BatchTests(unittest.TestCase):
     def test_storage_failure_rolls_back_both_job_and_members(self):
         self.assert_aborted_source(sqlite3.OperationalError("synthetic write failure"), "error")
 
-    def test_membership_failure_rolls_back_job_and_location(self):
+    def test_membership_failure_rolls_back_job(self):
         original = batches.record_member
         def record(conn, batch_id, uid, is_new):
             original(conn, batch_id, uid, is_new)
@@ -185,7 +183,7 @@ class BatchTests(unittest.TestCase):
             self.fetch([("seek", lambda *_: [job(1)])])
         with self.read() as conn:
             self.assertEqual(batches.list_batches(conn)[0]["collection_state"], "error")
-            for table in ("jobs", "job_locations", "fetch_batch_members"):
+            for table in ("jobs", "fetch_batch_members"):
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM " + table).fetchone()[0], 0)
 
     def test_fetch_exception_timeout_is_reraised(self):
@@ -308,13 +306,13 @@ class MigrationTests(unittest.TestCase):
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         conn.executescript(db.SCHEMA)
+        conn.execute("""CREATE TABLE job_locations(
+            location_id TEXT PRIMARY KEY, uid TEXT NOT NULL, raw TEXT NOT NULL)""")
         conn.execute("PRAGMA user_version=2")
         db.upsert_job(conn, job(1))
+        conn.execute("INSERT INTO job_locations VALUES('loc-old','seek:1','Melbourne VIC')")
         conn.commit()
         labels.set_label(conn, "seek:1", note="Synthetic note; 优先投递", action="saved")
-        loc = location_store.locations_for(conn, "seek:1")[0]["location_id"]
-        location_store.set_label(conn, "seek:1", loc, "note", "Synthetic scoped note")
-        location_store.set_correction(conn, "seek:1", loc, "Melbourne VIC 3000", "remote")
         db.replace_decision(conn, "seek:1", False, rules_version=7)
         db.replace_score(conn, "seek:1", "T1", 1, 2, 0, 3, [], 7)
         db.log_run(conn, "fetch", "2020-01-01", {})
@@ -331,14 +329,21 @@ class MigrationTests(unittest.TestCase):
                         for table in tables}
 
     def test_schema2_only_adds_tables_and_reopen_is_idempotent(self):
-        with patch.object(migrations, "_migrate_labels", side_effect=AssertionError("legacy conversion reran")), \
-                patch.object(location_store, "sync_all", side_effect=AssertionError("locations reparsed")):
+        with patch.object(migrations, "_migrate_labels", side_effect=AssertionError("legacy conversion reran")):
             for _ in range(2):
                 with closing(db.connect(self.path)) as conn:
                     self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
+                    self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
                     self.assertEqual(self.snapshot(conn), self.before)
                     self.assertEqual(conn.execute("SELECT COUNT(*) FROM fetch_batch_members").fetchone()[0], 0)
                     self.assertEqual(batches.list_batches(conn)[0]["membership"], "unavailable")
+
+    def test_batch_members_keep_foreign_key_integrity(self):
+        with closing(db.connect(self.path)) as conn:
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO fetch_batch_members(batch_id, uid, is_new, seen_at) "
+                    "VALUES ('missing-batch', 'seek:missing', 1, '2026-10-22T00:00:00Z')")
 
     def test_failed_ddl_rolls_back_tables_version_and_business_rows_then_retries(self):
         with patch.object(batches, "SCHEMA", batches.SCHEMA + ("INVALID SYNTHETIC SQL",)):

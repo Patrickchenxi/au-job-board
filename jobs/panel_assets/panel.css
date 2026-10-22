@@ -93,14 +93,13 @@ header.main-header{flex:0 0 auto;z-index:20;background:var(--surface);border-bot
  border-radius:var(--r-ctl);background:var(--surface);font-size:var(--fs-sm);color:var(--ink);cursor:pointer}
 .ctl.on{border-color:var(--accent);background:var(--accent-wash)}
 .ctl .k{color:var(--ink2)}
-.ctl select{border:0;background:transparent;font-size:var(--fs-sm);padding:0 4px;min-height:34px;cursor:pointer;outline:none;color:var(--ink)}
-.ctl select{-webkit-appearance:none;appearance:none}
-.ctl:has(>select)::after{content:"▾";margin-right:6px;pointer-events:none}
-.ctl select option{background:var(--surface);color:var(--ink)}
 .ctl.tog{padding:0 10px}
 .ctl input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 button.ctl{padding:0 10px}
 .ctl .v{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.caret{font-size:var(--fs-xs);color:var(--ink3);transition:transform var(--t-fast) var(--ease)}
+.choicepick{position:relative}
+.choicepick>[aria-expanded="true"] .caret{transform:rotate(180deg)}
 .fbtn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--line2);
  border-radius:var(--r-ctl);background:var(--surface);cursor:pointer;font-size:var(--fs-sm)}
 .fbtn[aria-expanded="true"]{background:var(--accent-wash);color:var(--accent-ink);border-color:var(--accent)}
@@ -120,7 +119,7 @@ a.clear{color:var(--bad);text-decoration:none;font-size:var(--fs-sm);white-space
 .fgroup{border:0;margin:0;padding:0;flex:1 1 300px;min-width:0}
 .fgroup legend{padding:0;font-size:var(--fs-xs);font-weight:700;color:var(--ink2);margin-bottom:8px}
 .fgroup legend span{font-weight:400;color:var(--ink3)}
-.more-foot{flex:1 1 100%;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.more-foot{display:none}
 .chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 20px 10px}
 .chips-label{font-size:var(--fs-sm);color:var(--ink2)}
 .achip{display:inline-flex;align-items:center;gap:2px;height:28px;padding:0 2px 0 10px;border-radius:14px;
@@ -131,14 +130,24 @@ a.clear{color:var(--bad);text-decoration:none;font-size:var(--fs-sm);white-space
 /* 技能多选：下拉面板，**默认收起**。相当一部分岗位一个技术词都没有，
    默认展开会给人「岗位被藏了」的错觉（和「只排序不排除」同一条原则）。 */
 .skillpick{position:relative}
-.skillpanel{position:absolute;top:calc(100% + 5px);left:0;z-index:210;display:none;
+.skillpanel,.choicepanel,.geo-suggest-panel{position:absolute;top:calc(100% + 5px);left:0;z-index:210;display:none;
  background:var(--surface);border:1px solid var(--line2);border-radius:var(--r-ctl);
  box-shadow:0 8px 24px var(--shadow);padding:6px;min-width:240px;
  max-height:300px;overflow-y:auto;overscroll-behavior:contain}
-.skillpanel.open{display:block}
+.skillpanel.open,.choicepanel.open,.geo-suggest-panel.open{display:block}
+.choicepanel{min-width:180px;max-width:min(320px,calc(100vw - 32px))}
+#tail-filters .choicepanel{left:auto;right:0}
+.geo-suggest-panel{min-width:240px;max-width:min(360px,calc(100vw - 32px))}
 .skillopt{display:flex;gap:6px;align-items:center;white-space:nowrap;padding:5px 6px;border-radius:var(--r-ctl);font-size:var(--fs-sm);cursor:pointer}
 .skillopt:hover{background:var(--accent-wash)}
 .skillopt .skc{color:var(--ink3);font-family:var(--mono);font-size:var(--fs-xs);margin-left:auto;padding-left:12px}
+.choiceopt,.geoopt{display:flex;align-items:center;gap:8px;width:100%;min-height:34px;padding:6px 9px;border:0;
+ border-radius:var(--r-ctl);background:transparent;color:var(--ink);text-align:left;font:inherit;font-size:var(--fs-sm);cursor:pointer}
+.choiceopt:hover,.choiceopt:focus-visible,.geoopt:hover,.geoopt:focus-visible{background:var(--accent-wash);outline:none}
+.choiceopt.sel{background:var(--accent-tint);color:var(--accent-ink);font-weight:600}
+.choice-label{min-width:0}
+.choice-check{margin-left:auto;visibility:hidden;font-family:var(--mono);font-size:var(--fs-xs)}
+.choiceopt.sel .choice-check{visibility:visible}
 
 /* ---- 视图说明条：一句话口径 + 统计 + 上次抓取 ---------------------------- */
 .ctxbar{flex:0 0 auto;display:flex;align-items:center;gap:8px 20px;flex-wrap:wrap;padding:9px 20px;
@@ -176,6 +185,7 @@ body.resizing *{user-select:none!important}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-box);padding:12px 14px;cursor:pointer;flex:0 0 auto;scroll-margin-block:56px}
 .card:hover{border-color:var(--line3)}
 .card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.sel:focus-visible{outline:none}
 .card.hidden{display:none}
 /* 推荐视图里，本次会话（since 之后）标过的卡片仍留在列表中 —— 那是保证
    翻页不跳条目的前提（见 _unlabelled_at）。变灰表示「这条已经处理过了」。 */
@@ -306,7 +316,6 @@ body.portrait .copy-btn{min-height:44px}
 .q-title{font-weight:600}
 .q-sum{color:var(--ink3)}
 .qualification[data-corrected="true"] .q-sum{color:var(--accent-ink);font-weight:600}
-.q-hist{font-size:var(--fs-xs);padding:0 7px;border-radius:var(--r-ctl);background:var(--chip);color:var(--ink2)}
 .q-body{padding:6px 0 2px 18px;display:flex;flex-direction:column;gap:6px}
 .q-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .q-segs{flex:0 1 260px}
@@ -317,9 +326,6 @@ body.portrait .copy-btn{min-height:44px}
 /* 机器默认选中：虚线描边，不是实底 —— 一眼区分「分析结果」与「人工纠正」 */
 .qualification[data-corrected="false"] .seg.on{background:var(--surface);color:var(--ink);font-weight:600;
  border:1px dashed var(--ink3);box-shadow:none}
-.history{margin-top:4px;padding:8px 10px;border-radius:var(--r-ctl);background:var(--surface);border:1px dashed var(--line2)}
-.history b{font-size:var(--fs-xs);color:var(--ink2)}
-.history ul{margin:4px 0;padding-left:18px;color:var(--ink2)}
 .note{margin-left:28px;position:relative}
 .note input{width:100%;min-height:38px;padding:6px 10px;border:1px solid var(--line2);border-radius:var(--r-ctl);
  font-size:var(--fs-sm);background:var(--surface)}
@@ -481,11 +487,19 @@ body.portrait .sheet-slot{display:flex;flex-direction:column;gap:10px}
 body.portrait .sheet-slot .filter-group{display:flex!important}
 body.portrait .more-panel .filter-group{flex-direction:column;align-items:stretch}
 body.portrait .more-panel .ctl{min-height:44px;justify-content:space-between}
-body.portrait .more-panel .ctl select{min-height:42px;font-size:16px}
-body.portrait .more-panel .skillpanel{position:static;box-shadow:none;max-height:240px;margin-top:6px}
-body.portrait .fgroup{flex:0 0 auto}
-body.portrait .more-foot{position:sticky;bottom:calc(-14px - env(safe-area-inset-bottom));background:var(--surface);padding-bottom:8px}
+body.portrait .more-panel .skillpanel,
+body.portrait .more-panel .choicepanel{position:static;width:100%;min-width:0;max-width:none;box-shadow:none;
+ max-height:240px;margin-top:6px}
+body.portrait .more-panel .skillpick,
+body.portrait .more-panel .choicepick{width:100%;min-width:0}
+body.portrait .more-panel .skillpick>button.ctl,
+body.portrait .more-panel .choicepick>button.ctl{width:100%;justify-content:space-between}
+body.portrait .more-panel .skillpick>button.ctl .v,
+body.portrait .more-panel .choicepick>button.ctl .v{margin-left:auto;max-width:60%;font-size:16px}
+body.portrait .more-foot{display:flex;position:sticky;bottom:calc(-14px - env(safe-area-inset-bottom));background:var(--surface);
+ justify-content:flex-end;gap:8px;border-top:1px solid var(--line);padding:8px 0 0;margin-top:4px}
 body.portrait .more-foot .primary-btn{flex:1 1 auto;min-height:48px;border-radius:var(--r-box)}
+body.portrait .fgroup{flex:0 0 auto}
 body.portrait.sheet-open .sheet-scrim{display:block;position:fixed;inset:0;z-index:230;background:var(--scrim)}
 
 /* ---- 设置页（左分类 / 右详情，居中留白）---------------------------------
@@ -614,7 +628,6 @@ body.settings{background:var(--paper)}
 }
 /* 底部抽屉里的控件：整行、左对齐 */
 body.portrait .more-panel .ctl.tog{justify-content:flex-start}
-body.portrait .more-panel .skillpick>button.ctl{width:100%;justify-content:space-between}
 
 /* ==========================================================================
    动效
@@ -655,6 +668,7 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
    动画结束后交还给原样式，所以「已处理」卡片的半透明不会被覆盖） */
 .card{transition:border-color var(--t) var(--ease),box-shadow var(--t) var(--ease),transform var(--t) var(--ease),opacity var(--t-slow) var(--ease)}
 @media (hover:hover){.card:hover{transform:translateY(-1px);box-shadow:0 4px 14px var(--shadow)}}
+.list.keyboard-nav .card:hover:not(.sel){border-color:var(--line);transform:none;box-shadow:none}
 .card:active{transform:translateY(0) scale(.995)}
 .list>.card{animation:rise-in var(--t-slow) var(--ease) backwards}
 .list>.card:nth-child(2){animation-delay:20ms}.list>.card:nth-child(3){animation-delay:40ms}
@@ -684,7 +698,7 @@ a.apply,.achip button,.skillopt,.note-item,.dchip,.danger-btn,.search,.note inpu
 /* 展开 / 收起的面板 */
 .more-panel.entering,.skill-edit.entering{animation:drop-in var(--t) var(--ease)}
 .more-panel.leaving,.skill-edit.leaving{animation:drop-out var(--t-fast) var(--ease-in) forwards}
-.skillpanel.open{animation:pop-in var(--t-fast) var(--ease);transform-origin:top left}
+.skillpanel.open,.choicepanel.open,.geo-suggest-panel.open{animation:pop-in var(--t-fast) var(--ease);transform-origin:top left}
 .note-menu.open{animation:fade-in var(--t-fast) var(--ease)}
 .achip{animation:pop-in var(--t) var(--ease) backwards}
 .achip.leaving{animation:chip-out 140ms var(--ease-in) forwards}
@@ -884,8 +898,10 @@ body.portrait .detail.swap>*{animation:none}
 /* 技术栈列表：手机没有列头，命中数前补「命中」 */
 .skhits-k{display:none}
 /* 竖屏筛选抽屉：每行左名称、右取值（技能按钮与下拉对齐） */
-body.portrait .more-panel .skillpick>button.ctl{justify-content:flex-start}
-body.portrait .more-panel .skillpick>button.ctl .v{margin-left:auto;max-width:60%}
+body.portrait .more-panel .skillpick>button.ctl,
+body.portrait .more-panel .choicepick>button.ctl{justify-content:flex-start}
+body.portrait .more-panel .skillpick>button.ctl .v,
+body.portrait .more-panel .choicepick>button.ctl .v{margin-left:auto;max-width:60%}
 body.portrait .more-panel .ctl select{flex:1 1 auto;min-width:0;text-align:right;text-align-last:right}
 body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁边下拉的 16px 取值对齐 */
 @media(max-width:760px){
@@ -899,62 +915,19 @@ body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁�
  .modal.update-confirm .dialog-foot{position:static}
 }
 
-/* Location filters and scope use the panel's existing controls and surfaces. */
-/* Region input and its Apply button read as one control. */
-.geo-control{display:inline-flex;align-items:stretch;min-width:0;max-width:100%}
+/* One location-search control; result blocks are separated without headings. */
+.geo-control{position:relative;display:inline-flex;align-items:stretch;min-width:0;max-width:100%}
 .geo-control .ctl{min-width:0;flex:1 1 auto;border-top-right-radius:0;border-bottom-right-radius:0;cursor:text}
 .geo-control .k{flex:0 0 auto;white-space:nowrap}
-.geo-control input{width:170px;min-width:0;max-width:100%;border:0;outline:none;background:transparent;color:var(--ink);
+.geo-control input{width:20ch;min-width:20ch;max-width:none;flex:0 0 auto;border:0;outline:none;background:transparent;color:var(--ink);
  font:inherit;min-height:34px}
 .geo-control .geo-apply{flex-shrink:0;min-height:36px;padding:0 12px;margin-left:-1px;border-top-left-radius:0;
  border-bottom-left-radius:0;color:var(--accent-ink)}
 .geo-control .ctl:focus-within{outline:2px solid var(--accent);outline-offset:-1px;position:relative;z-index:1}
 .geo-control.invalid .ctl{border-color:var(--bad-line);background:var(--bad-tint)}
 .geo-empty b{overflow-wrap:anywhere}
+.geo-divider{border:0;border-top:1px solid var(--line2);margin:14px 2px}
 .ctl:focus-within{outline:2px solid var(--accent);outline-offset:2px}
-/* One quiet line above the results; the long explanation is on demand. */
-.location-filter-hint{font-size:var(--fs-sm);color:var(--ink2);padding:0 4px;margin:0 0 6px;overflow-wrap:anywhere}
-.location-filter-hint summary{cursor:pointer;list-style:none;padding:2px 0}
-.location-filter-hint summary::-webkit-details-marker{display:none}
-.location-filter-hint summary .more{color:var(--accent-ink);white-space:nowrap}
-.location-filter-hint[open] summary .more{display:none}
-.location-filter-hint p{margin:4px 0 8px}
-.location-group>h3{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;font-size:var(--fs-sm);color:var(--ink2);
- border-bottom:1px solid var(--line);padding:10px 4px 8px;margin:4px 0 10px}
-.location-group>h3 .n{font:var(--fs-xs) var(--mono);color:var(--ink3)}
-.location-group>h3 small{font-weight:400;font-size:var(--fs-xs);color:var(--ink3)}
-.location-group[data-geo-match=match]>h3{color:var(--accent-ink)}
-/* Detail: selector + one summary line; provenance and correction fold away. */
-.location-panel{padding:10px 0 8px;margin:4px 0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
- font-size:var(--fs-sm);overflow-wrap:anywhere}
-.location-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.location-choice{font-weight:600;flex:0 0 auto}
-.location-head select{flex:1 1 220px;min-width:0;max-width:100%}
-.location-panel select,.location-panel input{display:block;width:100%;min-width:0;min-height:36px;border:1px solid var(--line2);
- border-radius:var(--r-ctl);background:var(--surface);color:var(--ink);font:inherit;padding:6px 8px}
-.location-head select{width:auto}
-.location-panel .hint{margin:6px 0;color:var(--ink2)}
-.location-panel p{margin:6px 0}
-.location-facts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--ink)}
-.location-outside{padding:6px 10px;border-radius:var(--r-ctl);background:var(--cue-wash);color:var(--cue-ink2)}
-.location-panel details{margin-top:2px}
-.location-panel summary{cursor:pointer;color:var(--ink2);padding:5px 0;width:fit-content;max-width:100%}
-.location-panel summary .tag{margin-left:4px;vertical-align:1px}
-.location-panel details[open]>summary{color:var(--ink)}
-.location-legacy p,.location-more>p{margin:4px 0 4px 14px}
-.location-legacy p{white-space:pre-wrap}
-.location-editor{margin:10px 0 4px 14px;padding-top:10px;border-top:1px dashed var(--line2)}
-.location-edit-title{font-weight:600}
-.location-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:8px 12px;margin-top:6px}
-.location-fields label{display:flex;flex-direction:column;gap:4px;color:var(--ink2)}
-.location-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
-/* Which record the actions write to; jumps back to the selector. */
-.scope-chip{display:inline-flex;align-items:center;max-width:100%;min-height:24px;padding:0 9px;border:1px solid var(--accent-line);
- border-radius:999px;background:var(--accent-wash);color:var(--accent-ink);font:inherit;font-size:var(--fs-xs);font-weight:500;
- cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.scope-chip:hover{background:var(--accent-tint)}
-.scope-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 body.portrait .geo-control{width:100%}
-body.portrait .geo-control input{width:100%}
-body.portrait .location-head select{flex-basis:100%}
-@media (max-width:520px){.location-fields{grid-template-columns:minmax(0,1fr)}}
+body.portrait .geo-control input{width:100%;min-width:0;max-width:100%;flex:1 1 auto}
+body.portrait .geo-suggest-panel{left:0;right:0;min-width:0;width:auto}

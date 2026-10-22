@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
-from . import config as config_mod, labels, location_query, location_store
+from . import config as config_mod, labels, location_query
 from . import locations, migrations, panel_data, report, run_state, skills
 
 UTC = dt.timezone.utc
@@ -146,12 +146,10 @@ def _panel_base(value):
     return value.rstrip('/') + '/'
 
 
-def panel_link(base, uid, location_id=None, filters=None):
+def panel_link(base, uid, filters=None):
     params = {'view': 'all'}
-    params.update({k: v for k, v in (filters or {}).items() if k in ('geo', 'mode')})
+    params.update({k: v for k, v in (filters or {}).items() if k == 'geo'})
     suffix = quote(uid, safe='')
-    if location_id:
-        suffix += '&location_id=' + quote(location_id, safe='')
     return base + '?' + urlencode(params) + '#' + suffix
 
 
@@ -161,35 +159,18 @@ def _human(value):
     return {k: value.get(k) for k in keys}
 
 
-def _location(value):
-    keys = ('location_id', 'raw', 'raw_original', 'precision', 'work_mode', 'source',
-            'reference_version', 'reason', 'state', 'postcode', 'locality', 'city',
-            'active', 'corrected', 'correction_at')
-    return {k: value.get(k) for k in keys}
-
-
 def serialize(conn, row, panel_base, filters):
-    selected = row.get('_location') or {}
-    places = []
-    for place in row['_locations']:
-        item = _location(place)
-        target = locations.parse_target(filters['geo']) if filters.get('geo') else None
-        item['match'] = locations.classify(place, target, filters.get('mode') or 'any')
-        item['human'] = _human(location_store.label_for(conn, row['uid'], place['location_id']))
-        places.append(item)
     keys = ('uid', 'source', 'title', 'company', 'location', 'url', 'salary', 'work_type',
             'listing_date', 'first_seen_at', 'last_seen_at', 'dedupe_group', 'tier', 'total_score',
             'skills', 'tags', 'is_excluded', 'rule_id', 'rule_kind', 'matched_text', 'reasons',
             'decision_rules_version', 'decided_at', 'eligibility_snippet', 'eligibility_cue', 'qualification')
     out = {k: row.get(k) for k in keys}
     out.update(description=row.get('description') or '', description_available=bool(row.get('description')),
-               source_id=row['uid'].partition(':')[2], selected_location_id=selected.get('location_id'),
-               match=row.get('_geo_match'), locations=places,
-               human_scope='location' if selected else 'legacy_group',
+               source_id=row['uid'].partition(':')[2],
+               location_match=row.get('_geo_match'),
+               human_scope='group',
                human=_human(row.get('_label') or {}),
-               legacy_reference={'scope': 'legacy_group', 'location_scope': 'unknown',
-                                 'human': _human(row.get('_legacy_label') or {})},
-               panel_url=panel_link(panel_base, row['uid'], selected.get('location_id'), filters))
+               panel_url=panel_link(panel_base, row['uid'], filters))
     return out
 
 
@@ -359,9 +340,8 @@ class AgentAPI:
                 pool = [r for r in kept+excluded if candidates is None or r['uid'] in candidates]
                 records = {}
                 for row in pool:
-                    chosen = location_query.choose(location_query.options(conn, row['uid']), filters) if location_query.enabled(filters) else None
-                    decorated = location_query.decorate(conn, row, legacy, index,
-                                                        chosen[1] if chosen else None, chosen[0] if chosen else None)
+                    target = locations.parse_target(filters['geo']) if filters.get('geo') else None
+                    decorated = location_query.decorate(conn, row, legacy, index, target=target)
                     records[row['uid']] = serialize(conn, decorated, self.panel_base, filters)
                 for row in rows:
                     records[row['uid']] = serialize(conn, row, self.panel_base, filters)
@@ -390,7 +370,7 @@ class AgentAPI:
         return self.store.page(self.store.create(lambda: self._materialize(query)))
 
     def detail(self, uid, qs):
-        if set(qs) - {'snapshot_id', 'location_id'} or any(len(v) != 1 for v in qs.values()):
+        if set(qs) - {'snapshot_id'} or any(len(v) != 1 for v in qs.values()):
             raise APIError('invalid_query')
         sid = (qs.get('snapshot_id') or [None])[0]
         if 'snapshot_id' in qs and not sid:
@@ -411,16 +391,6 @@ class AgentAPI:
                     as_of = utcnow()
                 finally:
                     conn.close()
-        if 'location_id' in qs:
-            lid = qs['location_id'][0]
-            place = next((p for p in result['locations'] if p['location_id'] == lid), None)
-            if lid and place is None:
-                raise APIError('location_not_found', 404)
-            result.update(selected_location_id=lid or None, human_scope='location' if lid else 'legacy_group',
-                          human=copy.deepcopy(place['human'] if lid else result['legacy_reference']['human']),
-                          match=place['match'] if place else None)
-            result['panel_url'] = panel_link(self.panel_base, uid, lid)
-            result['qualification'] = labels.qualification(result, result['human'])
         return {'api_version': 1, 'as_of': as_of, 'snapshot_id': sid, 'item': result}
 
     def batches(self, batch_id, qs):
@@ -545,12 +515,15 @@ def read_token(path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
+    parser.add_argument('--rules')
     parser.add_argument('--token-file', required=True)
     parser.add_argument('--port', type=int, default=8091)
     parser.add_argument('--panel-url', default='http://127.0.0.1:8090/')
     args = parser.parse_args(argv)
     try:
         config = config_mod.load_config(args.config)
+        config['rules_path'] = str(Path(args.rules).resolve() if args.rules
+                                   else config_mod.ROOT / 'rules.yaml')
         token = read_token(args.token_file)
         # Fail before listening if the installation is missing/outdated.
         conn = read_connection(config_mod.db_path(config)); conn.close()

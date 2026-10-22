@@ -93,17 +93,14 @@ def test_layout() -> None:
     print("\n== 筛选摆放 ==")
     for view, allowed in panel.VIEW_FILTER_KEYS.items():
         primary, groups = panel.filter_layout(view)
-        placed = set(primary) | set(groups["label"]) | set(groups["job"]) | set(groups["history"])
-        rest = set(allowed) - {"q", "sort"}
-        check(f"{view}：常驻 + 更多筛选 = 允许的筛选", placed == rest,
+        placed = set(primary) | set(groups["label"]) | set(groups["job"])
+        rest = set(allowed) - {"q", "sort", "interest"}
+        check(f"{view}：常驻 + 更多筛选 = 可见筛选", placed == rest,
               f"{sorted(placed)} vs {sorted(rest)}")
+        check(f"{view}：界面不展示旧兴趣筛选", "interest" not in placed)
     check("推荐视图没有「更多筛选」", not any(panel.filter_layout("recommend")[1].values()))
-    for view in ("all", "labelled"):
-        primary, groups = panel.filter_layout(view)
-        check(f"{view}：旧兴趣只在历史组，不与处理状态并列",
-              groups["history"] == ["interest"] and "interest" not in primary + tuple(groups["label"]))
-    check("已标注视图常驻处理状态与优先待投",
-          panel.filter_layout("labelled")[0][:2] == ("action", "priority"))
+    check("已标注视图按地点、处理状态、优先待投、技能排列",
+          panel.filter_layout("labelled")[0] == ("geo", "action", "priority", "skill"))
 
 
 def test_render() -> None:
@@ -168,15 +165,20 @@ def test_render() -> None:
               and 'class="seg on bad"' not in skipped_detail)
         check("跳过：状态行说明已处理", "Processed: Skipped" in skipped_detail)
 
-        # v1.2.3 C: legacy/unsure records, contradicting corrections and stars on cards
+        # v1.2.3 C: legacy database values stay compatible but no longer appear in the UI.
         database.replace_decision(conn, "seek:b", 1, "synthetic.rule")
         conn.commit()
         labels_mod.set_label(conn, "seek:b", source="cli", interest="maybe", note="legacy")
         conn.execute("UPDATE labels SET eligibility='unsure' WHERE uid='seek:b'")
         conn.commit()
         legacy = panel._detail_html(panel._find(conn, {}, "seek:b"), "zh")
-        check("旧待定/旧兴趣：只在折叠区回看，不是可选项",
-              "资格：待定" in legacy and "兴趣：也许" in legacy and "有旧记录" in legacy
+        stored = conn.execute(
+            "SELECT interest, eligibility FROM labels WHERE uid='seek:b'").fetchone()
+        check("旧待定/旧兴趣仍原样保存在后端",
+              tuple(stored) == ("maybe", "unsure"), str(tuple(stored)))
+        check("旧待定/旧兴趣及历史块不再出现在详情",
+              all(text not in legacy for text in
+                  ("资格：待定", "兴趣：也许", "有旧记录", "旧版记录", 'class="history"', 'class="q-hist"'))
               and "'eligibility','unsure'" not in legacy and "'interest'," not in legacy)
         check("旧待定不算人工纠正：摘要按分析结果，排除说明给出纠正方式",
               'data-corrected="false"' in legacy and "不可投 · 分析结果" in legacy
@@ -187,7 +189,7 @@ def test_render() -> None:
         page = panel.render_page(conn, {}, "all", 0, 40, None, {}, "zh", None)
         card_b = page[page.index('data-uid="seek:b"'):]
         card_b = card_b[:card_b.find('<div class="gutter"')]
-        check("与排除结果相反的人工可投在卡片上提示", '>人工：可投</span>' in card_b)
+        check("与排除结果相反的人工可投在卡片上提示", '>人工判定：可投</span>' in card_b)
         check("星标在卡片上可见（未处理也可有星标）",
               re.search(r'class="card-star" data-star-uid="seek:b"[^>]*>★', card_b) is not None
               and re.search(r'class="prog "[^>]* hidden>', card_b) is not None)

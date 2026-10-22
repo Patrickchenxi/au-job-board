@@ -146,9 +146,6 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
-from .location_store import SCHEMA as LOCATION_SCHEMA
-SCHEMA += LOCATION_SCHEMA
-
 # 元数据字段：抓取时若已有非空值，不要用空值覆盖
 META_FIELDS = (
     "title", "company", "location", "url", "salary",
@@ -181,7 +178,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
             conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         else:
             # Later upgrades only add their own schema, leaving existing
-            # business tables and structured-location facts untouched.
+            # business tables and human records untouched.
             conn.execute("BEGIN IMMEDIATE")
         migrations.upgrade(conn)
         conn.commit()
@@ -221,8 +218,6 @@ def upsert_job(conn: sqlite3.Connection, job: dict) -> str:
                 desc or None, now if desc else None, now, now, raw,
             ),
         )
-        from .location_store import sync_job
-        sync_job(conn, uid)
         return "inserted"
 
     # 更新：元数据只在有新值时覆盖
@@ -244,8 +239,6 @@ def upsert_job(conn: sqlite3.Connection, job: dict) -> str:
     vals.append(now)
     vals.append(uid)
     conn.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE uid = ?", vals)
-    from .location_store import sync_job
-    sync_job(conn, uid)
     return "updated"
 
 

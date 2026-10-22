@@ -431,6 +431,9 @@ def cmd_report(args) -> int:
     # CLI analysis uses --skills (or the default vocabulary), so report labels
     # must use that same vocabulary rather than a panel-only config path.
     config["skills_path"] = args.skills
+    config["rules_path"] = (
+        getattr(args, "rules", None)
+        or str(Path(__file__).resolve().parent.parent / "rules.yaml"))
     if not (config.get("report")):
         config["report"] = {}
     info = write_report(conn, config)
@@ -616,7 +619,6 @@ def cmd_label(args) -> int:
     if args.export:
         info = labels_mod.export(conn, out_dir)
         print(f"[label] 导出 {info['count']} 条标注 -> {info['csv']} / {info['md']}")
-        print(f"[label] 地点记录 {info['location_count']} 条及纠正/事件 -> {info['locations']}")
         return 0
 
     if args.export_fixtures:

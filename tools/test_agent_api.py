@@ -17,7 +17,7 @@ from unittest.mock import patch
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jobs import agent_api as api, agent_client, batches, db, labels, location_store, panel_data
+from jobs import agent_api as api, agent_client, batches, db, labels, panel_data
 
 TOKEN = 'synthetic-api-token-not-a-real-secret-000000'
 
@@ -30,13 +30,15 @@ class AgentAPI(unittest.TestCase):
         self.skills = self.root/'skills.yaml'; self.skills.write_text('skills: []\n')
         self.config = {'db_path': str(self.path), 'skills_path': str(self.skills), 'panel': {'page_size': 40}}
         with closing(db.connect(self.path)) as conn:
-            for uid, loc, score in [('a', 'Sydney NSW / Melbourne VIC', 9), ('b', 'Sydney NSW', 20), ('c', 'Undisclosed', 2)]:
+            for uid, loc, score in [
+                    ('a', 'Melbourne VIC / Sydney NSW', 9),
+                    ('b', 'Sydney NSW', 20),
+                    ('c', 'Undisclosed', 2)]:
                 self.job(conn, uid, loc, score)
             db.set_dedupe(conn, 'synthetic:a', 'synthetic-group', 'synthetic-group')
             db.set_dedupe(conn, 'synthetic:b', 'synthetic-group', 'synthetic-group')
-            labels.set_label(conn, 'synthetic:a', action='applied', note='Synthetic legacy context')
-            self.lid = next(x['location_id'] for x in location_store.locations_for(conn, 'synthetic:a') if 'Melbourne' in x['raw'])
-            conn.execute('BEGIN IMMEDIATE'); location_store.set_label(conn, 'synthetic:a', self.lid, 'note', 'Synthetic Melbourne note'); conn.commit()
+            labels.set_label(conn, 'synthetic:a', action='applied',
+                             note='Synthetic group context')
         self.clock = [100.]
         self.store = api.SnapshotStore(clock=lambda: self.clock[0])
         self.server = api.make_server(self.config, TOKEN, port=0, store=self.store, panel_url='http://127.0.0.1:8299/')
@@ -102,23 +104,27 @@ class AgentAPI(unittest.TestCase):
         self.assertEqual(self.request('/api/v1/jobs/synthetic%3Alater?snapshot_id='+sid)[0], 404)
         self.assertEqual(self.request('/api/v1/jobs/'+quote(first_uid,safe=''))[1]['item']['description'], 'Changed after snapshot')
 
-    def test_filter_parity_folded_source_and_human_scope(self):
+    def test_filter_parity_folded_source_and_group_scope(self):
         result = self.first('?geo=Melbourne%20VIC')
         with closing(api.read_connection(self.path)) as conn:
             expected, total = panel_data._query(conn, self.config, 'all', 0, 100, {'geo':'Melbourne VIC'})
         self.assertEqual([r['uid'] for r in result['items']], [r['uid'] for r in expected])
         self.assertEqual(result['total'], total)
         row = next(r for r in result['items'] if r['uid']=='synthetic:a')
-        self.assertEqual(row['selected_location_id'], self.lid); self.assertIsNone(row['human']['action'])
-        self.assertIn('Synthetic Melbourne note', row['human']['note'])
-        self.assertEqual(row['legacy_reference']['human']['action'], 'applied')
-        self.assertIn('synthetic%3Aa&location_id='+self.lid, row['panel_url'])
+        self.assertEqual(row['human_scope'], 'group')
+        self.assertEqual(row['human']['action'], 'applied')
+        self.assertIn('Synthetic group context', row['human']['note'])
+        self.assertNotIn('location_id=', row['panel_url'])
+        self.assertEqual(row['location_match'], 'near')
         all_result = self.first()
-        self.assertNotIn('synthetic:a', {r['uid'] for r in all_result['items']})
-        status, detail, _ = self.request('/api/v1/jobs/synthetic%3Aa?snapshot_id='+all_result['snapshot_id'])
-        self.assertEqual(status, 200); self.assertEqual(detail['item']['uid'], 'synthetic:a')
-        status, detail, _ = self.request('/api/v1/jobs/synthetic%3Aa?snapshot_id='+all_result['snapshot_id']+'&location_id='+self.lid)
-        self.assertEqual(status, 200); self.assertIsNone(detail['item']['human']['action'])
+        all_uids = {r['uid'] for r in all_result['items']}
+        self.assertIn('synthetic:a', all_uids)
+        self.assertNotIn('synthetic:b', all_uids)
+        status, detail, _ = self.request('/api/v1/jobs/synthetic%3Ab?snapshot_id='+all_result['snapshot_id'])
+        self.assertEqual(status, 200); self.assertEqual(detail['item']['uid'], 'synthetic:b')
+        self.assertEqual(detail['item']['human']['action'], 'applied')
+        self.assertEqual(self.request(
+            '/api/v1/jobs/synthetic%3Ab?snapshot_id='+all_result['snapshot_id']+'&location_id=old')[0], 400)
 
     def test_cursor_tampering_query_binding_expiry_and_restart(self):
         result = self.first('?limit=1'); cursor = result['next_cursor']
@@ -201,6 +207,26 @@ class AgentAPI(unittest.TestCase):
         status,data,_=self.request('/api/v1/batches?limit=1')
         self.assertEqual(status,200);self.assertEqual(len(data['items']),1);self.assertEqual(data['next_offset'],1)
 
+    def test_scoped_group_membership_is_identical_with_location_filter(self):
+        with closing(db.connect(self.path)) as conn:
+            self.job(conn, 'mixed-kept', 'Carlton VIC', 8)
+            self.job(conn, 'mixed-excluded', 'Melbourne VIC', 4)
+            db.set_dedupe(conn, 'synthetic:mixed-kept', 'mixed-group', 'mixed-group')
+            db.set_dedupe(conn, 'synthetic:mixed-excluded', 'mixed-group', 'mixed-group')
+            db.replace_decision(conn, 'synthetic:mixed-excluded', True)
+            batch_id = batches.start_batch(conn)
+            batches.record_member(conn, batch_id, 'synthetic:mixed-kept', True)
+            batches.finish_batch(conn, batch_id, 'success')
+            conn.commit()
+        base = f'?scope=batch_new&batch_id={batch_id}&view=excluded'
+        plain = self.first(base)
+        located = self.first(base + '&geo=VIC')
+        self.assertEqual(plain['total'], located['total'])
+        self.assertEqual([row['uid'] for row in plain['items']],
+                         ['synthetic:mixed-excluded'])
+        self.assertEqual([row['uid'] for row in located['items']],
+                         ['synthetic:mixed-excluded'])
+
     def test_unfinished_batch_rejected_and_new_batch_does_not_mix_snapshot(self):
         with closing(db.connect(self.path)) as conn:
             bid=batches.start_batch(conn)
@@ -238,22 +264,18 @@ class AgentAPI(unittest.TestCase):
         with self.assertRaises(agent_client.ClientError):agent_client.read_jobs('http://example.invalid',TOKEN,{})
         with self.assertRaises(agent_client.ClientError):agent_client.read_jobs(base,'wrong',{})
 
-    def test_location_qualification_recomputed_from_frozen_machine_and_human(self):
+    def test_group_qualification_is_frozen_in_snapshots(self):
+        first = self.first()
+        sid = first['snapshot_id']
         with closing(db.connect(self.path)) as conn:
-            conn.execute('BEGIN IMMEDIATE');location_store.set_label(conn,'synthetic:a',self.lid,'eligibility','ineligible');conn.commit()
-        first=self.first();sid=first['snapshot_id']
-        for suffix in ['', '&snapshot_id='+sid]:
-            status,value,_=self.request('/api/v1/jobs/synthetic%3Aa?location_id='+self.lid+suffix)
-            self.assertEqual(status,200);item=value['item']
-            self.assertEqual(item['human']['eligibility'],'ineligible')
-            self.assertEqual(item['qualification']['effective'],'ineligible')
-            self.assertTrue(item['qualification']['corrected'])
-        with closing(db.connect(self.path)) as conn:
-            conn.execute('BEGIN IMMEDIATE');location_store.set_label(conn,'synthetic:a',self.lid,'eligibility',None);conn.commit()
-        item=self.request('/api/v1/jobs/synthetic%3Aa?location_id='+self.lid+'&snapshot_id='+sid)[1]['item']
-        self.assertEqual(item['qualification']['effective'],'ineligible')
-        legacy=self.request('/api/v1/jobs/synthetic%3Aa?location_id=&snapshot_id='+sid)[1]['item']
-        self.assertEqual(legacy['qualification']['effective'],'eligible');self.assertFalse(legacy['qualification']['corrected'])
+            labels.set_label(conn, 'synthetic:a', eligibility='ineligible')
+        live = self.request('/api/v1/jobs/synthetic%3Aa')[1]['item']
+        self.assertEqual(live['human']['eligibility'], 'ineligible')
+        self.assertEqual(live['qualification']['effective'], 'ineligible')
+        self.assertTrue(live['qualification']['corrected'])
+        frozen = self.request(
+            '/api/v1/jobs/synthetic%3Aa?snapshot_id=' + sid)[1]['item']
+        self.assertIsNone(frozen['human']['eligibility'])
 
     def test_first_failed_pipeline_without_generation_remains_confirmed(self):
         runtime=self.root/'.synthetic.db.panel-update';runtime.mkdir()

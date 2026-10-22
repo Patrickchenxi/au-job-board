@@ -185,11 +185,10 @@ async function filtersFor(name, p) {
   const withRole = (role) => { const el = new El("div"); el.closestMap[`[role="${role}"]`] = new El("div", { attrs: { role } }); return el; };
   /* 每个用例独立：上一个用例误导航时回到 B，不连锁影响后面的断言 */
   const reset = async () => { if (t.api.uid() !== "B") await t.api.openJob("B"); };
-  const location = new El("button"); location.closestMap[".location-panel"] = new El("section");
   const cases = [
     ["input", { target: new El("input") }], ["textarea", { target: new El("textarea") }],
     ["select", { target: new El("select") }], ["contenteditable", { target: new El("div", { isContentEditable: true }) }],
-    ["地点控件", { target: location }], ["分栏拖条 role=separator", { target: withRole("separator") }],
+    ["地点搜索框", { target: new El("input") }], ["分栏拖条 role=separator", { target: withRole("separator") }],
     ["dialog 内", { target: withRole("dialog") }],
     ["IME isComposing", { isComposing: true }], ["IME keyCode 229", { keyCode: 229 }],
     ["Ctrl", { ctrlKey: true }], ["Meta", { metaKey: true }], ["Alt", { altKey: true }],

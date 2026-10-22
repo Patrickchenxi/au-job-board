@@ -46,7 +46,7 @@ PYTHON_TESTS = (
     ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
     ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
     ("tools/test_locations.py", "offline Australian location reference and matching", None),
-    ("tools/test_location_state.py", "location migration, scope ownership and query boundaries", None),
+    ("tools/test_location_search.py", "group representative selection and three-block location search", None),
     ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
@@ -107,7 +107,7 @@ PYTHON_TESTS = (
 NODE_TESTS = (
     ("tools/test_panel_shortcuts.mjs", "keyboard profiles, native selection and overlay guards", None),
     ("tools/test_panel_copy.mjs", "full JD clipboard, fallback and focus preservation", None),
-    ("tools/test_panel_locations.mjs", "location switching and scoped request identity", None),
+    ("tools/test_panel_locations.mjs", "group save identity and location search behavior", None),
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),
     ("tools/test_panel_navigation.mjs",

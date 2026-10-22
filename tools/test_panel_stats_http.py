@@ -355,7 +355,23 @@ class RenderHookTests(unittest.TestCase):
             html = self.page(view)
             self.assertNotRegex(html, r'data-fkey="[^"]+"[^>]*onchange="applyFilter\(\)"')
             self.assertIn('onchange="filterChanged()"', html)
+            self.assertIn('onclick="choiceToggle(event,this)"', html)
             self.assertIn('id="more-done" onclick="moreDone()"', html)
+            if view != "recommend":
+                self.assertIn('class="fbtn more-btn"', html)
+                self.assertIn('class="more-panel"', html)
+                self.assertIn('onclick="clearHidden()"', html)
+            else:
+                # The panel remains as the mobile home for primary filters, but
+                # desktop restore is blocked and the visible more button is absent.
+                self.assertNotIn('class="fbtn more-btn"', html)
+                self.assertIn('class="more-panel sheet-only"', html)
+                self.assertIn('id="more-panel" data-keys=""', html)
+            self.assertIn(".more-foot{display:none}", html)
+            self.assertIn("body.portrait .more-foot{display:flex", html)
+            self.assertIn("body.portrait .more-panel .choicepick{width:100%;min-width:0}", html)
+            self.assertIn("body.portrait .more-panel .choicepanel{position:static;width:100%;min-width:0;max-width:none", html)
+            self.assertNotIn('<select', html)
 
 
 if __name__ == "__main__":

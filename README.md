@@ -202,7 +202,7 @@ Not verified, and the documentation does not imply otherwise:
 | [Agent-assisted installation](docs/agent-install.md) | The same steps for an AI agent |
 | [Usage guide](docs/usage.md) | Workflow, commands, local data, notes, languages |
 | [Fetch settings and updates](docs/manual-updates.md) | Editable next-run configuration and background updates from the panel |
-| [Locations and records](docs/location-workflow.md) | Offline region/work-mode filters, location-specific labels and upgrade behavior |
+| [Locations and records](docs/location-workflow.md) | Representative choice, offline location search and group-level records |
 | [Read-only agent API](docs/agent-api.md) | Authenticated loopback reads, stable pagination and an external daily-report client |
 | [Optional Docker](docs/docker.md) | Published GHCR or local image, Compose, persistent volumes and backup |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |

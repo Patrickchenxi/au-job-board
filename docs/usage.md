@@ -71,6 +71,10 @@ description, salary present, freshness, skills, tier and your own records:
 status (including "not processed"), the ★ priority queue, eligibility
 correction and label status. Legacy interest sits in a separate History group
 under More filters; old `interest=` links still work.
+All, New, Excluded and Labelled also provide one location box for an Australian
+postcode, suburb, capital city, state or `Australia`. Results are grouped in
+exact, same-state coarse and unknown blocks with dividers; the recommended view
+does not offer location search. See [Locations and records](location-workflow.md).
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
@@ -78,13 +82,13 @@ for eligibility-related requirements, and a link to the original posting.
 Their keyboard shortcuts are chosen in **Settings → Display → Keyboard
 shortcuts**: Default `←` / `→`, Vim `K` / `J`, or Gamer `A` / `D`. Only the
 chosen set works, and the button hints show it. Keys typed in text fields,
-menus, the location controls and open dialogs or drawers never switch jobs, and
+menus, the location search box and open dialogs or drawers never switch jobs, and
 unsaved or saving notes are protected as with the buttons.
 
 **Copy job** in the detail header copies plain text for pasting into another
-tool such as an AI assistant: UID, title, company, location (plus the current
-record location when one is selected), listing link and the complete stored
-description, not the on-screen rendering. Copying changes no job or label. If
+tool such as an AI assistant: UID, title, company, listing location, listing
+link and the complete stored description, not the
+on-screen rendering. Copying changes no job or label. If
 the browser blocks clipboard access (for example over plain HTTP from another
 device), a dialog shows the same text selected for manual copying.
 

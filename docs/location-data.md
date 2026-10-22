@@ -1,9 +1,9 @@
 # Offline Australian location reference
 
-`jobs.locations` parses location text using bundled public reference data. It
-does not fetch data at runtime, open a database or assert that a place is an
-office. The input examples and regression tests are hand-written synthetic
-strings; the geographical seed is public reference data, not job data.
+`jobs.locations` resolves supported search terms with bundled public reference
+data. It does not fetch at runtime, open a database, store parsed locations or
+assert that a place is an office address. All examples and tests use
+hand-written synthetic strings.
 
 ## Source, license and snapshot
 
@@ -11,138 +11,113 @@ Contains data from [GeoNames](https://www.geonames.org/), licensed under
 [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
 The [official postal-code readme](https://download.geonames.org/export/zip/readme.txt)
 identifies this license and states that accuracy, timeliness and completeness
-are not guaranteed. Attribution must accompany redistributed data. GeoNames is
-the publisher of this reference, not an Australian postal authority.
+are not guaranteed. GeoNames is the publisher of this reference, not an
+Australian postal authority.
 
 - Source: [AU.zip](https://download.geonames.org/export/zip/AU.zip), downloaded
-  2026-10-22 UTC together with the official readme.
+  2026-10-22 UTC with the official readme.
 - Archive SHA-256:
   `fc6264334dab43ac67e3b6950bcd733918681b0158e65412448e59fcec054ded`.
 - Readme SHA-256:
   `fff60148da20f4d182859d926518efa5b0f3949f3c3273a284901325f1f8f008`.
-- `AU.txt` contains 18,521 source rows; 18,514 distinct triples remain after
-  projection to `postcode`, `locality`, `state`, deduplication and sorting.
+- `AU.txt` has 18,521 rows; 18,514 distinct `postcode`, `locality`, `state`
+  triples remain after projection, deduplication and sorting.
 - Seed SHA-256:
   `011ef7d2b65ba2a06af66f43e8ab4f1522e7083b33f5702826681b4b1a0f45ce`.
-- Reference version: `geonames-au-011ef7d2b65ba2a0` (seed hash prefix).
+- Reference version: `geonames-au-011ef7d2b65ba2a0`.
 
 The machine-readable [manifest](../jobs/data/location-reference.json) records
-URLs, download timestamp, Last-Modified headers, byte counts, hashes, source
-row count, transformation, attribution and seed schema. The
-[TSV](../jobs/data/au-postcodes.tsv) has exactly three columns. All coordinates,
-coordinate accuracy and lower administrative fields have been removed. Neither
-the source archive nor source job text is shipped in this seed.
+URLs, download time, response metadata, byte counts, hashes, source row count,
+attribution and seed schema. The [TSV](../jobs/data/au-postcodes.tsv) contains
+only postal code, locality and state. Coordinates and lower administrative
+fields were removed.
 
-Postal codes remain four-character strings, including `0800`. The relationship
-is many-to-many: `2620` has ACT and NSW entries; `0872` has NT, SA and WA entries.
-These are GeoNames associations, not inferred legal boundaries. Even entries
-for external territories retain the publisher's state associations. No state
-is guessed from a postcode prefix, and no metro area is guessed from a point.
+Postal codes stay four-character strings, including `0800`. The relationship is
+many-to-many: `2620` has ACT and NSW rows; `0872` has NT, SA and WA rows. These
+are publisher associations, not inferred boundaries.
 
-The manifest also contains a small, hand-maintained semantic list of eight
-state/territory capitals: Adelaide, Brisbane, Canberra, Darwin, Hobart,
-Melbourne, Perth and Sydney. This list recognizes city-level inputs; it is not
-a metro boundary dataset. Other supported place names use GeoNames locality
-precision. With an explicit other state, a capital name can instead resolve to
-a supported locality (for example `Perth TAS`).
+Eight capital cities have a separately maintained CBD postcode:
 
-## API contract
+| Capital | State/territory | CBD postcode |
+|---|---|---|
+| Adelaide | SA | 5000 |
+| Brisbane | QLD | 4000 |
+| Canberra | ACT | 2600 |
+| Darwin | NT | 0800 |
+| Hobart | TAS | 7000 |
+| Melbourne | VIC | 3000 |
+| Perth | WA | 6000 |
+| Sydney | NSW | 2000 |
+
+The mapping is explicit because postal-box and other special postcodes in the
+seed cannot be used to infer a CBD. Other supported place names use GeoNames
+locality precision.
+
+## Search contract
 
 ```python
-from jobs.locations import parse_locations, parse_target, classify
+from jobs.locations import match_tier, parse_listing, parse_target
 
-locations = parse_locations("Sydney NSW Hybrid / Melbourne VIC Remote")
-target = parse_target("VIC")
-matching_locations = [loc for loc in locations
-                      if classify(loc, target, "remote") == "match"]
-assert [loc["city"] for loc in matching_locations] == ["Melbourne"]
+target = parse_target("3053")
+tier = match_tier(parse_listing("Melbourne VIC"), target)
+assert tier == "near"
 ```
 
-`parse_locations(raw: str | None, work_type: str | None = None) -> list[dict]`
-returns at least one item. Missing text yields an unknown item. Each item has
-`raw`, `precision`, `work_mode`, `source`, `reference_version` and `reason`.
-Applicable geographical fields are `state`, `postcode`, `locality` and `city`;
-absent fields are omitted. `state` is one uppercase code or a sorted list of
-possible codes. Unknown/conflicting inputs keep their raw evidence and reason;
-an observed unsupported postcode may remain on an item with unknown precision.
-An unresolved name with a clearly stated state retains only state-level
-precision and reason `unresolved_place_state_only`.
+`parse_target(text) -> dict` accepts one of:
 
-`precision` is one of `postcode`, `locality`, `city`, `state`, `country`,
-`unknown`. An explicit supported postcode provides postcode precision. A
-locality resolves only when its name and optional state yield one distinct
-postcode/state relation. Several relations remain ambiguous, including several
-postcodes within one state; this seed does not identify whether those rows
-describe one locality or namesakes. An explicit postcode can disambiguate a
-supported name. A name inconsistent with the postcode remains unknown rather
-than inventing a metro relationship. `Melbourne` alone has city precision and
-does not become postcode `3000`.
+- an Australian postcode;
+- a locality, including an ambiguous locality such as `Carlton`;
+- one of the eight capital cities;
+- a state or territory abbreviation or full name;
+- `Australia` or `澳大利亚`.
 
-`raw` preserves the input for one unsplit item; alternative segments retain
-their original interior text, with surrounding whitespace/separators removed.
-Alternatives split on `/`, `;`, `|`, newlines, `and` and `&` outside parentheses.
-Comma-separated recognized places split, while `Richmond, VIC, 3121` remains
-one location. The parser intentionally supports a small structured-text grammar,
-not arbitrary prose or street addresses. Unsupported residue is kept in raw
-text and may reduce precision.
+Work-mode markers and multiple alternatives such as
+`Melbourne VIC / Sydney NSW` are rejected as search terms.
 
-`work_mode` is `remote`, `hybrid`, `onsite` or `unknown`. Explicit mode markers
-belong to their own segment. `Remote NSW / Melbourne VIC Onsite` therefore
-has no VIC+remote match. `Sydney NSW Hybrid / Melbourne VIC Remote` does have
-one. Missing modes never borrow another segment's Remote marker. `on-site`,
-`on site`, `WFH` and `work from home` are recognized. Conflicting or simply
-negated markers remain unknown and cannot be replaced by a generic fallback.
-This is not a general natural-language negation parser.
+Required mapping:
 
-An independent generic `work_type` can supply a missing mode. Supported generic
-text consists of mode markers, punctuation and optional employment words:
-`full time`, `part time`, `fixed term`, `contract`, `casual`, `permanent`,
-`temporary`, `internship`, `fully`. Thus `Full-time` supplies no mode;
-`Full-time, Remote` supplies remote; `Remote NSW` supplies no generic mode
-because it has a geographic restriction. Explicit per-location modes win.
+| Search | `exact` | `near` | `unknown` |
+|---|---|---|---|
+| Capital / CBD postcode | the CBD postcode | any other recognised place in that state | no recognised place |
+| Suburb / non-CBD postcode | the selected locality/postcode | city- or state-level precision in a matching state | no recognised place |
+| State | that state | — | no recognised place |
+| Australia | any recognised state | — | no recognised place |
 
-`parse_target(text) -> dict` accepts one supported postcode, state abbreviation
-or full name, known city or unique locality, including optional qualifiers. It
-includes the original `raw`, precision and reference provenance. Blank input,
-unsupported postcodes, conflicting fields, ambiguous localities, countries,
-work-mode markers and multiple locations raise a user-readable `ValueError`.
-To clear geography, pass `target=None` to `classify`; a blank target is an
-input error rather than silently clearing the user's filter.
+An established place in another state is `hidden`. Clearing the search passes
+`target=None`; a blank target is an input error rather than silently clearing
+the box.
 
-`classify(location, target=None, work_mode='any') -> str` classifies exactly
-one item. Parent code must select matching locations before aggregating jobs
-or choosing an action scope. Work mode must be `any`, `remote`, `hybrid` or
-`onsite`; other values raise `ValueError`. A-style dictionaries containing
-only `state`, `postcode` or `city` are accepted as targets; an empty target
-dictionary also clears geography.
+`parse_listing(raw) -> dict` returns one query-time fact for the first listed
+location. It removes observed work-mode words for geography parsing but does not
+assign a work mode. It recognizes explicit postcodes, a known state at an edge,
+capital city names, `Melbourne City Centre` / CBD wording, and exact locality
+names within a state. Missing or unresolved state evidence is `unknown`.
 
-- `match`: sufficient geographic evidence and a compatible explicit mode if
-  one was requested. With no geographic or mode filter every item is `match`,
-  including unknown items.
-- `related`: geography is compatible but coarser, metro membership is unknown,
-  a cross-state set only partly overlaps, or the mode is unknown on an
-  otherwise matching item. A bare postcode is broader than a target locality.
-- `unknown`: location evidence is unresolved, ambiguous or conflicting under
-  an active geographic filter. Raw evidence remains available.
-- `hidden`: an established state/postcode/name or explicit mode excludes this
-  item. An explicit incompatible mode also hides unknown geography.
+Supporting examples:
 
-A city is broader than a postcode; a locality and a same-state city remain
-related without verified metro membership. Remote mode does not remove stated
-state restrictions. Clearing geography while retaining a mode still applies
-that mode; clearing both returns `match` for every item. The A aggregation
-order for the parent is `match`, `related`, `unknown`, then `hidden` only when
-all locations are hidden. A job-level aggregate must not supply the location
-scope for an edit.
+- `Melbourne VIC` is city precision and does not become postcode `3000`.
+- `Melbourne City Centre VIC` is postcode precision `3000`.
+- `Carlton VIC` resolves to the VIC locality; unqualified `Carlton` can match
+  the VIC, NSW and TAS namesakes when used as a search target.
+- A state-qualified search does not admit another state's namesake:
+  `Carlton VIC` does not exactly match Carlton NSW. The same state check applies
+  to shared postcodes such as 2620.
+- Known suburbs win before the capital-prefix fallback, so
+  `Melbourne Airport VIC` and `Sydney Olympic Park NSW` remain locality searches.
+- `Sydney NSW Hybrid / Melbourne VIC Remote` is parsed as Sydney for search.
+  The raw string remains available for display.
+- `Geelong VIC` has locality postcode evidence and is not a coarse fallback for
+  a `Melbourne` capital search.
+
+The parser handles common listing location/spelling forms, not arbitrary prose,
+street addresses, real office locations, metro boundaries or distance.
 
 ## Reproducing the seed
 
-The following in-memory transformation reproduces the TSV for the same upstream
-bytes. It writes no files. GeoNames changes over time: compare archive/readme
-hashes with the manifest before treating a new download as the same snapshot.
-A deliberate refresh must update provenance, seed hash, version and tests
-together. Runtime loading checks the bundled seed hash and schema; a broken
-installation raises rather than silently becoming an empty reference.
+The following in-memory transformation reproduces the TSV. GeoNames changes
+over time; compare archive and readme hashes before treating a new download as
+the same snapshot. A deliberate refresh must update provenance, seed hash,
+version and tests together.
 
 ```python
 import csv, hashlib, io, urllib.request, zipfile
@@ -166,26 +141,17 @@ seed = ("postcode\tlocality\tstate\n" +
 print("seed", len(triples), hashlib.sha256(seed).hexdigest())
 ```
 
-## Verification and delivery
+## Verification
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tools/test_locations.py
 ```
 
-The tests block network/downloads and SQLite access. Inputs are newly written
-synthetic strings; assertions against the bundled GeoNames seed check public
-reference relations and integrity. Coverage includes both A Remote failures,
-unknown/fallback modes, geographic restrictions in work type, ambiguity,
-leading zeros, unsupported/conflicting targets, cross-state postcodes, mixed
-precision, raw preservation, comma grouping, filter clearing, A-style target
-compatibility, broken-reference failure and per-location selection. They do not
-establish accuracy for arbitrary job prose, completeness
-of GeoNames, actual office locations, street-address geocoding, metro boundaries,
-distance, production data or end-to-end UI/API behavior.
+The coverage includes capital/CBD behavior, postcode order, ambiguous locality
+names, same-state fallback, state and country searches, unknown rows, first
+location only, seed integrity, malformed input and local-preference patterns.
+It does not establish accuracy for arbitrary source prose, production-office
+coverage or places absent from the public reference.
 
-The module has no persistence, schema, query, HTTP or UI responsibilities.
-Those are covered separately by the location state, HTTP and panel checks in
-the explicit [public runner](public-tests.md). See the
-[location workflow](location-workflow.md) for storage and upgrade behavior.
-The Git and Docker allowlists explicitly include only the two bundled reference
-files under `jobs/data/`; runtime databases and private exports stay excluded.
+The module has no persistence, database, HTTP or UI responsibility. Those
+boundaries are covered by the explicit [public test runner](public-tests.md).

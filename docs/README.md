@@ -13,7 +13,7 @@ English.
 | [agent-install.md](agent-install.md) | The same install steps for an AI coding agent |
 | [usage.md](usage.md) | The fetch, analyze, report and panel workflow, commands, labels and notes, local data and provenance |
 | [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |
-| [location-workflow.md](location-workflow.md) | Region/work-mode filtering, location-specific records, corrections and database upgrade/recovery |
+| [location-workflow.md](location-workflow.md) | Group representative choice, one-box location search, block ordering and limits |
 | [location-data.md](location-data.md) | Offline Australian reference data, attribution, precision and matching limits |
 | [agent-api.md](agent-api.md) | Authenticated read-only HTTP snapshots, exact batches and external report clients |
 | [public-configuration.md](public-configuration.md) | The configuration file, paths, sources and which files stay private |

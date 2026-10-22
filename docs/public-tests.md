@@ -44,11 +44,11 @@ nothing in the suite fetches listings.
 |---|---|---|
 | `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
 | `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
-| `tools/test_location_http.py` | Location HTTP scope, invalid region guidance and same-origin protection | all |
-| `tools/test_locations.py` | Offline Australian geography, ambiguity and per-location work modes | all |
-| `tools/test_location_state.py` | Location upgrade, independent human state, frozen grouping and retained history | all |
-| `tools/test_panel_location_views.py` | Location selection, maintenance disclosure and translated region guidance | all |
-| `tools/test_panel_locations.mjs` | Location switching, scoped save identity and draft protection | all |
+| `tools/test_location_http.py` | Group-level writes, location query guidance and same-origin protection | all |
+| `tools/test_locations.py` | Offline Australian geography, ambiguity and three-tier matching | all |
+| `tools/test_location_search.py` | Representative selection, block ordering and pagination | all |
+| `tools/test_panel_location_views.py` | One location box, dividers and simplified group detail | all |
+| `tools/test_panel_locations.mjs` | Group save identity, location search drafts and navigation guards | all |
 | `tools/test_panel_shortcuts.mjs` | Keyboard profiles, cookie persistence, native text selection and input/overlay guards | all |
 | `tools/test_panel_copy.mjs` | Complete JD copy, clipboard fallbacks, safe text and restored focus/selection | all |
 | `tools/test_label_migration.py` | Atomic legacy upgrade, independent priority, correction provenance, concurrent partial edits and frozen action state | all |

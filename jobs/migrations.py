@@ -123,8 +123,6 @@ def upgrade(conn):
             conn.execute("ALTER TABLE label_events ADD COLUMN analysis_snapshot TEXT")
         if version < 1:
             _migrate_labels(conn)
-        from .location_store import sync_all
-        sync_all(conn)
     from .batches import SCHEMA as BATCH_SCHEMA
     for statement in BATCH_SCHEMA:
         conn.execute(statement)

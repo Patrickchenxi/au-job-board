@@ -28,10 +28,13 @@ COLUMNS = ["score", "tier", "tags", "eligibility_cue", "eligibility_snippet",
            "label_eligibility", "label_interest", "label_action", "label_note",
            "label_priority"]
 
+DEFAULT_LOCAL_PATTERNS = (r"\bVIC\b", "victoria", "melbourne")
+
 
 def _rows(conn) -> list[dict]:
     sql = """
-        SELECT j.uid, j.source, j.title, j.teaser, j.company, j.location, j.url, j.salary,
+        SELECT j.rowid AS _row_order,
+               j.uid, j.source, j.title, j.teaser, j.company, j.location, j.url, j.salary,
                j.work_type, j.listing_date, j.classification, j.job_level,
                j.description, j.dedupe_group, j.first_seen_at, j.last_seen_at,
                d.is_excluded, d.rule_id, d.rule_kind, d.matched_text, d.decided_at,
@@ -98,15 +101,48 @@ def score_value(row: dict):
     return value if value is not None else -999
 
 
-def _best_per_group(rows: list[dict]) -> list[dict]:
-    """每个去重组只保留分数最高的一条，并记录被合并掉的来源与城市。"""
+def _local_patterns(config: dict | None) -> tuple[str, ...]:
+    config = config or {}
+    direct = config.get("location")
+    if isinstance(direct, dict):
+        return tuple(str(value) for value in direct.get("local") or ())
+    rules = config.get("_rules")
+    if not isinstance(rules, dict):
+        from .config import load_rules
+        path = config.get("rules_path")
+        try:
+            rules = load_rules(path) if path else {"location": {"local": DEFAULT_LOCAL_PATTERNS}}
+        except FileNotFoundError:
+            rules = {"location": {"local": DEFAULT_LOCAL_PATTERNS}}
+    return tuple(str(value) for value in ((rules.get("location") or {}).get("local") or ()))
+
+
+def _best_per_group(rows: list[dict], config: dict | None = None) -> list[dict]:
+    """Keep the fixed display representative for each de-duplication group.
+
+    Local coverage wins before score because that preference identifies the
+    version a person is more likely to use. The remaining tie-breaks are the
+    existing score/title order, then the first row read from storage.
+    """
+    from .locations import is_local
+
+    patterns = _local_patterns(config)
     best: dict[str, dict] = {}
     dupes: dict[str, list[str]] = {}
-    for row in rows:
+    for input_order, row in enumerate(rows):
         group = row.get("dedupe_group") or row["uid"]
         tag = f"{row['source']}@{row.get('location') or '-'}"
         dupes.setdefault(group, []).append(tag)
-        if group not in best or _sort_key(row) < _sort_key(best[group]):
+        row["_is_local"] = is_local(row.get("location"), patterns)
+        key = (not row["_is_local"], -score_value(row),
+               (row.get("title") or "").casefold(),
+               row.get("_row_order", input_order), row["uid"])
+        current = best.get(group)
+        current_key = None if current is None else (
+            not current["_is_local"], -score_value(current),
+            (current.get("title") or "").casefold(),
+            current.get("_row_order", 0), current["uid"])
+        if current is None or key < current_key:
             best[group] = row
     for group, row in best.items():
         own = f"{row['source']}@{row.get('location') or '-'}"
@@ -116,10 +152,10 @@ def _best_per_group(rows: list[dict]) -> list[dict]:
     return list(best.values())
 
 
-def best_per_group(rows: list[dict]) -> list[dict]:
+def best_per_group(rows: list[dict], config: dict | None = None) -> list[dict]:
     """给「全部」视图用：kept 已经去过重，excluded 没有（审计要看全部），
     两边合起来必须再补一次，否则同一岗位的三个平台副本会并排出现。"""
-    return _best_per_group(rows)
+    return _best_per_group(rows, config)
 
 
 def load(conn, config: dict, *, deduplicate: bool = True):
@@ -142,7 +178,7 @@ def load(conn, config: dict, *, deduplicate: bool = True):
 
     kept = [r for r in rows if not r["is_excluded"]]
     if deduplicate:
-        kept = _best_per_group(kept)
+        kept = _best_per_group(kept, config)
     kept.sort(key=_sort_key)
     # 排除清单不去重 —— 审计要看全部
     excluded = sorted([r for r in rows if r["is_excluded"]],

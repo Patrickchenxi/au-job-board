@@ -133,11 +133,10 @@ def main(argv=None):
     parser.add_argument('--batch-id')
     parser.add_argument('--day')
     parser.add_argument('--geo')
-    parser.add_argument('--mode', choices=['remote','hybrid','onsite'])
     parser.add_argument('--output', required=True)
     args = parser.parse_args(argv)
     query = {'scope':args.scope,'limit':100}
-    for key in ('view','day','geo','mode'):
+    for key in ('view','day','geo'):
         value = getattr(args,key)
         if value:query[key]=value
     if args.batch_id:query['batch_id']=args.batch_id
