@@ -40,19 +40,24 @@ def read_token(path):
     return token
 
 
-def read_jobs(base_url, token, query, *, max_records=10000):
-    parsed = urlsplit(base_url)
-    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
-            or parsed.query or parsed.fragment or
-            (parsed.scheme == 'http' and parsed.hostname != '127.0.0.1')):
-        raise ClientError('Use loopback HTTP through a tunnel, or an authenticated HTTPS transport')
-    base = base_url.rstrip('/')
-    opener = build_opener(NoRedirect())
+class APIClient:
+    """Shared authenticated GET transport for the exporter and MCP adapter."""
 
-    def get(path, params):
-        request = Request(base + path + '?' + urlencode(params), headers={'Authorization': 'Bearer '+token})
+    def __init__(self, base_url, token):
+        parsed = urlsplit(base_url)
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
+                or parsed.query or parsed.fragment or
+                (parsed.scheme == 'http' and parsed.hostname != '127.0.0.1')):
+            raise ClientError('Use loopback HTTP through a tunnel, or an authenticated HTTPS transport')
+        self.base = base_url.rstrip('/')
+        self.token = token
+        self.opener = build_opener(NoRedirect())
+
+    def get(self, path, params):
+        request = Request(self.base + path + '?' + urlencode(params, doseq=True),
+                          headers={'Authorization': 'Bearer '+self.token})
         try:
-            with opener.open(request, timeout=30) as response:
+            with self.opener.open(request, timeout=30) as response:
                 if response.status != 200 or response.headers.get_content_type() != 'application/json':
                     raise ClientError('Unexpected API response')
                 raw = response.read(MAX_RESPONSE+1)
@@ -68,6 +73,9 @@ def read_jobs(base_url, token, query, *, max_records=10000):
         except (URLError, OSError, ValueError):
             raise ClientError('API unavailable or invalid JSON; export not completed') from None
 
+
+def read_jobs(base_url, token, query, *, max_records=10000):
+    get = APIClient(base_url, token).get
     first = page = get('/api/v1/jobs', query)
     sid, total = first.get('snapshot_id'), first.get('total')
     if not isinstance(sid, str) or not sid or type(total) is not int or not 0 <= total <= max_records:

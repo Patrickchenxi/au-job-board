@@ -1,0 +1,2 @@
+# Optional experimental stdio adapter; not needed by the panel or HTTP API.
+mcp==2.3.0

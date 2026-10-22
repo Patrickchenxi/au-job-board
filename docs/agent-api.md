@@ -6,6 +6,9 @@ It does not include an LLM, schedule reports, accept labels, fetch jobs or edit
 configuration. The panel remains a separate service with its existing exposure
 policy; this token does not add authentication to the panel.
 
+An optional [local MCP proof of concept](mcp-poc.md) exposes these reads to
+stdio MCP clients through a thin adapter, using the same HTTP authentication.
+
 ## Start locally
 
 Use the normal application to upgrade an installation to schema 3 first, under

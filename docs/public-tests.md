@@ -20,6 +20,12 @@ Run it from the project root with the project interpreter:
 .venv/bin/python tools/run_public_tests.py --list
 ```
 
+The experimental MCP adapter has one opt-in integration entry:
+`python tools/run_public_tests.py --with-mcp` (39 entries on macOS).
+It requires `requirements-mcp.txt` in addition to the runtime dependencies;
+missing SDK dependencies fail the opt-in run. The default 38 entries and CI
+installation are unchanged. See [MCP PoC](mcp-poc.md).
+
 It prints one line per test with the command, the exit status and the elapsed
 time, then a summary. It exits non-zero if any applicable test fails. If a
 required test file or the Node runtime is missing it reports a failure instead
