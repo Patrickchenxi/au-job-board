@@ -23,8 +23,9 @@ Run it from the project root with the project interpreter:
 The experimental MCP adapter has two opt-in integration entries:
 `python tools/run_public_tests.py --with-mcp` (40 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
-missing SDK dependencies fail the opt-in run. The default 38 entries and CI
-installation are unchanged. See [MCP PoC](mcp-poc.md).
+missing SDK dependencies fail the opt-in run. The default local command keeps
+38 entries. Release CI installs the optional SDK and runs all 40 entries.
+See [MCP PoC](mcp-poc.md).
 
 It prints one line per test with the command, the exit status and the elapsed
 time, then a summary. It exits non-zero if any applicable test fails. If a

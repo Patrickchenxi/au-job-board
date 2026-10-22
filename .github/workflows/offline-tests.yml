@@ -70,6 +70,7 @@ jobs:
       - name: Install the runtime dependencies
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check -r requirements-mcp.txt
 
       - name: Run the public offline test entry
-        run: python tools/run_public_tests.py
+        run: python tools/run_public_tests.py --with-mcp
