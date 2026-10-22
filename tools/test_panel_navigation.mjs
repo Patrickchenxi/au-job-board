@@ -626,6 +626,90 @@ async function testLabelLock() {
   eq("等待备注期间已完成的标签失败仍阻止离页",[nav.defaultPrevented,interleaved.sandbox.location.href,actionBtn.disabled],[true,original,false]);
 }
 
+async function testInterleavedLabelNotes() {
+  console.log("\n-- full-label snapshots cannot roll back independent writes --");
+  for (const field of ["action", "priority", "eligibility"]) {
+    for (const late of ["note", "label"]) {
+      for (const note of ["New synthetic note；", null]) {
+        const t=loadPanel(), button=new El("button"), input=new El("input"), dot=new El("span");
+        const initial={action:null, priority:null, eligibility:null, note:"Old synthetic note；",
+          action_at:null,applied_at:null,eligibility_source:null,eligibility_at:null,
+          eligibility_analysis:null,ineligible_reason:null};
+        const value={action:"saved",priority:true,eligibility:"ineligible"}[field];
+        t.api.LABELS.A={...initial};
+        button.dataset.uid="A";button.dataset.field=field;button.dataset.value=value;
+        t.reg['[data-uid="A"][data-field]']=[button];
+        t.reg['.prog[data-prog-uid="A"]']=[dot];
+        input.dataset.uid="A";t.api.noteAdopt(input,initial.note);
+        const requests={};
+        t.routes.label=body=>new Promise(resolve=>{requests[body.field]={body,resolve};});
+        // The label request is already in flight when the note is submitted.
+        // Control server commit order separately from response delivery order.
+        const status=t.api.setLabel("A",field,value,button);
+        input.value=note || "";
+        const savingNote=t.api.setNote(input);
+        input.value="Still editing synthetic draft";
+        const database={...initial};
+        const snapshots={};
+        const commit=key=>{
+          const request=requests[key];
+          database[key]=key==="note" ? note : request.body.value;
+          if(key==="action")database.action_at="2026-10-23T01:00:00";
+          if(key==="eligibility")Object.assign(database,{
+            eligibility_source:"panel",eligibility_at:"2026-10-23T01:00:00",
+            eligibility_analysis:"eligible",ineligible_reason:"Synthetic correction"});
+          snapshots[key]={value:database[key],label:{...database}};
+        };
+        commit(late==="note" ? "note" : field);
+        commit(late==="note" ? field : "note");
+        const respond=key=>requests[key].resolve({ok:true,json:async()=>snapshots[key]});
+        const early=late==="note" ? field : "note";
+        respond(early);await (early==="note" ? savingNote : status);
+        respond(late==="note" ? "note" : field);
+        await Promise.all([savingNote,status]);
+        const tag=`${field}, late ${late}, note ${note===null ? "clear" : "edit"}`;
+        eq("both confirmed fields survive: "+tag,
+          [t.api.LABELS.A[field],t.api.LABELS.A.note], [database[field],database.note]);
+        const metadata=["action_at","applied_at","eligibility_source","eligibility_at",
+          "eligibility_analysis","ineligible_reason"];
+        eq("field metadata survives: "+tag,metadata.map(key=>t.api.LABELS.A[key]),
+          metadata.map(key=>database[key]));
+        eq("newer draft survives: "+tag,input.value,"Still editing synthetic draft");
+        eq("canonical baseline survives: "+tag,input.dataset.noteStored,note||"");
+        if(field==="action")eq("card progress survives: "+tag,[dot.hidden,dot.textContent],
+          [false,"value.action.saved"]);
+      }
+    }
+  }
+  {
+    const t=loadPanel(), input=new El("input"), button=new El("button");
+    await t.api.openJob("A");
+    input.dataset.uid="A";t.api.noteAdopt(input,"Original；");input.value="Retry note";
+    t.reg['.note input']=[input];
+    button.dataset.uid="A";button.dataset.field="action";button.dataset.value="saved";
+    t.reg['[data-uid="A"][data-field]']=[button];
+    const requests=[];
+    t.routes.label=body=>new Promise(resolve=>requests.push({body,resolve}));
+    const note=t.api.setNote(input);
+    const status=t.api.setLabel("A","action","saved",button);
+    const navigation=t.api.stepDetail(1);
+    eq("note-first status waits for registered note",requests.map(r=>r.body.field),["note"]);
+    requests[0].resolve({ok:false,text:async()=>"Synthetic note failure"});
+    await note;await tick();
+    eq("status continues after failed note",requests.map(r=>r.body.field),["note","action"]);
+    requests[1].resolve({ok:true,json:async()=>({value:"saved",label:{action:"saved",note:"Original；"}})});
+    await status;await navigation;
+    eq("failed note draft blocks queued navigation",[t.api.state().uid,input.value],["A","Retry note"]);
+    const retry=t.api.setNote(input);
+    requests[2].resolve({ok:true,json:async()=>({value:"Retry note；",label:{action:"saved",note:"Retry note；"}})});
+    await retry;
+    eq("retry preserves confirmed status and saves note",[t.api.LABELS.A.action,t.api.LABELS.A.note],
+      ["saved","Retry note；"]);
+    await t.api.stepDetail(1);
+    eq("successful retry releases navigation",t.api.state().uid,"B");
+  }
+}
+
 function filterFixture(portrait) {
   const t = loadPanel({ portrait });
   const sel = (key, value, options) => {
@@ -944,6 +1028,7 @@ async function main() {
   await testLabelSheet();
   await testStats();
   await testLabelLock();
+  await testInterleavedLabelNotes();
   await testFilterDrawer();
   await testSkillCandidates();
   console.log();

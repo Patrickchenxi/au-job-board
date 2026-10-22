@@ -65,8 +65,11 @@ def day_window(value):
     if value != date.isoformat():
         raise APIError('invalid_day')
     zone = ZoneInfo(DAY_ZONE)
-    return tuple(dt.datetime.combine(d, dt.time.min, zone).astimezone(UTC)
-                 for d in (date, date + dt.timedelta(days=1)))
+    try:
+        return tuple(dt.datetime.combine(d, dt.time.min, zone).astimezone(UTC)
+                     for d in (date, date + dt.timedelta(days=1)))
+    except OverflowError:
+        raise APIError('invalid_day') from None
 
 
 def _timestamp(value):

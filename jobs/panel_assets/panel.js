@@ -2,7 +2,18 @@ const LABELS = window.__LABELS__ || {};
 function elementLocation(){return '';}
 function detailScope(){return document.querySelector('#detail [data-label-scope]');}
 function scopeLabel(uid){return LABELS[uid]||{};}
-function adoptScopeLabel(uid,_id,label){LABELS[uid]=label;}
+function adoptScopeLabel(uid,_id,field,value,snapshot={}){
+  // A response is a snapshot taken by one field's write, not a fresh read of
+  // concurrent note/status writes. Adopt only the field it acknowledges.
+  const label={...scopeLabel(uid),[field]:value};
+  const metadata=field==='action' ? ['action_at','applied_at'] : field==='eligibility'
+    ? ['ineligible_reason','eligibility_source','eligibility_at','eligibility_analysis'] : [];
+  metadata.forEach(key=>{
+    if(Object.prototype.hasOwnProperty.call(snapshot,key))label[key]=snapshot[key];
+  });
+  LABELS[uid]=label;
+  return label;
+}
 function inScope(){return true;}
 /* 界面文案：服务端按当前语言注入（i18n.js_strings）。数据（备注、技能名）不经过这里。 */
 const I18N = window.__I18N__ || {};
@@ -236,8 +247,7 @@ async function setLabel(uid,field,value,btn){
       body:JSON.stringify({uid:uid,field:field,value:target})});
     if(!r.ok) throw new Error(await r.text());
     const data=await r.json();
-    const savedLabel=data.label||{...scopeLabel(uid,id),[field]:data.value};
-    adoptScopeLabel(uid,id,savedLabel);
+    const savedLabel=adoptScopeLabel(uid,id,field,data.value,data.label||{});
     if(data.qualification && correction){
       correction.dataset.analysis=data.qualification.analysis||'';
       correction.dataset.corrected=String(data.qualification.corrected);
@@ -444,7 +454,7 @@ async function saveNote(input,request){
       input.dataset.noteStored=saved;
       input.dataset.noteLoaded=noteTagTranslate(saved);
     }
-    adoptScopeLabel(uid,'',d.label||{...scopeLabel(uid),note:saved||null}); refreshDot(uid);
+    adoptScopeLabel(uid,'','note',saved||null); refreshDot(uid);
     refreshStats();                 // 只有备注的新标注也算「已标注」
     toast(T('js.note_saved'));
   }catch(e){toast(T('js.note_failed')+e.message);}

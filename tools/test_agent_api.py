@@ -165,9 +165,26 @@ class AgentAPI(unittest.TestCase):
         self.server.api.store = api.SnapshotStore(max_snapshot_bytes=10)
         self.assertEqual(self.request('/api/v1/jobs')[0],413)
 
+    def test_invalid_days_return_json_and_allow_subsequent_requests(self):
+        with patch.object(self.server, 'handle_error') as handle_error:
+            for day in ('9999-12-31', '0001-01-01', '2026-02-30', 'not-a-day', '20261022'):
+                with self.subTest(day=day):
+                    status, data, headers = self.request(
+                        '/api/v1/jobs?scope=first_seen_day&day=' + day)
+                    self.assertEqual(status, 400)
+                    self.assertEqual(data, {'error': 'invalid_day'})
+                    self.assertIn('application/json', headers['Content-Type'])
+                    self.first()
+            handle_error.assert_not_called()
+
     def test_melbourne_day_boundaries_and_dst(self):
-        start,end=api.day_window('2026-10-04');self.assertEqual((end-start).total_seconds(),23*3600)
-        start,end=api.day_window('2026-04-05');self.assertEqual((end-start).total_seconds(),25*3600)
+        for day, hours in [('2026-10-04', 23), ('2026-04-05', 25), ('2026-10-22', 24)]:
+            with self.subTest(day=day):
+                start, end = api.day_window(day)
+                self.assertEqual((end-start).total_seconds(), hours*3600)
+                window = self.first('?scope=first_seen_day&day=' + day)['time_window']
+                self.assertEqual(window, {'start': start.isoformat(), 'end': end.isoformat(),
+                                          'timezone': 'Australia/Melbourne'})
         start,end=api.day_window('2026-10-22')
         with closing(db.connect(self.path)) as conn:
             conn.execute('UPDATE jobs SET first_seen_at=? WHERE uid=?',(start.isoformat(),'synthetic:a'))

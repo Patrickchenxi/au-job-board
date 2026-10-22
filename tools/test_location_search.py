@@ -195,6 +195,33 @@ class LocationSearchQuery(unittest.TestCase):
             self.conn, CONFIG, "synthetic:away")
         self.assertEqual(row["uid"], "synthetic:away")
 
+    def test_detail_keeps_full_group_sources_for_every_uid(self):
+        from jobs import location_query, panel_views
+
+        home = self.add("home", "Melbourne VIC", 1, group="same")
+        db.upsert_job(self.conn, {
+            "source": "other-synthetic", "source_id": "away",
+            "title": "Synthetic alternate source", "company": "Synthetic Company",
+            "location": "Sydney NSW", "description": "Handwritten alternate listing.",
+        })
+        away = "other-synthetic:away"
+        db.set_dedupe(self.conn, away, "same", "same")
+        # Even an excluded peer belongs in the complete group's summary.
+        db.replace_decision(self.conn, away, True)
+        self.conn.commit()
+        rows, total = self.query("Melbourne")
+        self.assertEqual((total, rows[0]["uid"]), (1, home))
+        for uid, peer in [(home, "other-synthetic@Sydney NSW"),
+                          (away, "synthetic@Melbourne VIC")]:
+            with self.subTest(uid=uid):
+                row = location_query.find(self.conn, CONFIG, uid, {"geo": "Melbourne"})
+                self.assertEqual(row["uid"], uid)
+                self.assertEqual(row.get("duplicate_count"), 1)
+                self.assertEqual(row.get("duplicate_sources"), peer)
+                self.assertIn(peer, panel_views._detail_html(row, "en"))
+        self.assertEqual(location_query.find(
+            self.conn, CONFIG, away, {"geo": "Melbourne"})["_geo_match"], "hidden")
+
     def test_recommend_view_does_not_offer_location_search(self):
         self.assertNotIn("geo", panel_data.VIEW_FILTER_KEYS["recommend"])
         self.assertNotIn("mode", panel_data.ALL_FILTER_KEYS)

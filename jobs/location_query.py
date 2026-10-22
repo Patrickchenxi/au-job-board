@@ -26,6 +26,16 @@ def find(conn, config, uid, filters=None):
     row = next((item for item in kept + excluded if item["uid"] == uid), None)
     if row is None:
         return None
+    # Keep the requested UID, including non-representatives and excluded peers.
+    # Summarize the complete group with the same source/location tags as lists.
+    group = row.get("dedupe_group") or row["uid"]
+    own = f"{row['source']}@{row.get('location') or '-'}"
+    others = [f"{item['source']}@{item.get('location') or '-'}"
+              for item in kept + excluded
+              if (item.get("dedupe_group") or item["uid"]) == group]
+    others = [tag for tag in others if tag != own]
+    row["duplicate_count"] = len(others)
+    row["duplicate_sources"] = "; ".join(dict.fromkeys(others))
     target = locations.parse_target(filters["geo"]) if (filters or {}).get("geo") else None
     return decorate(conn, row, labels, index, target=target)
 
