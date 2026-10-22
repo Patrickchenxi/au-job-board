@@ -710,6 +710,17 @@ async function testInterleavedLabelNotes() {
   }
 }
 
+async function testDetailOpenRefreshesLabel() {
+  console.log("\n-- opening a detail adopts its fresh server label --");
+  const t=loadPanel(), scope=new El("div");
+  t.api.LABELS.A={action:"saved",note:"Old synthetic note；"};
+  scope.dataset.scopeLabel=JSON.stringify({action:"applied",note:"New synthetic note；"});
+  t.reg['#detail [data-label-scope]']=[scope];
+  await t.api.openJob("A");
+  eq("detail label replaces stale state",JSON.stringify(t.api.LABELS.A),
+    JSON.stringify({action:"applied",note:"New synthetic note；"}));
+}
+
 function filterFixture(portrait) {
   const t = loadPanel({ portrait });
   const sel = (key, value, options) => {
@@ -1029,6 +1040,7 @@ async function main() {
   await testStats();
   await testLabelLock();
   await testInterleavedLabelNotes();
+  await testDetailOpenRefreshesLabel();
   await testFilterDrawer();
   await testSkillCandidates();
   console.log();

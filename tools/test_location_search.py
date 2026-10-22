@@ -134,6 +134,18 @@ class LocationSearchQuery(unittest.TestCase):
         self.assertEqual(total, 2)
         self.assertEqual([row["uid"] for row in rows], [high, low])
 
+    def test_excluded_audit_keeps_every_group_member(self):
+        first = self.add("first", "Melbourne VIC", 5, group="audit", excluded=True)
+        second = self.add("second", "Carlton VIC", 3, group="audit", excluded=True)
+        self.conn.execute("UPDATE decisions SET rule_id='r_company' WHERE uid=?", (first,))
+        self.conn.execute("UPDATE decisions SET rule_id='r_title' WHERE uid=?", (second,))
+        self.conn.commit()
+        for geo in (None, "VIC"):
+            with self.subTest(geo=geo):
+                rows, total = self.query(geo, view="excluded")
+                self.assertEqual(total, 2)
+                self.assertEqual({row["uid"] for row in rows}, {first, second})
+
     def test_group_human_state_and_fixed_representative_precede_search(self):
         self.add("away", "Sydney NSW", 30, group="same", title="Away")
         home = self.add("home", "Melbourne VIC", 2, group="same", title="Home")

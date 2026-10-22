@@ -176,6 +176,8 @@ class AgentAPI(unittest.TestCase):
                     self.assertIn('application/json', headers['Content-Type'])
                     self.first()
             handle_error.assert_not_called()
+        # Corrupt stored boundaries are skipped rather than crashing the request.
+        self.assertIsNone(api._timestamp('0001-01-01T00:00:00+10:00'))
 
     def test_melbourne_day_boundaries_and_dst(self):
         for day, hours in [('2026-10-04', 23), ('2026-04-05', 25), ('2026-10-22', 24)]:

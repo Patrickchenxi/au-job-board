@@ -76,7 +76,7 @@ def _timestamp(value):
     try:
         stamp = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
         return stamp.astimezone(UTC) if stamp.tzinfo else None
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, OverflowError):
         return None
 
 

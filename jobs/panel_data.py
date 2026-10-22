@@ -331,7 +331,8 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
         }
 
     if view == "excluded":
-        rows = report_mod.best_per_group(excluded, config)
+        # 排除清单不去重 —— 审计要按规则看到每一条来源记录
+        rows = excluded
     elif view == "all":
         # 全库。excluded 侧本来没去重（审计要看全部），这里补一次，
         # 否则同一岗位的三个平台副本会在「全部」里并排出现

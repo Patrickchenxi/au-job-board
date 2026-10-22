@@ -69,8 +69,8 @@ or rerun the update after analysis finishes.
 Filters include search over title, company, location, notes, tags and
 description, salary present, freshness, skills, tier and your own records:
 status (including "not processed"), the ★ priority queue, eligibility
-correction and label status. Legacy interest sits in a separate History group
-under More filters; old `interest=` links still work.
+correction and label status. Legacy interest records are kept in the database
+and API but no longer shown in the panel; old `interest=` links still work.
 All, New, Excluded and Labelled also provide one location box for an Australian
 postcode, suburb, capital city, state or `Australia`. Results are grouped in
 exact, same-state coarse and unknown blocks with dividers; the recommended view

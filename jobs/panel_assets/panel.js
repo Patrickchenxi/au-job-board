@@ -14,6 +14,8 @@ function adoptScopeLabel(uid,_id,field,value,snapshot={}){
   LABELS[uid]=label;
   return label;
 }
+// Server-rendered detail is a fresh read of the whole group label.
+function replaceScopeLabel(uid,label){LABELS[uid]=label||{};}
 function inScope(){return true;}
 /* 界面文案：服务端按当前语言注入（i18n.js_strings）。数据（备注、技能名）不经过这里。 */
 const I18N = window.__I18N__ || {};
@@ -178,7 +180,7 @@ async function openJob(uid){
     pane.innerHTML=d.html;
     const scope=detailScope();
     if(scope){
-      try{adoptScopeLabel(uid,'',JSON.parse(scope.dataset.scopeLabel));}catch(_){}
+      try{replaceScopeLabel(uid,JSON.parse(scope.dataset.scopeLabel));}catch(_){}
       history.replaceState(null,'',detailHash(uid));
     }
     pane.querySelectorAll('.note input').forEach(noteSync);

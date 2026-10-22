@@ -75,7 +75,8 @@ def query(conn, config, view, offset, limit, filters, since, skills_cfg, *,
 
     # Choose one representative from the complete view pool, then retain groups
     # whose source candidates belong to the requested batch/scoped query.
-    representatives = report.best_per_group(pool, config)
+    # The excluded audit keeps every source record, as without location search.
+    representatives = pool if view == "excluded" else report.best_per_group(pool, config)
     representatives = [
         row for row in representatives
         if (row.get("dedupe_group") or row["uid"]) in in_scope
