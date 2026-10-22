@@ -224,8 +224,8 @@ class Snapshot:
 
 
 class SnapshotStore:
-    def __init__(self, *, ttl=300, max_snapshots=8, max_bytes=64*1024*1024,
-                 max_snapshot_bytes=16*1024*1024, max_rows=10000, clock=time.monotonic):
+    def __init__(self, *, ttl=300, max_snapshots=8, max_bytes=512*1024*1024,
+                 max_snapshot_bytes=128*1024*1024, max_rows=50000, clock=time.monotonic):
         if min(ttl, max_snapshots, max_bytes, max_snapshot_bytes, max_rows) <= 0:
             raise ValueError('snapshot limits must be positive')
         self.ttl, self.max_snapshots, self.max_bytes = ttl, max_snapshots, max_bytes
@@ -292,12 +292,32 @@ class SnapshotStore:
         return copy.deepcopy(result)
 
 
+def snapshot_store(config):
+    """One validated capacity configuration shared by HTTP and MCP readers."""
+    section = config.get('agent_api', {})
+    if not isinstance(section, dict):
+        raise ValueError('agent_api must be an object')
+    values = section.get('snapshots', {})
+    defaults = {'ttl_seconds': 300, 'max_snapshots': 8, 'max_rows': 50000,
+                'max_snapshot_mib': 128, 'max_total_mib': 512}
+    if not isinstance(values, dict) or set(values) - defaults.keys():
+        raise ValueError('Invalid agent_api.snapshots settings')
+    merged = {**defaults, **values}
+    if any(type(value) is not int or value <= 0 for value in merged.values()):
+        raise ValueError('Snapshot settings must be positive integers')
+    if merged['max_snapshot_mib'] > merged['max_total_mib']:
+        raise ValueError('Snapshot budget exceeds total budget')
+    return SnapshotStore(ttl=merged['ttl_seconds'], max_snapshots=merged['max_snapshots'],
+        max_rows=merged['max_rows'], max_snapshot_bytes=merged['max_snapshot_mib']*1024*1024,
+        max_bytes=merged['max_total_mib']*1024*1024)
+
+
 class AgentAPI:
     def __init__(self, config, *, panel_url='http://127.0.0.1:8090/', store=None):
         self.config = copy.deepcopy(config)
         self.db_path = config_mod.db_path(config)
         self.panel_base = _panel_base(panel_url)
-        self.store = store or SnapshotStore()
+        self.store = store if store is not None else snapshot_store(config)
 
     def _candidates(self, conn, query):
         scope, batch = query['scope'], None

@@ -20,8 +20,8 @@ Run it from the project root with the project interpreter:
 .venv/bin/python tools/run_public_tests.py --list
 ```
 
-The experimental MCP adapter has one opt-in integration entry:
-`python tools/run_public_tests.py --with-mcp` (39 entries on macOS).
+The experimental MCP adapter has two opt-in integration entries:
+`python tools/run_public_tests.py --with-mcp` (40 entries on macOS).
 It requires `requirements-mcp.txt` in addition to the runtime dependencies;
 missing SDK dependencies fail the opt-in run. The default 38 entries and CI
 installation are unchanged. See [MCP PoC](mcp-poc.md).

@@ -116,6 +116,7 @@ NODE_TESTS = (
 
 MCP_TESTS = (
     ("tools/test_mcp.py", "optional MCP stdio / authenticated HTTP integration", None),
+    ("tools/test_mcp_http.py", "optional Streamable HTTP / app lifecycle / capacity", None),
 )
 
 
@@ -173,7 +174,7 @@ def print_inventory() -> None:
     print("Excluded from the public entry (see docs/public-tests.md):")
     print("  tools/test_public_snapshot.py      maintainer snapshot planner")
     print("  tools/regression_corpus.py         needs a private corpus")
-    print("  Optional --with-mcp: tools/test_mcp.py (requires requirements-mcp.txt)")
+    print("  Optional --with-mcp: tools/test_mcp.py and tools/test_mcp_http.py (requirements-mcp.txt)")
 
 
 def main(argv=None) -> int:

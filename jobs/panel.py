@@ -401,9 +401,18 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
     # inherit a runner from another listener in the same interpreter.
     handler = type("PanelHandler", (Handler,), {"config": config})
     httpd = ThreadingHTTPServer((host, port), handler)
-    httpd.config_editor = ConfigEditor(config, config_path, rules_path)
-    httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
-                                        skills_path=skills_path)
+    mcp = None
+    try:
+        from .mcp_http import start
+        mcp = start(config, httpd)
+        httpd.config_editor = ConfigEditor(config, config_path, rules_path)
+        httpd.update_manager = UpdateManager(config, config_path, rules_path=rules_path,
+                                            skills_path=skills_path)
+    except BaseException:
+        if mcp:
+            mcp.close()
+        httpd.server_close()
+        raise
 
     # 启动指纹：Python 在启动时就把模块加载进内存，改了代码不重启不会生效。
     # 把 panel.py 的修改时间打出来，「跑的是哪一版」就不用猜了。
@@ -413,9 +422,13 @@ def serve(config: dict, config_path=None, rules_path=None, skills_path=None) -> 
     print(f"  panel.py 版本时间戳 {mtime}　·　启动于 "
           f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("  Ctrl-C 停止")
+    if mcp:
+        print(f"  只读 MCP：{mcp.url}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止")
     finally:
         httpd.server_close()
+        if mcp:
+            mcp.close()

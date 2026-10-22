@@ -7,7 +7,8 @@ configuration. The panel remains a separate service with its existing exposure
 policy; this token does not add authentication to the panel.
 
 An optional [local MCP proof of concept](mcp-poc.md) exposes these reads to
-stdio MCP clients through a thin adapter, using the same HTTP authentication.
+stdio or Streamable HTTP MCP clients through a thin adapter, using the same
+read-only API and shared snapshot settings.
 
 ## Start locally
 
@@ -119,16 +120,20 @@ include `snapshot_id`, `as_of`, `expires_at`, `resolved_batch_id`, normalized
 Every detail read for that result must include its `snapshot_id`.
 
 The default page size is 100, maximum 200. Snapshots live for 300 seconds,
-maximum eight at once, with serialized-payload budgets of 16 MiB per snapshot
-and 64 MiB total (not a bound on Python process RSS). The current service
-conservatively rejects materialization if the source database has over 10,000
-jobs or over 16 MiB of raw descriptions, even for a narrow query. These limits
+maximum eight at once, with serialized-payload budgets of 128 MiB per snapshot
+and 512 MiB total (not a bound on Python process RSS). The current service
+conservatively rejects materialization if the source database has over 50,000
+jobs or over 128 MiB of raw descriptions, even for a narrow query. These limits
 are intentional; a query is never silently truncated. Unknown/expired
 snapshots return 410, malformed/restarted cursors 400, a too-large snapshot 413,
 and cache exhaustion 429. Existing unexpired snapshots are not evicted to make
 room for another query. Finish within the TTL or restart the complete query.
-The Python service API accepts explicit resource limits for controlled local
-verification; the CLI currently uses the documented defaults.
+Both standalone HTTP and app-owned MCP read `agent_api.snapshots` from the
+application configuration. Positive integer settings are `ttl_seconds`,
+`max_snapshots`, `max_rows`, `max_snapshot_mib` and `max_total_mib`. The single
+snapshot budget must not exceed the total. Omit the section to use the defaults
+above; invalid values fail startup. The Python service API also accepts an
+explicit store for controlled local verification.
 
 The detail pool includes source candidates; `items` contains the fixed display
 representatives after de-duplication. Every source in a group shares the same
