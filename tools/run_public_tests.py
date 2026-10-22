@@ -42,6 +42,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
+    ("tools/test_locations.py", "offline Australian location reference and matching", None),
+    ("tools/test_location_state.py", "location migration, scope ownership and query boundaries", None),
+    ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",
@@ -99,6 +103,7 @@ PYTHON_TESTS = (
 )
 
 NODE_TESTS = (
+    ("tools/test_panel_locations.mjs", "location switching and scoped request identity", None),
     ("tools/test_panel_note_separators.mjs",
      "panel note separators / default labels (UI-02, UI-03)", None),
     ("tools/test_panel_navigation.mjs",

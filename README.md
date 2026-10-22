@@ -202,6 +202,7 @@ Not verified, and the documentation does not imply otherwise:
 | [Agent-assisted installation](docs/agent-install.md) | The same steps for an AI agent |
 | [Usage guide](docs/usage.md) | Workflow, commands, local data, notes, languages |
 | [Fetch settings and updates](docs/manual-updates.md) | Editable next-run configuration and background updates from the panel |
+| [Locations and records](docs/location-workflow.md) | Offline region/work-mode filters, location-specific labels and upgrade behavior |
 | [Optional Docker](docs/docker.md) | Published GHCR or local image, Compose, persistent volumes and backup |
 | [Configuration](docs/public-configuration.md) | Config file, paths, sources, panel settings |
 | [Rule profiles](docs/legacy-rule-profiles.md) | The six profiles, per-rule switches, applying a change |

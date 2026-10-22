@@ -32,3 +32,8 @@ out/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Bundled public, attributed offline location reference (not runtime data).
+!jobs/data/
+!jobs/data/au-postcodes.tsv
+!jobs/data/location-reference.json

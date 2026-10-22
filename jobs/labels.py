@@ -556,7 +556,9 @@ def export(conn, out_dir: Path) -> dict:
     md_path = out_dir / "labels.md"
     md_path.write_text("\n".join(md), encoding="utf-8")
 
-    return {"count": len(rows), "csv": str(csv_path), "md": str(md_path)}
+    from . import location_store
+    return {"count": len(rows), "csv": str(csv_path), "md": str(md_path),
+            **location_store.export(conn, out_dir)}
 
 
 def history(conn, uid: str | None = None, limit: int = 60) -> list[dict]:

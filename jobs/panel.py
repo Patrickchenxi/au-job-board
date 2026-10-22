@@ -87,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):                                   # noqa: N802
         started = time.perf_counter()
         parsed = urlparse(self.path)
-        qs = parse_qs(parsed.query)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
         lang, theme = self._prefs()
         if parsed.path == "/api/config-settings":
             self._config_settings(None, started)
@@ -108,7 +108,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/job":
                 uid = (qs.get("uid") or [""])[0]
-                row = _find(conn, self.config, uid)
+                row = _find(conn, self.config, uid,
+                            location_id=(qs.get("location_id") or [None])[0],
+                            filters=({} if "location_id" in qs and not qs["location_id"][0]
+                                     else parse_filters(qs)))
                 if row is None:
                     self._send(f"uid={uid} not found".encode(), 404, "text/plain; charset=utf-8", started)
                     return
@@ -146,6 +149,8 @@ class Handler(BaseHTTPRequestHandler):
             page = render_page(conn, self.config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)
+        except ValueError as exc:
+            self._send(str(exc).encode(), 400, "text/plain; charset=utf-8", started)
         finally:
             conn.close()
 
@@ -164,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/update":
             self._post_update(started)
             return
-        if self.path not in ("/api/label", "/api/skills"):
+        if self.path not in ("/api/label", "/api/skills", "/api/location"):
             self._send(b"not found", 404, "text/plain", started)
             return
         payload = self._local_json(started, EDIT_MAX_BYTES)
@@ -178,6 +183,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._post_skills(payload, started)
             return
+        if self.path == "/api/location":
+            self._post_location(payload, started)
+            return
         uid, field, value = payload.get("uid"), payload.get("field"), payload.get("value")
         valid_value = (isinstance(value, (bool, int, type(None))) if field == "priority"
                        else isinstance(value, (str, type(None))))
@@ -185,11 +193,15 @@ class Handler(BaseHTTPRequestHandler):
                 or not valid_value):
             self._json({"error": "invalid_request"}, 400, started)
             return
+        location_id = payload.get("location_id")
+        if location_id is not None and (not isinstance(location_id, str) or not location_id):
+            self._json({"error": "invalid_request"}, 400, started)
+            return
         conn = None
         try:
             conn = database.connect(_db_path(self.config))
             conn.execute("BEGIN IMMEDIATE")
-            row = _find(conn, self.config, uid)
+            row = _find(conn, self.config, uid, location_id=location_id)
             if row is None:
                 row = {"uid": uid, "_label": labels_mod.get_labels(conn).get(uid, {})}
             old_label = row.get("_label") or {}
@@ -199,21 +211,50 @@ class Handler(BaseHTTPRequestHandler):
                 if not q["corrected"]:
                     conn.rollback()
                     self._json({"ok": True, "field": field, "value": None,
-                                "label": old_label, "qualification": q}, 200, started)
+                                "label": old_label, "qualification": q,
+                                "location_id": location_id}, 200, started)
                     return
                 value = None
-            labels_mod.set_label(conn, uid, source="panel", **{field: value})
+            if location_id:
+                from . import location_store
+                location_store.set_label(conn, uid, location_id, field, value)
+                conn.commit()
+            else:
+                labels_mod.set_label(conn, uid, source="panel", **{field: value})
             # 把**落库后**的值回传：note 会被规范化（补尾随「；」），
             # 前端要用它回填输入框，否则界面上和刷新后的不一致
-            row = _find(conn, self.config, uid) or {"_label": labels_mod.get_labels(conn).get(uid, {})}
+            row = _find(conn, self.config, uid, location_id=location_id) or {"_label": labels_mod.get_labels(conn).get(uid, {})}
             stored = row.get("_label") or {}
             self._json({"ok": True, "field": field, "value": stored.get(field),
                         "label": stored,
-                        "qualification": labels_mod.qualification(row, stored)}, 200, started)
+                        "qualification": labels_mod.qualification(row, stored),
+                        "location_id": location_id}, 200, started)
         except ValueError as exc:
             self._send(str(exc).encode(), 400, "text/plain", started)
         except sqlite3.Error:
             self._json({"error": "write_failed"}, 503, started)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _post_location(self, payload, started):
+        from . import location_store
+        uid, lid = payload.get('uid'), payload.get('location_id')
+        raw, mode = payload.get('raw'), payload.get('work_mode', 'unknown')
+        if 'raw' not in payload or not isinstance(uid, str) or not uid or not isinstance(lid, str) or not lid:
+            self._json({'error': 'invalid_request'}, 400, started)
+            return
+        conn = None
+        try:
+            conn = database.connect(_db_path(self.config))
+            conn.execute('BEGIN IMMEDIATE')
+            location_store.set_correction(conn, uid, lid, raw, mode)
+            conn.commit()
+            self._json({'ok': True, 'location_id': lid}, 200, started)
+        except ValueError as exc:
+            self._json({'error': str(exc)}, 400, started)
+        except sqlite3.Error:
+            self._json({'error': 'write_failed'}, 503, started)
         finally:
             if conn is not None:
                 conn.close()
@@ -256,7 +297,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = database.connect(_db_path(self.config))
         try:
-            summary = labels_mod.summary(conn)
+            if (parse_qs(urlparse(self.path).query).get("scope") or [""])[0] == "location":
+                from .location_store import summary as location_summary
+                summary = location_summary(conn)
+            else:
+                summary = labels_mod.summary(conn)
         finally:
             conn.close()
         self._json({key: summary[name] for key, name in STAT_KEYS.items()}, 200, started)
@@ -345,14 +390,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
 
-def _find(conn, config, uid: str):
+def _find(conn, config, uid: str, location_id=None, filters=None):
     if not uid:
         return None
-    kept, excluded, labels, index = report_mod.load(conn, config)
-    for row in kept + excluded:
-        if row["uid"] == uid:
-            return report_mod.decorate([row], labels, index)[0]
-    return None
+    from .location_query import find
+    return find(conn, config, uid, location_id, filters)
 
 
 def _db_path(config: dict):

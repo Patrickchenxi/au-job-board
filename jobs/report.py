@@ -122,7 +122,7 @@ def best_per_group(rows: list[dict]) -> list[dict]:
     return _best_per_group(rows)
 
 
-def load(conn, config: dict):
+def load(conn, config: dict, *, deduplicate: bool = True):
     """取数 + 去重 + 排序。**刻意不做装饰。**
 
     装饰（抽资格句、算 tag）是最耗时的一步。面板一次只显示一页，所以
@@ -140,7 +140,9 @@ def load(conn, config: dict):
         row["skills"] = skill_hits.get(row["uid"], [])
         row["skill_display_names"] = skill_labels
 
-    kept = _best_per_group([r for r in rows if not r["is_excluded"]])
+    kept = [r for r in rows if not r["is_excluded"]]
+    if deduplicate:
+        kept = _best_per_group(kept)
     kept.sort(key=_sort_key)
     # 排除清单不去重 —— 审计要看全部
     excluded = sorted([r for r in rows if r["is_excluded"]],

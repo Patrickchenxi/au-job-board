@@ -48,10 +48,10 @@ TONE = {"eligible": "good", "ineligible": "bad", "want": "good", "no": "bad",
 # 每个视图哪些筛选常驻在工具栏，其余进「更多筛选」。**允许哪些筛选**仍以
 # panel_data.VIEW_FILTER_KEYS 为准，这里只决定摆放位置（见 filter_layout）。
 PRIMARY_FILTERS = {
-    "recommend": (SKILL_KEY, TIER_KEY, "salary"),
-    "labelled": ("action", PRIORITY_KEY, SKILL_KEY),
+    "recommend": ("geo", "mode", SKILL_KEY, TIER_KEY, "salary"),
+    "labelled": ("action", PRIORITY_KEY, "geo", "mode", SKILL_KEY),
 }
-DEFAULT_PRIMARY = (SKILL_KEY, TIER_KEY)
+DEFAULT_PRIMARY = ("geo", "mode", SKILL_KEY, TIER_KEY)
 LABEL_GROUP_KEYS = ("action", "eligibility", "labeled")
 HISTORY_GROUP_KEYS = ("interest",)          # 旧兴趣轴：只读回看，旧链接参数照样生效
 TOOLBAR_FIXED = (QUERY_KEY, "sort")          # 搜索框与排序有自己的固定位置
@@ -295,6 +295,8 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
                           i18n.t(lang, "card.rule", rule=row.get("rule_id") or ""))
     if row.get("eligibility_cue"):
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
+    if row.get("_scoped_records") and not row.get("location_scope"):
+        tags += _tag_html("mid", i18n.t(lang, "location.record_count", n=row["_scoped_records"]))
     tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
     skills = [text for kind, text in pairs if kind == "skill"]
@@ -311,13 +313,14 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
     badge = (f'<span class="tier">{_e(tier)}</span><span class="sep">·</span>' if tier else "") + f'<b>{_e(score)}</b>'
 
     sub = " · ".join(str(x) for x in (
-        row.get("company"), row.get("location"), row.get("source")) if x)
+        row.get("company"), (row.get("_location") or {}).get("raw") or row.get("location"), row.get("source")) if x)
     # 技能与进度共用一行：技能按剩余宽度省略，进度保持完整；空间不足时整组换行。
     state = _card_state(uid, label, lang)
     tail = f'<span class="card-tail">{skills_html}{state}</span>' if skills else state
     # 搜索已挪到服务端（见 _search_text），这里不再拼 data-text
     return "".join([
-        f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" role="button" tabindex="0" '
+        f'<div class="card{" done" if done else ""}" data-uid="{_e(uid)}" '
+        f'data-location-id="{_e((row.get("_location") or {}).get("location_id"))}" role="button" tabindex="0" '
         f'onclick="openJob(\'{_e(uid)}\')" onkeydown="cardKeys(event,\'{_e(uid)}\')">',
         '<div class="card-top">',
         f'<p class="t">{_e(row.get("title"))}</p>',
@@ -412,6 +415,62 @@ def _qualification_source_key(q: dict) -> str:
     return "qualification.machine" if q["analysis"] else "qualification.unknown"
 
 
+def _location_html(row: dict, lang: str) -> str:
+    """Location identity and provenance; legacy labels never seed a location."""
+    T = lambda key, **kw: i18n.t(lang, key, **kw)
+    locations = row.get("_locations") or []
+    loc = row.get("_location") or {}
+    selected = str(loc.get("location_id") or "")
+    options = [f'<option value=""{" selected" if not selected else ""}>{_e(T("location.legacy_option"))}</option>']
+    for item in locations:
+        ident = str(item["location_id"])
+        name = item.get("raw") or T("location.unknown")
+        if item.get("active") is False:
+            name += " · " + T("location.inactive")
+        options.append(f'<option value="{_e(ident)}"{" selected" if ident == selected else ""}>{_e(name)}</option>')
+    out = [f'<section class="location-panel" aria-label="{_e(T("location.title"))}">',
+           f'<label class="location-choice" for="location-choice">{_e(T("location.title"))}'
+           f'<select id="location-choice" onchange="changeLocation(this)">{"".join(options)}</select></label>',
+           f'<p class="hint">{_e(T("location.scope" if selected else "location.legacy_scope"))}</p>']
+    if selected:
+        precision = loc.get("precision") or "unknown"
+        mode = loc.get("work_mode") or "unknown"
+        legacy = row.get("_legacy_label") or {}
+        reasons = " · ".join(T("location.reason." + part) if "location.reason." + part in i18n.STRINGS["zh"] else T("location.reason.not_in_reference")
+                             for part in str(loc.get("reason") or "").split(";") if part)
+        details = " · ".join(str(loc.get(k)) for k in ("locality", "city", "state", "postcode") if loc.get(k))
+        out += [f'<p class="hint">{_e(T("location.outside"))}</p>' if row.get("_geo_match") == "hidden" else "",
+                f'<p class="location-facts">{_e(T("location.precision"))}: '
+                f'{_e(T("location.precision." + precision) if "location.precision." + precision in i18n.STRINGS["zh"] else precision)}'
+                f' · {_e(T("location.mode"))}: {_e(T("location.mode." + mode))}</p>',
+                f'<p class="hint">{_e(details)}</p>' if details else "",
+                f'<p class="hint">{_e(T("location.source"))}: {_e(loc.get("source") or T("location.unknown"))}'
+                f' · {_e(reasons)}</p>',
+                f'<p class="location-raw"><b>{_e(T("location.original"))}</b> {_e(row.get("location"))}</p>',
+                f'<p class="location-raw"><b>{_e(T("location.corrected" if loc.get("corrected") else "location.derived"))}</b> {_e(loc.get("raw"))}</p>',
+                f'<details class="location-editor"><summary>{_e(T("location.edit"))}</summary>'
+                f'<p class="hint">{_e(T("location.edit_hint"))}</p>'
+                f'<label>{_e(T("location.raw"))}<input id="location-raw" value="{_e(loc.get("raw"))}" '
+                'autocomplete="off" oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
+                f'<label>{_e(T("location.mode"))}<select id="location-mode">'
+                + "".join(f'<option value="{m}"{" selected" if mode == m else ""}>{_e(T("location.mode." + m))}</option>'
+                          for m in ("unknown", "remote", "hybrid", "onsite"))
+                + '</select></label><div class="location-actions">'
+                f'<button type="button" class="btn" onclick="saveLocation(false)">{_e(T("location.save"))}</button>'
+                f'<button type="button" class="linkbtn" onclick="saveLocation(true)"{"" if loc.get("corrected") else " disabled"}>'
+                f'{_e(T("location.reset"))}</button></div>'
+                '<p id="location-status" class="hint" role="status" aria-live="polite"></p></details>',
+                f'<details class="location-legacy"><summary>{_e(T("location.legacy_title"))}</summary>'
+                f'<p>{_e(_state_text(legacy, lang))}</p>'
+                + "".join(f'<p>{_e(i18n.t(lang, "field." + key))}: '
+                          f'{_e(i18n.display_note(lang, value) if key == "note" else i18n.value_label(lang, key, value))}</p>'
+                          for key in ("eligibility", "interest", "note")
+                          if (value := legacy.get(key)) is not None)
+                + f'<p class="hint">{_e(T("location.legacy_scope"))}</p></details>']
+    out.append('</section>')
+    return "".join(out)
+
+
 def _detail_html(row: dict, lang: str = "zh") -> str:
     """右侧详情。与 md 报告同口径（都走 render.py），只在样式上更贴合面板。"""
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
@@ -448,7 +507,10 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         return (f'<button type="button" class="stepbtn" data-step="{delta}" onclick="stepDetail({delta})" '
                 f'aria-label="{_e(name)}" aria-keyshortcuts="{key}" title="{_e(name)} ({key})" disabled>'
                 f'{text}</button>')
+    loc_id = (row.get("_location") or {}).get("location_id") or ""
     out = [
+        f'<div data-location-scope data-uid="{_e(uid)}" data-location-id="{_e(loc_id)}" '
+        f'data-scope-label="{_e(json.dumps(_label_state(label), ensure_ascii=False))}">',
         '<div class="d-nav">',
         f'<button type="button" id="back" onclick="closeDetail()">{_e(T("detail.back"))}</button>',
         '<span class="d-steps">',
@@ -461,6 +523,7 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         f'<div class="sub">{_e(meta)}</div></div>',
         f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>',
         "</div>",
+        _location_html(row, lang),
         f'<div class="tags d-tags">{tags}'
         f'<button type="button" class="linkbtn" aria-expanded="false" aria-controls="skill-edit" '
         f'onclick="toggleSkillEdit(this)">{_e(T("detail.skill_edit"))}</button></div>',
@@ -555,6 +618,7 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
                + f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
                + step_btn(1, "›")
                + '</div>')
+    out.append('</div>')
     return "".join(out)
 
 
@@ -616,6 +680,8 @@ def filter_layout(view: str) -> tuple[tuple[str, ...], dict[str, list[str]]]:
 
 def _is_active(key: str, filters: dict) -> bool:
     value = filters.get(key)
+    if key == "mode":
+        return value not in (None, "", "any")
     if key == "labeled":
         return value in ("yes", "no")
     return bool(value)
@@ -674,6 +740,18 @@ def _tier_select(filters: dict, lang: str = "zh") -> str:
 
 def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
+    if key == "geo":
+        return (f'<div class="geo-control"><label class="ctl{" on" if filters.get("geo") else ""}">'
+                f'<span class="k">{_e(T("location.region"))}</span>'
+                f'<input data-fkey="geo" value="{_e(filters.get("geo", ""))}" '
+                f'placeholder="{_e(T("location.region_hint"))}" aria-label="{_e(T("location.region"))}" '
+                'oninput="geoTyping()" onkeydown="geoKeys(event)" '
+                'oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
+                f'<button type="button" class="btn" onclick="applyGeo()">{_e(T("location.apply"))}</button></div>')
+    if key == "mode":
+        return _select("mode", T("location.mode"), [("", T("filter.any"))] +
+                       [(m, T("location.mode." + m)) for m in ("remote", "hybrid", "onsite")],
+                       "" if filters.get("mode") == "any" else filters.get("mode", ""))
     if key in FILTER_KEYS:
         options = ([("", T("filter.any"))]
                    + [(v, i18n.value_label(lang, key, v)) for v in labels_mod.VALID[key]]
@@ -700,6 +778,10 @@ def _chip_text(key: str, filters: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     colon = T("js.colon")
     value = filters.get(key)
+    if key == "geo":
+        return T("location.region") + colon + str(value)
+    if key == "mode":
+        return T("location.mode") + colon + T("location.mode." + str(value))
     if key in FILTER_KEYS:
         shown = T(f"filter.none.{key}") if value == NONE_TOKEN else i18n.value_label(lang, key, value)
         return T(f"filter.field.{key}") + colon + shown
@@ -964,7 +1046,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     if total and offset >= total:
         offset = ((total - 1) // limit) * limit
         page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
-    stats = labels_mod.summary(conn)
+    from . import location_query, location_store
+    stats = location_store.summary(conn) if location_query.enabled(filters) else labels_mod.summary(conn)
     skill_counts = database.skill_counts(conn)
 
     # nav 用不带 since 的链接：换视图 = 重新冻结（推荐视图会重新取未标注）。
@@ -982,7 +1065,9 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<small>{_e(T("viewhint." + key))}</small></a>'
         for key in VIEWS)
 
-    embed = {r["uid"]: _label_state(r.get("_label") or {}) for r in page}
+    embed = {r["uid"]: _label_state((r.get("_legacy_label") if r.get("location_scope") else r.get("_label")) or {}) for r in page}
+    location_embed = [[r["uid"], str(r["_location"]["location_id"]), _label_state(r.get("_label") or {})]
+                      for r in page if r.get("location_scope") and r.get("_location")]
     # Priority has its own control; retain legacy note translations for reading.
     note_tags = [tag for tag in labels_mod.note_tag_candidates(conn) if tag != "优先投递"]
     # 按字母排：详情页的候选不再按输入过滤，排序是唯一的"怎么找"。
@@ -1007,7 +1092,16 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
     if page:
-        cards = "".join(_card(r, since, lang) for r in page)
+        if filters.get("geo") or filters.get("mode") not in (None, "", "any"):
+            # Group only this returned page; keep parent sorting and pagination intact.
+            cards = ''.join(
+                f'<section class="location-group" data-geo-match="{kind}">'
+                f'<h3>{_e(T("location.group." + kind))} <span>{len(members)}</span></h3>'
+                + ''.join(_card(r, since, lang) for r in members) + '</section>'
+                for kind in ("match", "related", "unknown")
+                for members in [[r for r in page if (r.get("_geo_match") or "unknown") == kind]])
+        else:
+            cards = "".join(_card(r, since, lang) for r in page)
     elif has_filters:
         cards = (f'<div class="empty"><b>{_e(T("list.empty_filtered"))}</b>'
                  f'<span>{_e(T("list.empty_hint"))}</span>'
@@ -1049,6 +1143,8 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span></div>',
         "</div>",
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
+        (f'<p class="location-filter-hint">{_e(T("location.filter_hint"))}</p>'
+         if filters.get("geo") or filters.get("mode") not in (None, "", "any") else ""),
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
         "</div>",
@@ -1081,7 +1177,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         '<div class="note-menu" id="note-menu"></div>',
         _update_confirm(lang),
-        _scripts(lang, {"__LABELS__": embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
+        _scripts(lang, {"__LABELS__": embed, "__LOCATION_LABELS__": location_embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
                         "__SKILLS__": skill_embed,
                         "__SKILL_OWNERS__": sorted(skills_mod.canonical_tokens(skills_cfg).items()),

@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LABEL_COLUMNS = {
     "priority": "INTEGER CHECK (priority IN (0,1))",
     "action_at": "TEXT",
@@ -111,7 +111,8 @@ def _migrate_labels(conn):
 
 
 def upgrade(conn):
-    if check_version(conn) == SCHEMA_VERSION:
+    version = check_version(conn)
+    if version == SCHEMA_VERSION:
         return
     existing = _columns(conn, "labels")
     for name, definition in LABEL_COLUMNS.items():
@@ -119,5 +120,8 @@ def upgrade(conn):
             conn.execute(f"ALTER TABLE labels ADD COLUMN {name} {definition}")
     if "analysis_snapshot" not in _columns(conn, "label_events"):
         conn.execute("ALTER TABLE label_events ADD COLUMN analysis_snapshot TEXT")
-    _migrate_labels(conn)
+    if version < 1:
+        _migrate_labels(conn)
+    from .location_store import sync_all
+    sync_all(conn)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

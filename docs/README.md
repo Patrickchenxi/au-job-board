@@ -13,6 +13,8 @@ English.
 | [agent-install.md](agent-install.md) | The same install steps for an AI coding agent |
 | [usage.md](usage.md) | The fetch, analyze, report and panel workflow, commands, labels and notes, local data and provenance |
 | [manual-updates.md](manual-updates.md) | Editable next-run fetch settings, background updates, configuration timing and failure states |
+| [location-workflow.md](location-workflow.md) | Region/work-mode filtering, location-specific records, corrections and database upgrade/recovery |
+| [location-data.md](location-data.md) | Offline Australian reference data, attribution, precision and matching limits |
 | [public-configuration.md](public-configuration.md) | The configuration file, paths, sources and which files stay private |
 | [legacy-rule-profiles.md](legacy-rule-profiles.md) | The six rule profiles, per-rule switches and how to apply a change |
 | [eligibility-profiles.md](eligibility-profiles.md) | The separate, read-only `eligibility` section and command |

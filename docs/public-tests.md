@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 29 checks: 27 Python tests
-plus two Node behavior tests.
+be collected by accident. The entry currently has 34 checks: 31 Python tests
+plus three Node behavior tests.
 
 Run it from the project root with the project interpreter:
 

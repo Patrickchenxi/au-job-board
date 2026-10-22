@@ -1,4 +1,69 @@
 const LABELS = window.__LABELS__ || {};
+// Legacy labels remain uid-scoped. Location labels must never overwrite them.
+const LOCATION_LABELS=new Map((window.__LOCATION_LABELS__||[]).map(([uid,id,label])=>[scopeKey(uid,id),label]));
+function scopeKey(uid,id){return JSON.stringify([uid,id||'']);}
+function elementLocation(el){
+  const host=el && el.closest ? el.closest('[data-location-id]') : null;
+  return host && host.dataset.locationId || '';
+}
+function detailScope(){return document.querySelector('#detail [data-location-scope]');}
+function scopeLabel(uid,id){return id ? LOCATION_LABELS.get(scopeKey(uid,id))||{} : LABELS[uid]||{};}
+function adoptScopeLabel(uid,id,label){
+  if(id)LOCATION_LABELS.set(scopeKey(uid,id),label);
+  else LABELS[uid]=label;
+}
+function inScope(el,id){return elementLocation(el)===(id||'');}
+function hasLocationDraft(){
+  const raw=document.getElementById('location-raw'), mode=document.getElementById('location-mode');
+  return !!(raw && raw.value!==raw.defaultValue) || !!(mode && mode.dataset.loaded!==undefined && mode.value!==mode.dataset.loaded);
+}
+async function changeLocation(select){
+  const scope=detailScope(); if(!scope)return;
+  const previous=scope.dataset.locationId||'', target=select.value, uid=scope.dataset.uid;
+  select.value=previous;
+  if(NAV_GATES || target===previous)return;
+  if(await openJob(uid,target)){
+    const next=document.getElementById('location-choice');if(next)next.focus({preventScroll:true});
+  }
+}
+async function saveLocation(clear){
+  const scope=detailScope(), raw=document.getElementById('location-raw'), mode=document.getElementById('location-mode');
+  if(!scope || !scope.dataset.locationId || !raw || !mode || imeBusy(raw) || imeJustComposed(raw))return;
+  const uid=scope.dataset.uid, id=scope.dataset.locationId, seq=OPEN_SEQ;
+  if(LABEL_WRITES.has(uid))return;
+  const status=document.getElementById('location-status');
+  if(!clear && !raw.value.trim()){if(status)status.textContent=T('location.required');raw.focus();return;}
+  const payload={uid,location_id:id,raw:clear?null:raw.value,work_mode:mode.value};
+  const controls=Array.from(scope.querySelectorAll('.location-editor input,.location-editor select,.location-editor button'));
+  const disabled=controls.map(el=>el.disabled);
+  controls.forEach(el=>{el.disabled=true;});
+  let release, saved=false;
+  const lock=new Promise(resolve=>{release=resolve;});
+  LABEL_WRITES.set(uid,lock);
+  if(status)status.textContent=T('location.saving');
+  try{
+    if(NOTE_WRITES.has(uid))await NOTE_WRITES.get(uid);
+    const r=await fetch('/api/location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!r.ok)throw new Error(await r.text());
+    const data=await r.json();
+    if(!data.ok || data.location_id!==id)throw new Error('scope mismatch');
+    saved=true;
+    raw.defaultValue=raw.value;mode.dataset.loaded=mode.value;
+    if(status)status.textContent=T('location.saved');
+    toast(T('location.saved'));
+  }catch(_){if(status)status.textContent=T('location.failed');toast(T('location.failed'));}
+  finally{
+    LABEL_WRITES.delete(uid);controls.forEach((el,i)=>{el.disabled=disabled[i];});release(saved);
+  }
+  // A waiting navigation owns its destination. Otherwise reload through the
+  // ordinary gate, which still protects any notes edited during this request.
+  if(saved && !NAV_GATES && seq===OPEN_SEQ && OPEN_UID===uid && OPEN_LOCATION===id){
+    if(await openJob(uid,id)){
+      const next=document.getElementById('location-choice');if(next)next.focus({preventScroll:true});
+      toast(T('location.saved'));
+    }
+  }
+}
 /* 界面文案：服务端按当前语言注入（i18n.js_strings）。数据（备注、技能名）不经过这里。 */
 const I18N = window.__I18N__ || {};
 function T(key, vars){
@@ -57,26 +122,27 @@ function conceal(el, done){
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
  clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),1400);}
 /* 处理状态：想投 / 已投 / 跳过 才算处理；星标独立。卡片、详情状态行与竖屏底栏
-   都读 LABELS[uid]（组合并后的标注），与服务端 _card_state / _state_text 同口径。 */
+   读取对应 UID / location_id 的状态，与服务端 _card_state / _state_text 同口径。 */
 const TONE={eligible:'good',ineligible:'bad',saved:'want',applied:'good',skipped:'mid'};
 function stateText(s){
   let text=s.action ? T('state.done',{status:T('value.action.'+s.action)}) : T('state.open');
   if(s.priority) text+=' · '+T('state.star');
   return text;
 }
-function refreshDot(uid){
-  const s=LABELS[uid]||{};
+function refreshDot(uid,id=''){
+  const s=scopeLabel(uid,id);
   document.querySelectorAll('.prog[data-prog-uid="'+uid+'"]').forEach(el=>{
+    if(!inScope(el,id))return;
     const v=s.action;
     el.hidden=!v;
     el.className='prog'+(v ? ' '+(TONE[v]||'mid') : '');
     el.textContent=v ? T('value.action.'+v) : '';
     el.title=v ? T('field.action')+T('js.colon')+T('value.action.'+v) : '';
   });
-  document.querySelectorAll('.card-star[data-star-uid="'+uid+'"]').forEach(el=>{ el.hidden=!s.priority; });
-  document.querySelectorAll('[data-state-uid="'+uid+'"]').forEach(el=>{ el.textContent=stateText(s); });
+  document.querySelectorAll('.card-star[data-star-uid="'+uid+'"]').forEach(el=>{ if(inScope(el,id))el.hidden=!s.priority; });
+  document.querySelectorAll('[data-state-uid="'+uid+'"]').forEach(el=>{ if(inScope(el,id))el.textContent=stateText(s); });
   if(!document.querySelector('#detail [data-uid="'+uid+'"]')) return;
-  document.querySelectorAll('#detail .label-sum').forEach(el=>{ el.textContent=stateText(s); });
+  document.querySelectorAll('#detail .label-sum').forEach(el=>{ if(inScope(el,id))el.textContent=stateText(s); });
 }
 /* 资格纠错摘要：当前有效结果 · 来源（服务端 _qualification_summary 同口径） */
 function qualificationSummary(q){
@@ -106,8 +172,9 @@ function labelToast(field,data){
   return data.value==null ? T('js.unlabelled') : T('js.labelled')+' · '+T('field.'+field);
 }
 /* 卡片上的「人工：可投/不可投」只提示与分析结果相反的人工纠正（服务端 _correction_tag 同口径） */
-function refreshCorrectionTag(uid,q){
+function refreshCorrectionTag(uid,q,id=''){
   document.querySelectorAll('.card[data-uid="'+uid+'"] .tags').forEach(tags=>{
+    if(!inScope(tags,id))return;
     let tag=tags.querySelector('.tag.corr');
     if(!q || !q.corrected || !q.analysis || q.effective===q.analysis){ if(tag) tag.remove(); return; }
     if(!tag){
@@ -119,17 +186,26 @@ function refreshCorrectionTag(uid,q){
     tag.title=T('qualification.manual');
   });
 }
-async function openJob(uid){
-  if(OPEN_UID && OPEN_UID!==uid){
+function detailHash(uid,id){
+  return '#'+encodeURIComponent(uid)+(id===undefined ? '' : '&location_id='+encodeURIComponent(id));
+}
+function readDetailHash(){
+  const raw=location.hash.slice(1), cut=raw.indexOf('&location_id=');
+  try{return {uid:decodeURIComponent(cut<0?raw:raw.slice(0,cut)),
+    id:cut<0?undefined:decodeURIComponent(raw.slice(cut+13))};}catch(_){return {uid:''};}
+}
+async function openJob(uid,locationId){
+  if(OPEN_UID && (OPEN_UID!==uid || locationId!==OPEN_LOCATION || NOTE_REQUESTS.size || LABEL_WRITES.size || hasDetailDraft())){
     if(!await allowDetailNavigation()){
-      history.replaceState(null,"",location.pathname+location.search+"#"+encodeURIComponent(OPEN_UID));
-      return;
+      history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID,OPEN_LOCATION));
+      return false;
     }
-    if(UPDATE_PENDING){applyLatestResults("#"+encodeURIComponent(uid));return;}
+    if(UPDATE_PENDING){applyLatestResults(detailHash(uid,locationId));return false;}
   }
   OPEN_UID=uid;
+  OPEN_LOCATION=locationId;
   document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel',c.dataset.uid===uid));
-  history.replaceState(null,'','#'+encodeURIComponent(uid));
+  history.replaceState(null,'',detailHash(uid,locationId));
   const pane=document.getElementById('detail');
   const seq=(OPEN_SEQ+=1);
   const mobileOpening=document.body.classList.contains('portrait') &&
@@ -144,27 +220,40 @@ async function openJob(uid){
     reveal(pane);                                   // 竖屏：详情从右侧滑入
   }
   try{
-    const r=await fetch('/api/job?uid='+encodeURIComponent(uid));
+    const params=new URLSearchParams({uid});
+    if(locationId!==undefined)params.set('location_id',locationId);
+    const context=new URLSearchParams(location.search);
+    for(const key of ['geo','mode'])if(context.has(key))params.set(key,context.get(key));
+    const r=await fetch('/api/job?'+params);
     if(!r.ok) throw new Error(await r.text());
     const d=await r.json();
     if(seq!==OPEN_SEQ) return;                      // 连点时只认最后一次
     clearTimeout(slow);
     pane.innerHTML=d.html;
+    const scope=detailScope();
+    if(scope){
+      OPEN_LOCATION=scope.dataset.locationId||'';
+      try{adoptScopeLabel(uid,OPEN_LOCATION,JSON.parse(scope.dataset.scopeLabel));}catch(_){}
+      history.replaceState(null,'',detailHash(uid,OPEN_LOCATION));
+    }
+    const mode=document.getElementById('location-mode');if(mode)mode.dataset.loaded=mode.value;
     pane.querySelectorAll('.note input').forEach(noteSync);
     pane.classList.remove('label-open');            // 标注抽屉属于上一条，换条即收起
     pane.classList.add('open');
     pane.scrollTop=0;
     syncDetailNav();
     swapIn(pane);
+    return true;
   }catch(e){
     clearTimeout(slow);
     if(seq!==OPEN_SEQ) return;
     pane.innerHTML='';
     const d=document.createElement('div'); d.className='placeholder';
     d.textContent=T('js.load_failed')+e.message; pane.appendChild(d);
+    return false;
   }
 }
-let OPEN_SEQ=0, OPEN_UID=null;
+let OPEN_SEQ=0, OPEN_UID=null, OPEN_LOCATION=undefined;
 const NOTE_REQUESTS=new Set();
 const NOTE_WRITES=new Map();
 const LABEL_WRITES=new Map();
@@ -180,10 +269,11 @@ function swapIn(pane){
 }
 async function closeDetail(){
   if(!await allowDetailNavigation()){
-    if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+"#"+encodeURIComponent(OPEN_UID));
+    if(OPEN_UID)history.replaceState(null,"",location.pathname+location.search+detailHash(OPEN_UID,OPEN_LOCATION));
     return;
   }
   OPEN_UID=null;
+  OPEN_LOCATION=undefined;
   history.replaceState(null,"",location.pathname+location.search);
   if(UPDATE_PENDING){applyLatestResults("");return;}
   OPEN_SEQ+=1; // Ignore pending responses and skeleton timers after closing.
@@ -192,13 +282,14 @@ async function closeDetail(){
   if(!document.body.classList.contains('portrait') || REDUCED.matches){ pane.classList.remove('open'); return; }
   conceal(pane, ()=>{ pane.hidden=false; pane.classList.remove('open'); });
 }
-function labelButtons(uid){
-  return Array.from(document.querySelectorAll('[data-uid="'+uid+'"][data-field]'));
+function labelButtons(uid,id){
+  return Array.from(document.querySelectorAll('[data-uid="'+uid+'"][data-field]')).filter(b=>id===undefined || inScope(b,id));
 }
 async function setLabel(uid,field,value,btn){
   if(LABEL_WRITES.has(uid)) return LABEL_WRITES.get(uid);
+  const id=elementLocation(btn);
   const wasOn=btn.classList.contains('on');
-  const correction=document.querySelector('[data-qualification-uid="'+uid+'"]');
+  const correction=Array.from(document.querySelectorAll('[data-qualification-uid="'+uid+'"]')).find(el=>inScope(el,id));
   if(field==='eligibility' && wasOn && correction && correction.dataset.corrected!=='true') return;
   const target=wasOn ? null : (field==='priority' ? true : value);
   labelButtons(uid).forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true');});
@@ -210,11 +301,12 @@ async function setLabel(uid,field,value,btn){
   try{
     if(NOTE_WRITES.has(uid)) await NOTE_WRITES.get(uid);
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({uid:uid,field:field,value:target})});
+      body:JSON.stringify({uid:uid,field:field,value:target,...(id?{location_id:id}:{})})});
     if(!r.ok) throw new Error(await r.text());
     const data=await r.json();
-    LABELS[uid]=LABELS[uid]||{};
-    LABELS[uid][field]=data.value;
+    if((data.location_id||'')!==id)throw new Error(T('js.label_retry'));
+    const savedLabel=data.label||{...scopeLabel(uid,id),[field]:data.value};
+    adoptScopeLabel(uid,id,savedLabel);
     if(data.qualification && correction){
       correction.dataset.analysis=data.qualification.analysis||'';
       correction.dataset.corrected=String(data.qualification.corrected);
@@ -226,17 +318,17 @@ async function setLabel(uid,field,value,btn){
       if(was)was.textContent=(data.qualification.corrected && data.qualification.analysis)
         ? T('qualification.analysis_was',{value:T('value.eligibility.'+data.qualification.analysis)}) : '';
     }
-    labelButtons(uid).filter(b=>b.dataset.field===field).forEach(b=>{
+    labelButtons(uid,id).filter(b=>b.dataset.field===field).forEach(b=>{
       const chosen=field==='eligibility' && data.qualification ? data.qualification.effective : data.value;
       const on=field==='priority' ? !!chosen : b.dataset.value===chosen;
       b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
     });
     // 只有推荐视图把本次处理过的卡片变淡（与服务端 _card 的 since 口径一致）
     if(window.__VIEW__==='recommend') document.querySelectorAll('.card[data-uid="'+uid+'"]').forEach(c=>{
-      c.classList.toggle('done',!!LABELS[uid].action);
+      if(inScope(c,id))c.classList.toggle('done',!!savedLabel.action);
     });
-    if(field==='eligibility') refreshCorrectionTag(uid,data.qualification);
-    refreshDot(uid);refreshStats();
+    if(field==='eligibility') refreshCorrectionTag(uid,data.qualification,id);
+    refreshDot(uid,id);refreshStats();
     saved=true;
     toast(labelToast(field,data));
   }catch(e){toast(labelFailure(e));}
@@ -255,7 +347,9 @@ async function refreshStats(){
   if(!document.querySelector('[data-stat]')) return;
   const seq=(STATS_SEQ+=1);
   try{
-    const r=await fetch('/api/stats',{cache:'no-store',credentials:'same-origin'});
+    const context=new URLSearchParams(location.search);
+    const statUrl='/api/stats'+(context.get('geo') || ['remote','hybrid','onsite'].includes(context.get('mode')) ? '?scope=location' : '');
+    const r=await fetch(statUrl,{cache:'no-store',credentials:'same-origin'});
     if(!r.ok) return;
     const d=await r.json();
     if(seq!==STATS_SEQ || !d || typeof d!=='object') return;
@@ -303,6 +397,7 @@ function navKeyIgnored(ev){
   for(const el of [ev.target, document.activeElement]){
     if(!el || !el.tagName) continue;
     if(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
+    if(el.closest && el.closest('.location-panel'))return true;
   }
   // 抽屉、筛选面板和对话浮层开着时按键属于它们
   const detail=document.getElementById('detail');
@@ -336,7 +431,7 @@ function setNote(input){
   // its canonical identity (a translated default is not custom English text).
   const reverted=input._notePending && input.value===input.dataset.noteLoaded;
   const request={payload:reverted ? input.dataset.noteStored : noteCanonicalize(input),display:input.value,
-    version:(input._noteSaveVersion||0)+1};
+    uid,locationId:elementLocation(input),version:(input._noteSaveVersion||0)+1};
   input._noteSaveVersion=request.version;
   input._notePending=request;
   const previous=NOTE_WRITES.get(uid);
@@ -351,16 +446,18 @@ function setNote(input){
   return task;
 }
 async function saveNote(input,request){
-  const uid=input.dataset.uid;
+  const uid=request.uid;
+  const id=request.locationId;
   // 落库前把界面显示值映射回 canonical：默认标签用中文原文，自定义内容原样，
   // 服务端仍走 labels.normalize_note 做最终规范化。显示值本身不入库。
   const payload=request.payload;
   try{
     const r=await fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({uid:uid,field:'note',value:payload||null})});
+      body:JSON.stringify({uid:uid,field:'note',value:payload||null,...(id?{location_id:id}:{})})});
     if(!r.ok) throw new Error(await r.text());
     // 服务端回传 canonical；LABELS 存它，输入框按当前语言显示。
     const d=await r.json();
+    if((d.location_id||'')!==id)throw new Error(T('js.label_retry'));
     const saved=d.value||'';
     if(input._noteSaveVersion===request.version && input.value===request.display){
       noteAdopt(input,saved);
@@ -369,7 +466,7 @@ async function saveNote(input,request){
       input.dataset.noteStored=saved;
       input.dataset.noteLoaded=noteTagTranslate(saved);
     }
-    LABELS[uid]=LABELS[uid]||{}; LABELS[uid].note=saved||null; refreshDot(uid);
+    adoptScopeLabel(uid,id,d.label||{...scopeLabel(uid,id),note:saved||null}); refreshDot(uid,id);
     refreshStats();                 // 只有备注的新标注也算「已标注」
     toast(T('js.note_saved'));
   }catch(e){toast(T('js.note_failed')+e.message);}
@@ -987,7 +1084,8 @@ function viewParams(){
       for(const o of el.selectedOptions) if(o.value) p.append(k,o.value);
       return;
     }
-    if(el.value) p.append(k, el.value);
+    const value=k==='geo' && !filterBatching() ? urlValue(el) : el.value;
+    if(value && !(k==='mode' && value==='any')) p.append(k, value);
   });
   return p;
 }
@@ -1029,8 +1127,8 @@ function gotoView(view,ev){
 }
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.dots').forEach(d=>refreshDot(d.dataset.uid));
-  const h=decodeURIComponent(location.hash.slice(1));
-  if(h && document.getElementById("detail")) openJob(h);
+  const h=readDetailHash();
+  if(h.uid && document.getElementById("detail")) openJob(h.uid,h.id);
   fitLayout();          // 应用记住的分栏宽度 / 决定是不是竖屏
   // 搜索框：请求回来之后焦点会丢，光标也回到开头。带着 q 重新聚焦、光标置尾，
   // 否则用户打字打到一半就被打断，没法连着敲。
@@ -1151,13 +1249,14 @@ function placeUpdate(portrait){
 function resetControl(key){
   document.querySelectorAll('[data-fkey="'+key+'"]').forEach(el=>{
     if(el.type==='checkbox') el.checked=false; else el.value='';
+    if(key==='geo' && !filterBatching())el.defaultValue='';
   });
 }
 /* 复位成默认页渲染出的样子：下拉选「任意」（空值）项，没有空值项（排序）就选第一项 */
 function resetEl(el){
   if(el.type==='checkbox'){ el.checked=false; return; }
   const opts=el.tagName==='SELECT' && el.options ? Array.from(el.options) : [];
-  if(!opts.length){ el.value=''; return; }
+  if(!opts.length){ el.value=''; if(el.dataset.fkey==='geo' && !filterBatching())el.defaultValue=''; return; }
   if(el.multiple){ opts.forEach(o=>{ o.selected=false; }); return; }
   const i=opts.findIndex(o=>o.value==='');
   el.selectedIndex = i<0 ? 0 : i;
@@ -1188,14 +1287,16 @@ function filterBatching(){
 /* 搜索框还没提交的字（380ms 防抖内）不算 URL 状态：基线与快照用渲染时的值，
    这样它计入「应用（N 项）」，丢弃草稿时也一起还原。 */
 function urlValue(el){
-  return el.dataset.fkey==='q' && typeof el.defaultValue==='string' ? el.defaultValue : el.value;
+  return ['q','geo'].includes(el.dataset.fkey) && typeof el.defaultValue==='string' ? el.defaultValue : el.value;
 }
 function filterDraftBegin(){
   if(FILTER_DRAFT) return;
   clearTimeout(Q_TIMER);              // 抽屉打开前排上的搜索跳转作废，搜索词进草稿
   const base=viewParams();
-  const qi=filterControls().find(el=>el.dataset.fkey==='q');
-  if(qi){ base.delete('q'); if(urlValue(qi)) base.append('q', urlValue(qi)); }
+  for(const key of ['q','geo']){
+    const input=filterControls().find(el=>el.dataset.fkey===key);
+    if(input){base.delete(key);if(urlValue(input))base.append(key,urlValue(input));}
+  }
   FILTER_DRAFT={base, snap:filterControls().map(el=>[el,
     el.type==='checkbox' ? el.checked : (el.multiple ? Array.from(el.options).map(o=>o.selected) : urlValue(el))])};
   syncFilterDraft();
@@ -1247,6 +1348,19 @@ function filterChanged(){
   if(!filterBatching()){ applyFilter(); return; }
   filterDraftBegin();
   syncFilterDraft();
+}
+function geoTyping(){
+  if(filterBatching()){filterDraftBegin();syncFilterDraft();}
+}
+function applyGeo(){
+  const input=document.querySelector('[data-fkey="geo"]');
+  if(!input || imeBusy(input) || imeJustComposed(input))return;
+  if(!filterBatching())input.defaultValue=input.value;
+  filterChanged();
+}
+function geoKeys(ev){
+  if(ev.key!=='Enter' || imeComposing(ev) || imeBusy(ev.target) || imeJustComposed(ev.target))return;
+  ev.preventDefault();applyGeo();
 }
 /* 抽屉底部按钮：有改动 =「应用」（一次跳转，跳完不再自动展开）；没改动 = 收起 */
 function moreDone(){
@@ -1387,7 +1501,7 @@ let UPDATE_BASELINE=window.__RESULT_GENERATION__||'', UPDATE_PENDING=null, UPDAT
 let UPDATE_OWN_TASK=null;
 function hasDetailDraft(){
   return Array.from(document.querySelectorAll('.note input')).some(el=>el.dataset.noteLoaded!==undefined && el.value!==el.dataset.noteLoaded) ||
-    !!(skillInput() && skillInput().value.trim());
+    !!(skillInput() && skillInput().value.trim()) || hasLocationDraft();
 }
 async function allowDetailNavigation(){
   NAV_GATES+=1;
@@ -1607,8 +1721,8 @@ window.addEventListener('beforeunload',event=>{
 });
 window.addEventListener('hashchange',()=>{
   if(!document.getElementById('detail'))return;
-  const uid=decodeURIComponent(location.hash.slice(1));
-  if(uid)openJob(uid);else if(OPEN_UID)closeDetail();
+  const h=readDetailHash();
+  if(h.uid)openJob(h.uid,h.id);else if(OPEN_UID)closeDetail();
 });
 document.addEventListener('DOMContentLoaded',()=>{
   let saved=null;

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "reference_version": "geonames-au-011ef7d2b65ba2a0",
+  "source": "GeoNames",
+  "country": "AU",
+  "downloaded_at": "2026-10-22T06:06:45.154918+00:00",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "Contains GeoNames postal data (https://www.geonames.org/), licensed under CC BY 4.0. Reduced to postcode, locality and state; coordinates and other fields removed; duplicate triples removed; rows sorted.",
+  "resources": {
+    "AU.zip": {
+      "url": "https://download.geonames.org/export/zip/AU.zip",
+      "sha256": "fc6264334dab43ac67e3b6950bcd733918681b0158e65412448e59fcec054ded",
+      "bytes": 271087,
+      "last_modified": "Thu, 22 Oct 2026 02:14:34 GMT"
+    },
+    "readme.txt": {
+      "url": "https://download.geonames.org/export/zip/readme.txt",
+      "sha256": "fff60148da20f4d182859d926518efa5b0f3949f3c3273a284901325f1f8f008",
+      "bytes": 2893,
+      "last_modified": "Thu, 22 Oct 2026 02:14:30 GMT"
+    }
+  },
+  "archive_member": {
+    "name": "AU.txt",
+    "sha256": "6ad38fd0b99f9ce5e2f0d4dc44deca6baf045c873e1070f250c8adf42131f995",
+    "rows": 18521
+  },
+  "seed": {
+    "file": "au-postcodes.tsv",
+    "sha256": "011ef7d2b65ba2a06af66f43e8ab4f1522e7083b33f5702826681b4b1a0f45ce",
+    "rows": 18514,
+    "columns": [
+      "postcode",
+      "locality",
+      "state"
+    ]
+  },
+  "states": {
+    "ACT": "Australian Capital Territory",
+    "NSW": "New South Wales",
+    "NT": "Northern Territory",
+    "QLD": "Queensland",
+    "SA": "South Australia",
+    "TAS": "Tasmania",
+    "VIC": "Victoria",
+    "WA": "Western Australia"
+  },
+  "cities": {
+    "Adelaide": "SA",
+    "Brisbane": "QLD",
+    "Canberra": "ACT",
+    "Darwin": "NT",
+    "Hobart": "TAS",
+    "Melbourne": "VIC",
+    "Perth": "WA",
+    "Sydney": "NSW"
+  },
+  "city_scope": "Hand-maintained state/territory capital names only. City is coarser than a postcode and does not establish CBD or metro membership."
+}

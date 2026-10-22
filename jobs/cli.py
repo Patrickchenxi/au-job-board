@@ -584,6 +584,7 @@ def cmd_label(args) -> int:
     if args.export:
         info = labels_mod.export(conn, out_dir)
         print(f"[label] 导出 {info['count']} 条标注 -> {info['csv']} / {info['md']}")
+        print(f"[label] 地点记录 {info['location_count']} 条及纠正/事件 -> {info['locations']}")
         return 0
 
     if args.export_fixtures:
