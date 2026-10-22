@@ -157,6 +157,7 @@ AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-jo
 | [使用指南](docs/usage.md) | 流程、命令、本地数据、备注、语言 |
 | [抓取设置与更新](docs/manual-updates.md) | 下次运行配置编辑、面板后台更新、失败与并发限制（英文） |
 | [地点与人工记录](docs/location-workflow.md) | 离线地区／工作方式筛选、逐地点标注与升级说明（英文） |
+| [只读 agent API](docs/agent-api.md) | 回环认证读取、稳定分页、精确批次与外部日报取数（英文） |
 | [配置说明](docs/public-configuration.md) | 配置文件、路径、来源、面板设置 |
 | [规则 profile](docs/legacy-rule-profiles.md) | 六个 profile、逐条规则开关、如何让改动生效 |
 | [资格快照](docs/eligibility-profiles.md) | 独立的只读 `eligibility` 配置段 |

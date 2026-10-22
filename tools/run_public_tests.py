@@ -42,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # (relative path, one-line description, applicable sys.platform values)
 # platforms=None means every platform; a tuple restricts the entry.
 PYTHON_TESTS = (
+    ("tools/test_agent_api.py", "authenticated read-only snapshots and external agent client", None),
+    ("tools/test_batches.py", "exact fetch membership and schema 3 recovery", None),
     ("tools/test_location_http.py", "location HTTP scope and same-origin protection", None),
     ("tools/test_locations.py", "offline Australian location reference and matching", None),
     ("tools/test_location_state.py", "location migration, scope ownership and query boundaries", None),

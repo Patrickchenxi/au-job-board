@@ -69,10 +69,12 @@ def find(conn, config, uid, location_id=None, filters=None):
     return decorate(conn, row, legacy, index, selected, kind)
 
 
-def query(conn, config, view, offset, limit, filters, since, skills_cfg):
+def query(conn, config, view, offset, limit, filters, since, skills_cfg, *, candidate_uids=None):
     from . import db, panel_data
     kept, excluded, legacy, index = report.load(conn, config, deduplicate=False)
     raw = (excluded if view == 'excluded' else kept if view == 'recommend' else kept + excluded)
+    if candidate_uids is not None:
+        raw = [r for r in raw if r['uid'] in candidate_uids]
     # Select source candidates before choosing display representatives.
     if view == 'new':
         batch = db.last_batch_started_at(conn)

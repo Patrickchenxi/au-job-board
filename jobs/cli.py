@@ -65,6 +65,7 @@ def _open(args):
 
 def _cmd_fetch(args) -> int:
     from .sources import iter_sources
+    from . import batches
 
     config, conn = _open(args)
     # Closing also rolls back any uncommitted batch before outer finalization.
@@ -75,43 +76,74 @@ def _cmd_fetch(args) -> int:
             print("config.yaml 里没有 queries", file=sys.stderr)
             return 1
 
-        started = database.utcnow()
-        stats = {}
         only = getattr(args, "only", None)
-        source_count = 0
-        for name, fetch_fn in iter_sources(config):
-            if only and name != only:
-                continue
-            source_count += 1
-            print(f"[fetch] {name} ...", flush=True)
-            try:
-                jobs = fetch_fn(config, queries)
-            except RunTimeout:
-                raise                # 超时必须向上传播，否则会被当成「这个来源失败」吞掉
-            except Exception as exc:                       # noqa: BLE001
-                print(f"  [{name}] 失败: {type(exc).__name__}: {exc}")
-                stats[name] = {"error": str(exc)}
-                if hasattr(args, "_run_failed_sources"):
-                    args._run_failed_sources.add(name)
-                continue
-            inserted = updated = 0
-            for job in jobs:
-                result = database.upsert_job(conn, job)
-                inserted += result == "inserted"
-                updated += result == "updated"
-            conn.commit()
-            stats[name] = {"seen": len(jobs), "inserted": inserted, "updated": updated}
-            if hasattr(args, "_run_counts"):
-                for field in ("seen", "inserted", "updated"):
-                    args._run_counts[field] += stats[name][field]
-            print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
-
-        if not source_count:
+        selected = [(name, fn) for name, fn in iter_sources(config) if not only or name == only]
+        if not selected:
             return 1
-        if hasattr(args, "_run_counts"):
-            args._run_failed_sources.update(config.get("_run_source_failures", {}))
-        database.log_run(conn, "fetch", started, stats)
-        conn.commit()
+
+        started = database.utcnow()
+        stats, failed_sources = {}, set()
+        batch_id = None
+        try:
+            batch_id = batches.start_batch(
+                conn, pipeline_task_id=getattr(args, "_task_id", None),
+                trigger=getattr(args, "trigger", None) or "cli")
+            conn.commit()
+            for name, fetch_fn in selected:
+                print(f"[fetch] {name} ...", flush=True)
+                try:
+                    jobs = fetch_fn(config, queries)
+                except RunTimeout:
+                    raise            # 全流程超时必须向上传播
+                except Exception as exc:                   # noqa: BLE001
+                    print(f"  [{name}] 失败: {type(exc).__name__}: {exc}")
+                    stats[name] = {"error": str(exc)}
+                    failed_sources.add(name)
+                    if hasattr(args, "_run_failed_sources"):
+                        args._run_failed_sources.add(name)
+                    continue
+                inserted = updated = 0
+                for job in jobs:
+                    result = database.upsert_job(conn, job)
+                    batches.record_member(conn, batch_id,
+                                          f"{job['source']}:{job['source_id']}", result == "inserted")
+                    inserted += result == "inserted"
+                    updated += result == "updated"
+                # The source's jobs, locations and exact members publish together.
+                conn.commit()
+                stats[name] = {"seen": len(jobs), "inserted": inserted, "updated": updated}
+                if hasattr(args, "_run_counts"):
+                    for field in ("seen", "inserted", "updated"):
+                        args._run_counts[field] += stats[name][field]
+                print(f"  {name}: 见到 {len(jobs)}，新增 {inserted}，更新 {updated}")
+
+            failed_sources.update(config.get("_run_source_failures", {}))
+            if hasattr(args, "_run_failed_sources"):
+                args._run_failed_sources.update(failed_sources)
+            database.log_run(conn, "fetch", started, stats)
+            run_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            batches.finish_batch(conn, batch_id, "partial" if failed_sources else "success",
+                                 error="source_failed" if failed_sources else None,
+                                 fetch_run_id=run_id)
+            conn.commit()
+        except BaseException as exc:
+            # Preserve already committed sources and discard this source's jobs
+            # and members before recording a terminal collection fact. Never turn
+            # RunTimeout, SIGTERM/SystemExit or KeyboardInterrupt into success.
+            conn.rollback()
+            if batch_id is not None:
+                state, error = "error", "collection_failed"
+                if isinstance(exc, RunTimeout):
+                    state, error = "timeout", "run_timeout"
+                elif isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    state, error = "interrupted", "collection_interrupted"
+                try:
+                    batches.finish_batch(conn, batch_id, state, error=error)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    print("[fetch] 批次收尾失败，保留未完成状态。", file=sys.stderr)
+            raise
         print(f"[fetch] 完成 -> {database.counts(conn)}")
         return 0
 

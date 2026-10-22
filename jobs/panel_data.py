@@ -310,14 +310,18 @@ def _resolve_since(conn, view: str, filters: dict) -> str | None:
 
 
 def _query(conn, config, view, offset, limit, filters=None, since=None,
-           skills_cfg=None):
+           skills_cfg=None, *, candidate_uids=None):
     """返回 (页内行[已装饰], 总数)。只装饰当前页。"""
     filters = filters or {}
     from . import location_query, location_store
     if location_query.enabled(filters):
         return location_query.query(conn, config, view, offset, limit, filters,
-                                    since or filters.get(SINCE_KEY) or location_store.freeze_marker(conn), skills_cfg)
-    kept, excluded, labels, index = report_mod.load(conn, config)
+                                    since or filters.get(SINCE_KEY) or location_store.freeze_marker(conn), skills_cfg,
+                                    candidate_uids=candidate_uids)
+    kept, excluded, labels, index = report_mod.load(conn, config, deduplicate=candidate_uids is None)
+    if candidate_uids is not None:
+        kept = report_mod.best_per_group([r for r in kept if r['uid'] in candidate_uids])
+        excluded = [r for r in excluded if r['uid'] in candidate_uids]
     frozen_labels = (labels_mod.action_states_at(
         conn, since or filters.get(SINCE_KEY) or labels_mod.freeze_marker(conn))
         if view == "recommend" else labels)
@@ -336,7 +340,8 @@ def _query(conn, config, view, offset, limit, filters=None, since=None,
             full_kept, full_excluded, _, _ = report_mod.load(conn, config, deduplicate=False)
             present = {r["uid"] for r in rows}
             rows += [r for r in full_kept + full_excluded
-                     if r["uid"] in scoped_uids and r["uid"] not in present]
+                     if r["uid"] in scoped_uids and r["uid"] not in present
+                     and (candidate_uids is None or r["uid"] in candidate_uids)]
     elif view == "new":
         # 最近一批抓取。**不看访问时间** —— 那套会被每次页面加载推走，
         # 基线永远晚于最近一次抓取，结果恒为空。

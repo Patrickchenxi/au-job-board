@@ -44,7 +44,9 @@ legacy UID records; use the panel for location-specific edits.
 
 ## Upgrade and recovery
 
-The database version is 2. Opening a schema-1 installation adds location
+The database version is 3; the location upgrade was introduced in version 2.
+Version 3 adds exact fetch batch membership without re-parsing existing locations
+or replaying human-label conversions; see [agent access](agent-api.md). Opening a schema-1 installation adds location
 identities and empty independent scope records in one transaction; it does not
 replay the earlier label conversion or assign guessed location scopes to old
 human records. Schema 0 runs its existing protected label upgrade first. A

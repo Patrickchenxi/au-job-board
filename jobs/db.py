@@ -177,7 +177,12 @@ def connect(path: str | Path) -> sqlite3.Connection:
             return conn
         # Schema additions, legacy conversion, audit events and version publish
         # form one transaction, including on the first connection to an old DB.
-        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        if version < 2:
+            conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        else:
+            # Later upgrades only add their own schema, leaving existing
+            # business tables and structured-location facts untouched.
+            conn.execute("BEGIN IMMEDIATE")
         migrations.upgrade(conn)
         conn.commit()
     except BaseException:
