@@ -152,7 +152,9 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 try: proc.wait(timeout=12)
                 except subprocess.TimeoutExpired: proc.kill();proc.wait(timeout=5)
         self.addCleanup(cleanup)
-        for _ in range(100):
+        # Cold CI runners import the full CLI stack slowly; bound by wall time.
+        deadline = time.monotonic() + 30
+        while True:
             if proc.poll() is not None:
                 self.fail('Application exited: '+(root/'app.log').read_text())
             try:
@@ -160,9 +162,9 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                     break
             except OSError:
                 pass
+            if time.monotonic() > deadline:
+                self.fail('Application MCP startup timed out: '+(root/'app.log').read_text())
             await asyncio.sleep(.05)
-        else:
-            self.fail('Application MCP startup timed out')
         connection = http.client.HTTPConnection('127.0.0.1',port,timeout=10)
         connection.request('GET','/?view=all')
         response = await asyncio.to_thread(connection.getresponse)
