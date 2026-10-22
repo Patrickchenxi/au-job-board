@@ -3,7 +3,7 @@
 （Node 标准库 + 最小 DOM stub，无第三方依赖；执行 panel.js 里的真实函数）。
 
 覆盖：
-  - UX-1①：上一条 / 下一条 + J/K 基于页面载入时冻结的列表；标注改变视图成员后
+  - UX-1①：上一条 / 下一条 + J/K（显式选 Vim 方案；三种方案见 test_panel_shortcuts.mjs）基于页面载入时冻结的列表；标注改变视图成员后
     顺序不变、不跳条；首/末条提示；经过 allowDetailNavigation（保存中等待、草稿确认）；
     等待期间重复按键不排队；待应用新结果（UPDATE_PENDING）时整页载入一次并把目标
     uid 带进 hash，之后的按键不再发起导航；快速连按只认最后一次响应
@@ -110,7 +110,7 @@ class El {
   scrollIntoView() { this.scrolled = (this.scrolled || 0) + 1; }
 }
 
-function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false } = {}) {
+function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], owners = [], portrait = false, keys = "" } = {}) {
   const ids = new Map();
   const reg = {};
   const docListeners = new Map();
@@ -118,7 +118,8 @@ function loadPanel({ lang = "en", cards = ["A", "B", "C", "D"], skills = [], own
   const body = new El("body");
   if (portrait) body.classList.add("portrait");
   const document = {
-    body, activeElement: body, hidden: false, cookie: "",
+    // 快捷键方案（cookie jobs_keys）：J/K 用例必须显式选 vim，默认方案是 ← / →
+    body, activeElement: body, hidden: false, cookie: keys ? "jobs_keys=" + keys : "",
     documentElement: { style: { setProperty() {} }, dataset: {}, lang },
     getElementById: (id) => ids.get(id) || null,
     querySelector: (s) => (reg[s] || [])[0] || null,
@@ -296,7 +297,7 @@ async function testFrozenList() {
 async function testNavigationGate() {
   console.log("\n-- UX-1①：保存中 / 草稿 / 待应用新结果 --");
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     let release; t.api.addPendingNote(new Promise((r) => { release = r; }));
     const first = t.api.stepDetail(1); await tick();
@@ -308,7 +309,7 @@ async function testNavigationGate() {
     eq("等待结束后门闩归零", t.api.state().gates, 0);
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     const input = new El("input"); input.dataset.noteLoaded = "saved"; input.value = "draft";
     t.reg[".note input"] = [input];
@@ -322,7 +323,7 @@ async function testNavigationGate() {
     eq("草稿确认：继续到B", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("A");
     t.api.setUpdate({ uid: "A", baseline: "generation-1", pending: "generation-2" });
     await t.api.stepDetail(1);
@@ -337,7 +338,7 @@ async function testNavigationGate() {
 
 async function testRapidKeys() {
   console.log("\n-- UX-1①：快速连按 J/K --");
-  const t = loadPanel();
+  const t = loadPanel({ keys: "vim" });
   await t.api.openJob("A");
   const pending = [];
   t.routes.job = (uid) => new Promise((resolve) => pending.push({ uid, resolve }));
@@ -360,7 +361,7 @@ async function testRapidKeys() {
 
 async function testKeyFilters() {
   console.log("\n-- UX-1①：按键忽略条件 --");
-  const t = loadPanel();
+  const t = loadPanel({ keys: "vim" });
   await t.api.openJob("A");
   const cases = [
     ["输入框", { target: new El("input") }],
@@ -398,7 +399,7 @@ async function testKeyFilters() {
   t.key({ key: "K" }); await tick(); await tick();
   eq("大写 K：上一条", t.api.state().uid, "A");
   {
-    const s = loadPanel();
+    const s = loadPanel({ keys: "vim" });
     s.ids.delete("detail");
     s.key({ key: "j" }); await tick();
     eq("设置页（无详情面板）：不处理", s.calls.length, 0);
@@ -408,7 +409,7 @@ async function testKeyFilters() {
 async function testOverlayKeyOwnership() {
   console.log("\n-- UX-1①：浮层打开时 J/K 不切条 --");
   {
-    const t = loadPanel({ portrait: true });
+    const t = loadPanel({ portrait: true, keys: "vim" });
     await t.api.openJob("B");
     const sheet = new El("div"); t.ids.set("label-sheet", sheet);
     t.api.toggleLabelSheet(true);
@@ -426,7 +427,7 @@ async function testOverlayKeyOwnership() {
     eq("标注抽屉关闭后：K 恢复", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("B");
     const confirm = new El("div", { hidden: false });
     const cancel = new El("button");
@@ -446,7 +447,7 @@ async function testOverlayKeyOwnership() {
     eq("更新确认关闭后：K 恢复", t.api.state().uid, "B");
   }
   {
-    const t = loadPanel();
+    const t = loadPanel({ keys: "vim" });
     await t.api.openJob("B");
     const btn = new El("button"), pop = new El("div", { hidden: false }), choice = new El("button");
     choice.className = "on"; pop.q["button.on"] = [choice];

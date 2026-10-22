@@ -115,7 +115,8 @@ class Handler(BaseHTTPRequestHandler):
                 if row is None:
                     self._send(f"uid={uid} not found".encode(), 404, "text/plain; charset=utf-8", started)
                     return
-                payload = json.dumps({"html": _detail_html(row, lang)}, ensure_ascii=False)
+                payload = json.dumps({"html": _detail_html(row, lang, i18n.resolve_keys(self.headers.get("Cookie")))},
+                                     ensure_ascii=False)
                 self._send(payload.encode("utf-8"), 200,
                            "application/json; charset=utf-8", started)
                 return
@@ -127,7 +128,8 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/settings":
                 section = (qs.get("section") or [SETTINGS_SECTIONS[0]])[0]
                 page = render_settings(conn, self.config, lang, theme, section,
-                                       i18n.lang_pref(self.headers.get("Cookie")))
+                                       i18n.lang_pref(self.headers.get("Cookie")),
+                                       i18n.resolve_keys(self.headers.get("Cookie")))
                 self._send(page.encode("utf-8"), 200,
                            "text/html; charset=utf-8", started)
                 return

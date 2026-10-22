@@ -11,6 +11,7 @@
 
 语言选择：cookie `jobs_lang`（zh / en）> 浏览器 Accept-Language > 中文。
 外观：cookie `jobs_theme`（light / dark），没有就跟随系统。
+快捷键：cookie `jobs_keys`（vim / gamer），没有就是 default（← / →）。
 """
 
 from __future__ import annotations
@@ -23,6 +24,15 @@ LANG_COOKIE = "jobs_lang"
 THEME_COOKIE = "jobs_theme"
 THEMES = ("light", "dark")
 HTML_LANG = {"zh": "zh-CN", "en": "en"}
+# 详情上一条 / 下一条的按键方案。KEY_PROFILES 的键与 panel.js 的同名表一致：
+# (上一条, 下一条) 的显示字形与 aria-keyshortcuts 值。
+KEYS_COOKIE = "jobs_keys"
+DEFAULT_KEYS = "default"
+KEY_PROFILES = {
+    "default": (("←", "ArrowLeft"), ("→", "ArrowRight")),
+    "vim": (("K", "K"), ("J", "J")),
+    "gamer": (("A", "A"), ("D", "D")),
+}
 
 STRINGS: dict[str, dict[str, str]] = {
     "zh": {
@@ -228,6 +238,31 @@ STRINGS: dict[str, dict[str, str]] = {
         "detail.sheet_done": "完成",
         "detail.sheet_close": "收起标注",
         "detail.open": "打开原文",
+        "detail.copy": "复制岗位",
+        "detail.copy_title": "复制 UID、标题、公司、地点、原帖链接和完整 JD，可粘贴给外部 AI",
+        "copy.uid": "UID",
+        "copy.title": "标题",
+        "copy.company": "公司",
+        "copy.location": "地点",
+        "copy.record_location": "当前记录地点",
+        "copy.url": "原帖链接",
+        "copy.jd": "完整 JD",
+        "copy.manual_title": "手动复制岗位",
+        "copy.manual_body": "浏览器没有允许自动复制。下面已全选完整内容，按 ⌘C 或 Ctrl+C 复制；手机上长按选择后复制。",
+        "copy.select": "全选",
+        "copy.close": "关闭",
+        "js.copy_done": "已复制岗位与完整 JD",
+        "js.copy_done_short": "已复制 ✓",
+        "js.copy_missing": "没有找到可复制的岗位内容，请重新打开这条岗位",
+        "js.keys_saved": "上一条 / 下一条快捷键：{keys}",
+        "set.keys_title": "快捷键",
+        "set.keys_desc": "在岗位详情里切换上一条 / 下一条。输入框、下拉框和弹出层里按键不会切换岗位。",
+        "set.keys_default": "默认",
+        "set.keys_default_desc": "← 上一条 · → 下一条",
+        "set.keys_vim": "Vim",
+        "set.keys_vim_desc": "K 上一条 · J 下一条",
+        "set.keys_gamer": "游戏",
+        "set.keys_gamer_desc": "A 上一条 · D 下一条",
         "detail.posted": "发布 {date}",
         "detail.dupes": "另有 {n} 条重复（{sources}）",
         "detail.rule": "被规则排除：",
@@ -695,6 +730,31 @@ STRINGS: dict[str, dict[str, str]] = {
         "detail.sheet_done": "Done",
         "detail.sheet_close": "Close labels",
         "detail.open": "Open listing",
+        "detail.copy": "Copy job",
+        "detail.copy_title": "Copy the UID, title, company, location, listing link and full description to paste into another AI tool",
+        "copy.uid": "UID",
+        "copy.title": "Title",
+        "copy.company": "Company",
+        "copy.location": "Location",
+        "copy.record_location": "Current record location",
+        "copy.url": "Listing link",
+        "copy.jd": "Full job description",
+        "copy.manual_title": "Copy the job manually",
+        "copy.manual_body": "The browser did not allow automatic copying. The full text below is selected: press ⌘C or Ctrl+C. On a phone, press and hold to select, then copy.",
+        "copy.select": "Select all",
+        "copy.close": "Close",
+        "js.copy_done": "Copied the job and full description",
+        "js.copy_done_short": "Copied ✓",
+        "js.copy_missing": "Nothing to copy was found. Open this job again.",
+        "js.keys_saved": "Previous / next shortcuts: {keys}",
+        "set.keys_title": "Keyboard shortcuts",
+        "set.keys_desc": "Move to the previous or next job while reading details. Keys typed in text fields, menus and dialogs never switch jobs.",
+        "set.keys_default": "Default",
+        "set.keys_default_desc": "← previous · → next",
+        "set.keys_vim": "Vim",
+        "set.keys_vim_desc": "K previous · J next",
+        "set.keys_gamer": "Gamer",
+        "set.keys_gamer_desc": "A previous · D next",
         "detail.posted": "Posted {date}",
         "detail.dupes": "{n} duplicates ({sources})",
         "detail.rule": "Excluded by rule: ",
@@ -1003,6 +1063,12 @@ def resolve_theme(cookie_header: str | None = None) -> str | None:
     """明确选过浅色/深色才返回；None = 跟随系统。"""
     value = parse_cookies(cookie_header).get(THEME_COOKIE)
     return value if value in THEMES else None
+
+
+def resolve_keys(cookie_header: str | None = None) -> str:
+    """上一条 / 下一条的按键方案；没选过或不认得的值都是 default。"""
+    value = parse_cookies(cookie_header).get(KEYS_COOKIE)
+    return value if value in KEY_PROFILES else DEFAULT_KEYS
 
 
 def lang_pref(cookie_header: str | None = None) -> str:

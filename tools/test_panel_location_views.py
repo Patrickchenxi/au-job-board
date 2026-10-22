@@ -90,6 +90,13 @@ class LocationViews(unittest.TestCase):
         self.assertFalse(Nodes(html).find('script'))
         self.assertIn('&lt;script&gt;', html)
 
+    def test_copy_text_names_current_record_location(self):
+        copied = Nodes(panel_views._detail_html(row(), 'en')).find('button', onclick='copyJob(this)')[0]['data-copy-text']
+        self.assertIn('Location: Sydney NSW / Melbourne VIC\nCurrent record location: Melbourne VIC\n', copied)
+        self.assertIn('A wholly fictional role.', copied)
+        legacy = Nodes(panel_views._detail_html(row(_location=None), 'en')).find('button', onclick='copyJob(this)')[0]
+        self.assertNotIn('Current record location', legacy['data-copy-text'])
+
     def test_correction_controls_and_historical_location(self):
         sample = row()
         sample['_location']['corrected'] = True

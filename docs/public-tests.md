@@ -10,8 +10,8 @@ still only needs the two short offline checks in
 `tools/run_public_tests.py` runs an explicit, fixed list of synthetic,
 offline tests. There is no test discovery or globbing: the inventory is a
 literal list, so a maintainer-only test that needs a private corpus can never
-be collected by accident. The entry currently has 36 checks: 33 Python tests
-plus three Node behavior tests.
+be collected by accident. The entry currently has 38 checks: 33 Python tests
+plus five Node behavior tests.
 
 Run it from the project root with the project interpreter:
 
@@ -30,7 +30,7 @@ applicable" on a non-macOS system.
 
 - **Python 3.12** with the runtime dependencies:
   `python -m pip install -r requirements.txt`.
-- **Node.js 24.21.0** for the two panel behavior tests. Node is only
+- **Node.js 24.21.0** for the five panel behavior tests. Node is only
   needed to run the full public suite. It is **not** part of the product
   installation, the panel does not depend on it at runtime, and a normal
   install does not need it.
@@ -42,6 +42,15 @@ nothing in the suite fetches listings.
 
 | Test | Covers | Platform |
 |---|---|---|
+| `tools/test_agent_api.py` | Authenticated read-only HTTP, frozen pagination/detail, scope and external client failures | all |
+| `tools/test_batches.py` | Exact fetch membership, source transactions and schema 3 recovery | all |
+| `tools/test_location_http.py` | Location HTTP scope, invalid region guidance and same-origin protection | all |
+| `tools/test_locations.py` | Offline Australian geography, ambiguity and per-location work modes | all |
+| `tools/test_location_state.py` | Location upgrade, independent human state, frozen grouping and retained history | all |
+| `tools/test_panel_location_views.py` | Location selection, maintenance disclosure and translated region guidance | all |
+| `tools/test_panel_locations.mjs` | Location switching, scoped save identity and draft protection | all |
+| `tools/test_panel_shortcuts.mjs` | Keyboard profiles, cookie persistence, native text selection and input/overlay guards | all |
+| `tools/test_panel_copy.mjs` | Complete JD copy, clipboard fallbacks, safe text and restored focus/selection | all |
 | `tools/test_label_migration.py` | Atomic legacy upgrade, independent priority, correction provenance, concurrent partial edits and frozen action state | all |
 | `tools/test_patch_boundaries.py` | Concurrent partial labels, explicit group clears and legacy events, config candidate limit, unknown-employer grouping, detail retries and score/CSV values | all |
 | `tools/test_pipeline_boundaries.py` | Real interrupted writes, timeout finalization and competing standalone analysis | all |
@@ -70,7 +79,7 @@ nothing in the suite fetches listings.
 | `tools/test_fixture_boundary.py` | Test-data boundary and export contract | all |
 | `tools/test_launchd_examples.py` | macOS LaunchAgent templates and renderer | macOS |
 | `tools/test_panel_note_separators.mjs` | Panel note separators, default labels (UI-02, UI-03) and generation-based refresh, draft protection and destination navigation, update confirmation, card progress text and the unknown-outcome status line | all |
-| `tools/test_panel_navigation.mjs` | Detail previous/next and J/K over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard and skill candidates writing canonical names | all |
+| `tools/test_panel_navigation.mjs` | Detail previous/next and profile keys over the frozen list (save/draft gate, pending result version, repeated keys, ignored keys), mobile label sheet, header-count refresh, mobile filter drawer apply/discard and skill candidates writing canonical names | all |
 
 The fixture-boundary test also guards that a private label export is not used
 by default; it is part of keeping the public test data synthetic. Its output

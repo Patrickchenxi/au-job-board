@@ -74,6 +74,20 @@ under More filters; old `interest=` links still work.
 The detail pane shows the original description, the extracted evidence sentence
 for eligibility-related requirements, and a link to the original posting.
 
+**Previous / next** buttons in the detail pane follow the page's list order.
+Their keyboard shortcuts are chosen in **Settings → Display → Keyboard
+shortcuts**: Default `←` / `→`, Vim `K` / `J`, or Gamer `A` / `D`. Only the
+chosen set works, and the button hints show it. Keys typed in text fields,
+menus, the location controls and open dialogs or drawers never switch jobs, and
+unsaved or saving notes are protected as with the buttons.
+
+**Copy job** in the detail header copies plain text for pasting into another
+tool such as an AI assistant: UID, title, company, location (plus the current
+record location when one is selected), listing link and the complete stored
+description, not the on-screen rendering. Copying changes no job or label. If
+the browser blocks clipboard access (for example over plain HTTP from another
+device), a dialog shows the same text selected for manual copying.
+
 **Settings → Fetching & updates** shows current configuration in each region,
 with saved changes in a dashed next-run region. The rule profile is part of the
 legacy rule-switch region. **Update jobs**
@@ -161,8 +175,9 @@ a database rollback.
 
 ### Languages and themes
 
-The interface language (English or Chinese) and the theme (light or dark) are
-stored in browser cookies (`jobs_lang`, `jobs_theme`), not in the database.
+The interface language (English or Chinese), the theme (light or dark) and the
+keyboard shortcut set are stored in browser cookies (`jobs_lang`, `jobs_theme`,
+`jobs_keys`), not in the database or configuration file.
 Switching them rewrites nothing you stored. The language is taken from the
 cookie, then the browser's `Accept-Language`, then defaults to Chinese. Job text,
 original evidence sentences and skill names are never translated.

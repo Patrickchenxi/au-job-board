@@ -209,6 +209,18 @@ class StatsHTTPTests(unittest.TestCase):
         self.assertEqual(self.dump(), before)
 
 
+    def test_shortcut_cookie_reaches_detail_and_settings(self):
+        for cookie, nxt in ((None, "ArrowRight"), ("jobs_keys=vim", "J"), ("jobs_keys=gamer", "D"),
+                            ("jobs_keys=bogus", "ArrowRight")):
+            headers = {"Cookie": cookie} if cookie else {}
+            code, payload = self.request("/api/job?uid=seek:one", headers=headers)
+            self.assertEqual(code, 200)
+            self.assertEqual(payload["html"].count(f'aria-keyshortcuts="{nxt}"'), 2, cookie)
+        code, raw = self.request("/settings?section=display", headers={"Cookie": "jobs_keys=gamer"})
+        self.assertEqual(code, 200)
+        self.assertRegex(raw.decode("utf-8"), r'aria-pressed="true" data-keys-choice="gamer"')
+
+
 class RenderHookTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -261,7 +273,7 @@ class RenderHookTests(unittest.TestCase):
     def test_detail_navigation_and_single_label_sheet(self):
         for lang in ("zh", "en"):
             row = panel._find(self.conn, self.config, "seek:one")
-            html = panel._detail_html(row, lang)
+            html = panel._detail_html(row, lang, "vim")   # J/K is the explicit Vim profile
             self.assertEqual(html.count('data-step="-1"'), 2)
             self.assertEqual(html.count('data-step="1"'), 2)
             self.assertIn('aria-keyshortcuts="J"', html)
@@ -276,6 +288,67 @@ class RenderHookTests(unittest.TestCase):
             self.assertLess(html.index('id="label-sheet"'), html.index('class="jd"'))
             self.assertIn('class="label-sum"', html)
             self.assertIn('aria-controls="label-sheet"', html)
+
+    def test_shortcut_profile_hints_follow_selected_profile(self):
+        row = panel._find(self.conn, self.config, "seek:one")
+        expected = {"default": ("ArrowLeft", "ArrowRight", "←", "→"), "vim": ("K", "J", "K", "J"),
+                    "gamer": ("A", "D", "A", "D")}
+        for profile, (prev, nxt, prev_glyph, next_glyph) in expected.items():
+            for lang in ("zh", "en"):
+                with self.subTest(profile=profile, lang=lang):
+                    html = panel._detail_html(row, lang, profile)
+                    self.assertEqual(html.count(f'aria-keyshortcuts="{prev}"'), 2)
+                    self.assertEqual(html.count(f'aria-keyshortcuts="{nxt}"'), 2)
+                    self.assertIn(f'<kbd>{prev_glyph}</kbd>', html)
+                    self.assertIn(f'<kbd>{next_glyph}</kbd>', html)
+                    others = {k for k in ("ArrowLeft", "ArrowRight", "J", "K", "A", "D")} - {prev, nxt}
+                    for other in others:
+                        self.assertNotIn(f'aria-keyshortcuts="{other}"', html)
+        # Missing or unknown preference is the default profile.
+        self.assertEqual(panel._detail_html(row, "en"), panel._detail_html(row, "en", "default"))
+        for cookie in (None, "", "jobs_keys=", "jobs_keys=emacs", "jobs_lang=en"):
+            self.assertEqual(panel.i18n.resolve_keys(cookie), "default")
+        self.assertEqual(panel.i18n.resolve_keys("jobs_lang=en; jobs_keys=gamer"), "gamer")
+        for profile in ("default", "vim", "gamer"):
+            html = panel.render_settings(self.conn, self.config, "en", None, "display", "auto", profile)
+            pressed = re.findall(r'aria-pressed="true" data-keys-choice="(\w+)"', html)
+            self.assertEqual(pressed, [profile])
+            self.assertIn('onclick="setKeys(\'gamer\')"', html)
+
+    def test_copy_text_is_full_stored_description_and_escaped(self):
+        from html.parser import HTMLParser
+        row = dict(panel._find(self.conn, self.config, "seek:one"))
+        hostile = '</button><script>alert(1)</script><img src=x onerror=alert(2)> & "quoted" \'single\''
+        body = "Intro line\r\n" + hostile + "\n\n" + "\n".join(f"Requirement {i}: " + "x" * 120 for i in range(400))
+        row.update(title='Engineer <b>"Lead"</b>', company="A&B <Co>", location="Sydney NSW",
+                   url="https://example.invalid/job?a=1&b=<2>", description=body)
+
+        class Copy(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.values = []; self.tags = []
+            def handle_starttag(self, tag, attrs):
+                self.tags.append(tag)
+                self.values += [v for k, v in attrs if k == "data-copy-text"]
+
+        for lang in ("zh", "en"):
+            with self.subTest(lang=lang):
+                html = panel._detail_html(row, lang)
+                parsed = Copy(); parsed.feed(html)
+                self.assertEqual(len(parsed.values), 1)
+                text = parsed.values[0]
+                self.assertNotIn("script", parsed.tags)
+                self.assertNotIn("img", parsed.tags)
+                self.assertIn("UID: seek:one\n", text)
+                self.assertIn('Engineer <b>"Lead"</b>', text)
+                self.assertIn("A&B <Co>", text)
+                self.assertIn("https://example.invalid/job?a=1&b=<2>", text)
+                # The full stored JD, not the rendered or truncated DOM.
+                self.assertTrue(text.endswith(body.replace("\r\n", "\n") + "\n"))
+                self.assertGreater(len(text), 48000)
+                self.assertNotIn("copy-btn", text)
+        empty = dict(row, description="")
+        parsed = Copy(); parsed.feed(panel._detail_html(empty, "en"))
+        self.assertIn("(No description was captured for this posting)", parsed.values[0])
 
     def test_filter_controls_defer_through_filter_changed(self):
         for view in ("all", "labelled", "recommend", "excluded"):

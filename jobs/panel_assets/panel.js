@@ -368,7 +368,7 @@ async function refreshStats(){
     });
   }catch(e){}
 }
-/* ---- 上一条 / 下一条 + J/K ---------------------------------------------
+/* ---- 上一条 / 下一条 + 快捷键 -------------------------------------------
    顺序是**页面载入时冻结**的卡片顺序：标注不会让卡片消失或换位，所以刚标完
    的那条仍占着位置，「下一条」不会跳过一条（推荐视图本来就按 since 冻结）。
    切换一律走 openJob：它先过 allowDetailNavigation（等备注写完、草稿先确认），
@@ -384,6 +384,7 @@ function syncDetailNav(){
   const list=navList(), i=OPEN_UID ? list.indexOf(OPEN_UID) : -1;
   pane.querySelectorAll('.stepbtn').forEach(b=>{ b.disabled = i<0 || !list[i+parseInt(b.dataset.step,10)]; });
   pane.querySelectorAll('.d-pos').forEach(el=>{ el.textContent = i<0 ? '' : T('js.detail_pos',{n:i+1,total:list.length}); });
+  syncKeyHints();
 }
 async function stepDetail(delta){
   if(NAV_GATES || DETAIL_LEAVING || UPDATE_APPLYING) return;
@@ -401,22 +402,64 @@ async function stepDetail(delta){
   const card=Array.from(document.querySelectorAll('.list .card')).find(c=>c.dataset.uid===target);
   if(card && card.scrollIntoView) card.scrollIntoView({block:'nearest'});
 }
+/* 按键方案存在 cookie jobs_keys（服务端 i18n.KEY_PROFILES 同表，按钮上的提示据此渲染）。
+   每次按键现读 cookie：设置页刚改过，已打开的面板也只认新方案的键。 */
+const KEY_PROFILES={default:['ArrowLeft','ArrowRight'],vim:['k','j'],gamer:['a','d']};
+const KEY_GLYPHS={default:'← / →',vim:'K / J',gamer:'A / D'};
+// 按钮提示：[上一条, 下一条] 的 [显示字形, aria-keyshortcuts]，与服务端 KEY_PROFILES 同值
+const KEY_HINTS={default:[['←','ArrowLeft'],['→','ArrowRight']],vim:[['K','K'],['J','J']],gamer:[['A','A'],['D','D']]};
+function keyProfile(){
+  const m=/(?:^|;\s*)jobs_keys=([^;]*)/.exec(document.cookie||'');
+  const v=m ? m[1].trim() : '';
+  return Object.prototype.hasOwnProperty.call(KEY_PROFILES,v) ? v : 'default';
+}
+function navKeyStep(ev){
+  const raw=String(ev.key||''), key=raw.length===1 ? raw.toLowerCase() : raw;
+  const [prev,next]=KEY_PROFILES[keyProfile()];
+  const step=key===next ? 1 : key===prev ? -1 : 0;
+  if(!step || !key.startsWith('Arrow')) return step;
+  // 方向键配 Shift 是扩选；已选中文字时方向键收起选区 / 移动光标：都留给浏览器
+  return ev.shiftKey || hasTextSelection() ? 0 : step;
+}
+function hasTextSelection(){
+  const sel=document.getSelection ? document.getSelection() : null;
+  return !!(sel && sel.rangeCount && !sel.isCollapsed && String(sel).length);
+}
+/* 已打开的页面在别处改了方案（设置页、另一个标签）后，按钮提示随当前 cookie 重写，
+   与实际响应的键保持一致。 */
+function syncKeyHints(){
+  const hints=KEY_HINTS[keyProfile()];
+  document.querySelectorAll('#detail .stepbtn').forEach(b=>{
+    const [glyph,aria]=hints[parseInt(b.dataset.step,10)>0 ? 1 : 0];
+    if(b.getAttribute('aria-keyshortcuts')===aria) return;
+    b.setAttribute('aria-keyshortcuts',aria);
+    const name=b.getAttribute('aria-label')||'';
+    b.title=name+' ('+glyph+')';
+    const kbd=b.querySelector && b.querySelector('kbd'); if(kbd) kbd.textContent=glyph;
+  });
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) syncKeyHints(); });
+window.addEventListener('pageshow',syncKeyHints);
+window.addEventListener('focus',syncKeyHints);
 function navKeyIgnored(ev){
   if(ev.defaultPrevented || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey || imeComposing(ev)) return true;
   for(const el of [ev.target, document.activeElement]){
     if(!el || !el.tagName) continue;
     if(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
     if(el.closest && el.closest('.location-panel'))return true;
+    // 自带方向键语义的控件（分栏拖条等）
+    if(el.closest && el.closest('[role="separator"],[role="slider"],[role="tablist"],[role="listbox"],[role="menu"],[role="radiogroup"],[role="dialog"]'))return true;
   }
   // 抽屉、筛选面板和对话浮层开着时按键属于它们
   const detail=document.getElementById('detail');
   return shown(document.getElementById('drawer')) || shown(document.getElementById('more-panel'))
     || !!(detail && detail.classList.contains('label-open'))
     || shown(document.getElementById('update-confirm'))
+    || shown(document.getElementById('copy-modal'))
     || shown(document.getElementById('display-pop'));
 }
 document.addEventListener('keydown',ev=>{
-  const step={j:1,k:-1}[String(ev.key||'').toLowerCase()];
+  const step=navKeyStep(ev);
   if(!step || !document.getElementById('detail') || navKeyIgnored(ev)) return;
   ev.preventDefault();
   stepDetail(step);
@@ -1408,6 +1451,15 @@ function setPref(name,value){
   if(value) document.cookie=name+'='+value+'; max-age=31536000'+base;
   else document.cookie=name+'=; max-age=0'+base;
 }
+function setKeys(profile){
+  if(!Object.prototype.hasOwnProperty.call(KEY_PROFILES,profile)) profile='default';
+  setPref('jobs_keys', profile==='default' ? '' : profile);
+  document.querySelectorAll('[data-keys-choice]').forEach(b=>{
+    const on=b.dataset.keysChoice===profile;
+    b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false');
+  });
+  toast(T('js.keys_saved',{keys:KEY_GLYPHS[profile]}));
+}
 function setLang(lang){ setPref('jobs_lang', lang==='auto' ? '' : lang); location.reload(); }
 function effectiveTheme(){
   const t=document.documentElement.dataset.theme;
@@ -1463,6 +1515,95 @@ document.addEventListener('keydown',ev=>{
   if(ev.key!=='Escape') return;
   const [btn,pop]=displayParts();
   if(pop && !pop.hidden){ toggleDisplay(false); if(btn) btn.focus(); }
+});
+
+/* ---- 详情：复制岗位 ----------------------------------------------------
+   文本由服务端从存储字段生成（UID、标题、公司、地点、链接、完整 JD），放在按钮
+   转义后的 data-copy-text 属性里；这里不读渲染后的正文 DOM。先试 Clipboard API；HTTP 等非安全上下文
+   或被拒时退到 execCommand；仍不行就打开手动复制框（已全选）。只读，不改岗位和标注；
+   不移动页面选区，焦点回到按钮。 */
+let COPYING=false;
+function copySource(btn){
+  const el=btn && btn.dataset && btn.dataset.copyText!==undefined ? btn : document.querySelector('#detail [data-copy-text]');
+  const v=el && el.dataset ? el.dataset.copyText : undefined;
+  return typeof v==='string' && v ? v : null;
+}
+function legacyCopy(text){
+  if(!document.execCommand) return false;
+  const sel=document.getSelection ? document.getSelection() : null;
+  const ranges=[]; if(sel) for(let i=0;i<sel.rangeCount;i++) ranges.push(sel.getRangeAt(i));
+  const active=document.activeElement;
+  const ta=document.createElement('textarea');
+  ta.value=text; ta.readOnly=true; ta.tabIndex=-1; ta.setAttribute('aria-hidden','true');
+  ta.style.cssText='position:fixed;top:0;left:-9999px;width:1px;height:1px;opacity:0';
+  document.body.appendChild(ta);
+  let ok=false;
+  try{ ta.focus({preventScroll:true}); ta.select(); ok=!!document.execCommand('copy'); }catch(e){ ok=false; }
+  ta.remove();
+  if(sel){ sel.removeAllRanges(); ranges.forEach(r=>sel.addRange(r)); }
+  if(active && active!==document.body && active.focus) active.focus({preventScroll:true});
+  return ok;
+}
+async function copyJob(btn){
+  if(COPYING) return;
+  const text=copySource(btn);
+  if(text===null){ toast(T('js.copy_missing')); return; }
+  COPYING=true;
+  try{
+    let ok=false;
+    const clip=typeof navigator!=='undefined' && navigator.clipboard;
+    if(clip && clip.writeText && window.isSecureContext){
+      try{ await clip.writeText(text); ok=true; }catch(e){ ok=false; }
+    }
+    if(!ok) ok=legacyCopy(text);
+    if(ok){ toast(T('js.copy_done')); copiedMark(btn); }
+    else openCopyDialog(text,btn);
+  }finally{ COPYING=false; }
+}
+/* 成功也在按钮上短暂标一下：同一时刻的其它提示（例如失焦保存备注）可能顶掉 toast */
+function copiedMark(btn){
+  if(!btn || !btn.classList) return;
+  if(btn.dataset.label===undefined) btn.dataset.label=btn.textContent;
+  btn.textContent=T('js.copy_done_short'); btn.classList.add('copied');
+  clearTimeout(btn._copiedT);
+  btn._copiedT=setTimeout(()=>{ btn.textContent=btn.dataset.label; btn.classList.remove('copied'); },1600);
+}
+let COPY_RETURN=null;
+function copyParts(){
+  const box=document.getElementById('copy-modal');
+  return box ? [box, box.querySelector('#copy-modal-text')] : [null,null];
+}
+function selectCopyText(){
+  const [,ta]=copyParts(); if(!ta) return;
+  ta.focus({preventScroll:true}); ta.select(); ta.scrollTop=0;
+}
+function openCopyDialog(text,btn){
+  const [box,ta]=copyParts(); if(!box || !ta){ toast(T('js.copy_missing')); return; }
+  COPY_RETURN=btn||null;
+  ta.value=text;
+  reveal(box);
+  selectCopyText();
+}
+function closeCopyDialog(){
+  const [box]=copyParts(); if(!box || !shown(box)) return;
+  conceal(box);
+  const back=COPY_RETURN; COPY_RETURN=null;
+  if(back && back.isConnected && back.focus) back.focus({preventScroll:true});
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const [box]=copyParts(); if(!box || !box.querySelector) return;
+  const pick=box.querySelector('[data-copy-select]'), close=box.querySelector('[data-copy-close]');
+  if(pick) pick.addEventListener('click',selectCopyText);
+  if(close) close.addEventListener('click',closeCopyDialog);
+  box.addEventListener('click',ev=>{ if(ev.target===box) closeCopyDialog(); });
+  box.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape'){ ev.preventDefault(); ev.stopPropagation(); closeCopyDialog(); return; }
+    if(ev.key!=='Tab') return;
+    const items=[box.querySelector('#copy-modal-text'),pick,close].filter(Boolean);
+    const i=items.indexOf(document.activeElement);
+    ev.preventDefault();
+    items[(i + (ev.shiftKey ? items.length-1 : 1) + items.length) % items.length].focus();
+  });
 });
 
 /* ---- 详情：技能编辑的展开 ---------------------------------------------- */

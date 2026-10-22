@@ -38,7 +38,11 @@ For another computer, keep the API on loopback and use a secure tunnel:
 ssh -N -L 8091:127.0.0.1:8091 mini-host
 ```
 
-The client then uses `http://127.0.0.1:8091`. Transfer the token privately using
+The client then uses `http://127.0.0.1:8091`. Set `--panel-url` on the API
+server to the panel address reachable from the reporting computer. If using
+`http://127.0.0.1:8090/` for those links, also forward that port to the panel's
+configured listener; forwarding only the API port does not expose the panel.
+Transfer the token privately using
 your existing secure channel. Never put it in URLs, checked-in config, report
 content or a public HTTP connection. Other deployments need protected HTTPS
 transport and explicit operational setup. These instructions do not deploy or
@@ -110,7 +114,8 @@ include `snapshot_id`, `as_of`, `expires_at`, `resolved_batch_id`, normalized
 Every detail read for that result must include its `snapshot_id`.
 
 The default page size is 100, maximum 200. Snapshots live for 300 seconds,
-maximum eight at once, 16 MiB per snapshot and 64 MiB total. The current service
+maximum eight at once, with serialized-payload budgets of 16 MiB per snapshot
+and 64 MiB total (not a bound on Python process RSS). The current service
 conservatively rejects materialization if the source database has over 10,000
 jobs or over 16 MiB of raw descriptions, even for a narrow query. These limits
 are intentional; a query is never silently truncated. Unknown/expired

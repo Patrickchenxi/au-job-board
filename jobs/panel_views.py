@@ -106,6 +106,22 @@ def _js(value) -> str:
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
 
+def _copy_dialog(lang: str) -> str:
+    """「复制岗位」自动复制失败时的手动退路：只读文本框里是同一份完整文本。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    return (
+        '<div class="modal copy-modal" id="copy-modal" hidden>'
+        '<div class="dialog" role="dialog" aria-modal="true" '
+        'aria-labelledby="copy-modal-title" aria-describedby="copy-modal-body">'
+        f'<div class="dialog-head"><h3 id="copy-modal-title">{_e(T("copy.manual_title"))}</h3></div>'
+        f'<div class="dialog-body"><p id="copy-modal-body">{_e(T("copy.manual_body"))}</p>'
+        f'<textarea id="copy-modal-text" readonly spellcheck="false" aria-label="{_e(T("detail.copy"))}"></textarea></div>'
+        '<div class="dialog-foot"><span class="spacer"></span>'
+        f'<button type="button" class="btn" data-copy-select>{_e(T("copy.select"))}</button>'
+        f'<button type="button" class="primary-btn" data-copy-close>{_e(T("copy.close"))}</button>'
+        '</div></div></div>')
+
+
 def _update_widget(lang: str, *, compact: bool = False) -> str:
     """「更新岗位」：带文字的按钮，点了先确认（见 _update_confirm），因为它会联网。
     按钮只有一个 #update-start；竖屏时 panel.js 把整个小部件挪进汉堡抽屉。"""
@@ -516,9 +532,25 @@ def _geo_error(text: str) -> str | None:
     return None
 
 
-def _detail_html(row: dict, lang: str = "zh") -> str:
+def _copy_text(row: dict, lang: str) -> str:
+    """「复制岗位」的纯文本：给外部 AI 用，所以取存储的完整 JD，不取渲染后的 DOM。"""
+    T = lambda key: i18n.t(lang, key)   # noqa: E731
+    lines = [f'{T("copy.uid")}: {row.get("uid") or ""}',
+             f'{T("copy.title")}: {row.get("title") or ""}',
+             f'{T("copy.company")}: {row.get("company") or ""}',
+             f'{T("copy.location")}: {row.get("location") or ""}']
+    if (row.get("_location") or {}).get("location_id"):
+        lines.append(f'{T("copy.record_location")}: {_location_name(row, lang)}')
+    lines.append(f'{T("copy.url")}: {row.get("url") or ""}')
+    body = str(row.get("description") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines += ["", f'{T("copy.jd")}:', body or T("detail.jd_empty")]
+    return "\n".join(lines) + "\n"
+
+
+def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> str:
     """右侧详情。与 md 报告同口径（都走 render.py），只在样式上更贴合面板。"""
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    prev_key, next_key = i18n.KEY_PROFILES.get(keys, i18n.KEY_PROFILES[i18n.DEFAULT_KEYS])
     uid = row["uid"]
     label = row.get("_label") or {}
 
@@ -547,10 +579,11 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
 
     # 上一条 / 下一条：列表顺序只有前端知道（页面载入时冻结的卡片顺序），
     # 这里只给按钮，位置与可用状态由 panel.js 的 syncDetailNav 填。
+    # 按键提示跟随快捷键方案（cookie jobs_keys），与 panel.js 实际响应的键一致。
     def step_btn(delta: int, text: str) -> str:
-        key, name = ("J", T("detail.next")) if delta > 0 else ("K", T("detail.prev"))
+        (glyph, aria), name = (next_key, T("detail.next")) if delta > 0 else (prev_key, T("detail.prev"))
         return (f'<button type="button" class="stepbtn" data-step="{delta}" onclick="stepDetail({delta})" '
-                f'aria-label="{_e(name)}" aria-keyshortcuts="{key}" title="{_e(name)} ({key})" disabled>'
+                f'aria-label="{_e(name)}" aria-keyshortcuts="{aria}" title="{_e(name)} ({_e(glyph)})" disabled>'
                 f'{text}</button>')
     loc_id = (row.get("_location") or {}).get("location_id") or ""
     out = [
@@ -559,14 +592,20 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         '<div class="d-nav">',
         f'<button type="button" id="back" onclick="closeDetail()">{_e(T("detail.back"))}</button>',
         '<span class="d-steps">',
-        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>K</kbd>'),
+        step_btn(-1, f'‹ {_e(T("detail.prev"))} <kbd>{_e(prev_key[0])}</kbd>'),
         '<span class="d-pos"></span>',
-        step_btn(1, f'{_e(T("detail.next"))} <kbd>J</kbd> ›'),
+        step_btn(1, f'{_e(T("detail.next"))} <kbd>{_e(next_key[0])}</kbd> ›'),
         '</span></div>',
         '<div class="d-head"><div class="d-title">',
         f'<h2>{_e(row.get("title"))}</h2>',
         f'<div class="sub">{_e(meta)}</div></div>',
-        f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>',
+        '<div class="d-actions">'
+        # 复制用的完整文本在转义后的属性里：按钮读它，不读渲染后的正文 DOM
+        f'<button type="button" class="btn copy-btn" onclick="copyJob(this)" '
+        f'title="{_e(T("detail.copy_title"))}" data-copy-text="{_e(_copy_text(row, lang))}">'
+        f'{_e(T("detail.copy"))}</button>'
+        f'<a class="apply" href="{url}" target="_blank" rel="noopener">{_e(T("detail.open"))} ↗</a>'
+        '</div>',
         "</div>",
         _location_html(row, lang),
         f'<div class="tags d-tags">{tags}'
@@ -1248,6 +1287,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         '<div class="toast" id="toast" role="status" aria-live="polite"></div>',
         '<div class="note-menu" id="note-menu"></div>',
         _update_confirm(lang),
+        _copy_dialog(lang),
         _scripts(lang, {"__LABELS__": embed, "__LOCATION_LABELS__": location_embed, "__VIEW__": view, "__NOTE_TAGS__": note_tags,
                         "__NOTE_TAG_LABELS__": i18n.note_tag_labels(lang),
                         "__SKILLS__": skill_embed,
@@ -1269,7 +1309,8 @@ SETTINGS_SECTIONS = ("rules", "fetch", "skills", "display")
 CONFIG_GROUPS = {"rules": "rules", "fetch": "queries seek indeed linkedin"}
 
 def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = None,
-                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto") -> str:
+                    section: str = SETTINGS_SECTIONS[0], lang_pref: str = "auto",
+                    keys: str = i18n.DEFAULT_KEYS) -> str:
     """设置页：左分类、右详情，页面居中留白（LinkedIn 设置那种）。
 
     技术栈列表交给前端用 GET /api/skills 的数据渲染，服务端不重复写一套。
@@ -1343,6 +1384,10 @@ def render_settings(conn, config: dict, lang: str = "zh", theme: str | None = No
             radios("theme", theme or "auto", [("auto", T("set.theme_auto"), T("set.theme_auto_desc")),
                                               ("light", T("set.theme_light"), ""),
                                               ("dark", T("set.theme_dark"), "")], "setTheme"),
+            f'<h2 class="h2-gap">{_e(T("set.keys_title"))}</h2>',
+            f'<p class="set-hint">{_e(T("set.keys_desc"))}</p>',
+            radios("keys", keys, [(code, T("set.keys_" + code), T(f"set.keys_{code}_desc"))
+                                  for code in i18n.KEY_PROFILES], "setKeys"),
             f'<div class="keep"><b>{_e(T("set.keep_title"))}</b><ul>'
             f'<li>{_e(T("set.keep1"))}</li><li>{_e(T("set.keep2"))}</li><li>{_e(T("set.keep3"))}</li></ul></div>',
         ])

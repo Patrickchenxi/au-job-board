@@ -239,6 +239,20 @@ body.resizing *{user-select:none!important}
 a.apply{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;border-radius:var(--r-ctl);
  background:var(--accent);color:var(--on-fill);text-decoration:none;font-weight:600;font-size:var(--fs-sm);white-space:nowrap}
 .apply-bar{display:none}
+/* 复制岗位：次要操作，排在「打开原文」前；竖屏原文按钮移到底栏后它独自留在标题下 */
+.d-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.copy-btn{min-height:40px;font-size:var(--fs-sm);font-weight:600;color:var(--ink);white-space:nowrap}
+.copy-btn.copied{color:var(--good-ink);border-color:currentColor}
+body.portrait .d-head{gap:10px}
+body.portrait .copy-btn{min-height:44px}
+.modal.copy-modal{align-items:center}
+.copy-modal .dialog{max-width:640px}
+.copy-modal .dialog-body{gap:12px}
+.copy-modal .dialog-body p{margin:0;line-height:1.7;color:var(--ink2)}
+#copy-modal-text{width:100%;min-height:240px;max-height:50vh;resize:vertical;padding:10px 12px;border:1px solid var(--line2);
+ border-radius:var(--r-ctl);background:var(--surface2);color:var(--ink);font:12.5px/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+/* 窄屏对话框占满整屏：文本框吃掉剩余高度，不留半屏空白 */
+@media(max-width:760px){.copy-modal .dialog-body{flex:1 1 auto}#copy-modal-text{flex:1 1 auto;max-height:none;resize:none}}
 .d-tags{margin-top:12px}
 .rule{background:var(--bad-tint);border:1px solid var(--bad-line);padding:9px 12px;border-radius:var(--r-ctl);
  font-size:var(--fs-sm);margin:12px 0 0;color:var(--bad-ink)}
