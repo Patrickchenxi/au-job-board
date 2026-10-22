@@ -103,6 +103,66 @@ class LocationViews(unittest.TestCase):
         sample['_location']['corrected'] = False
         self.assertIn('disabled', Nodes(panel_views._detail_html(sample)).find('button', onclick='saveLocation(true)')[0])
 
+    def test_reading_path_folds_provenance_and_names_record_scope(self):
+        for lang in i18n.LANGS:
+            with self.subTest(lang=lang):
+                html = panel_views._detail_html(row(), lang)
+                nodes = Nodes(html)
+                folds = [n.get('class') for n in nodes.find('details')]
+                self.assertEqual(folds[:2], ['location-legacy', 'location-more'])
+                # Nothing about provenance/correction is open on the reading path.
+                self.assertFalse(any('open' in n for n in nodes.find('details')))
+                legacy_summary = html.split('class="location-legacy"><summary>')[1].split('</summary>')[0]
+                self.assertIn(panel_views._state_text({'action': 'applied', 'priority': True}, lang), legacy_summary)
+                more = html.split('class="location-more">')[1].split('</details>')[0]
+                for marker in ('id="location-raw"', 'id="location-mode"', 'saveLocation(false)',
+                               i18n.t(lang, 'location.original'), 'Synthetic reference'):
+                    self.assertIn(marker, more)
+                chip = nodes.find('button', **{'class': 'scope-chip'})
+                self.assertEqual(len(chip), 1)
+                self.assertEqual(chip[0]['onclick'], 'focusLocationChoice()')
+                self.assertIn(i18n.t(lang, 'location.record_at', name='Melbourne VIC'), html)
+                # The chip sits inside the action step, before the action buttons.
+                self.assertLess(html.index('scope-chip'), html.index('data-field="action"'))
+                self.assertGreater(html.index('scope-chip'), html.index('label-sheet'))
+                self.assertNotIn(i18n.t(lang, 'location.outside'), html)
+                outside = panel_views._detail_html(row(_geo_match='hidden'), lang)
+                self.assertIn(i18n.t(lang, 'location.outside'), outside)
+
+    def test_legacy_summary_scope_chip_and_no_location_rows(self):
+        legacy = panel_views._detail_html(row(_location=None, location_scope=False), 'en')
+        self.assertIn(i18n.t('en', 'location.record_at', name=i18n.t('en', 'location.legacy_name')), legacy)
+        self.assertNotIn('location-more', legacy)
+        bare = panel_views._detail_html(row(_location=None, _locations=[], location_scope=False), 'en')
+        self.assertNotIn('scope-chip', bare)
+
+    def test_invalid_region_renders_guidance_without_querying(self):
+        cases = {'Richmond': 'location.geo_error.ambiguous',
+                 'Melbourne VIC, Sydney': 'location.geo_error.multiple',
+                 'Atlantis': 'location.geo_error.unsupported'}
+        self.assertIsNone(panel_views._geo_error('Melbourne VIC'))
+        with tempfile.TemporaryDirectory(prefix='jobs-location-view-') as tmp:
+            config = {'db_path': str(Path(tmp) / 'synthetic.db')}
+            conn = db.connect(config['db_path'])
+            try:
+                for geo, key in cases.items():
+                    self.assertEqual(panel_views._geo_error(geo), key)
+                    for lang in i18n.LANGS:
+                        with self.subTest(geo=geo, lang=lang), \
+                             patch.object(panel_views, '_query', side_effect=AssertionError('queried')), \
+                             patch.object(panel_views, '_resolve_since', return_value=None), \
+                             patch.object(panel_views, '_last_run_note', return_value=''), \
+                             patch('jobs.run_state.generation', return_value='synthetic-generation'):
+                            html = panel_views.render_page(conn, config, 'all', 0, 10, filters={'geo': geo}, lang=lang)
+                            nodes = Nodes(html)
+                            self.assertEqual(nodes.find('input', data_fkey='geo')[0]['aria-invalid'], 'true')
+                            self.assertTrue(nodes.find('div', id='geo-error', role='alert'))
+                            self.assertIn(i18n.t(lang, key), html)
+                            self.assertIn("removeFilter('geo')", html)
+                            self.assertNotIn('<details class="location-filter-hint"', html)
+            finally:
+                conn.close()
+
     def test_controls_and_translations(self):
         for view in panel_data.VIEWS:
             allowed = panel_data.VIEW_FILTER_KEYS[view]
@@ -118,6 +178,11 @@ class LocationViews(unittest.TestCase):
                 self.assertEqual(len(nodes.find('select', data_fkey='mode')), 1)
                 self.assertIn('geoKeys(event)', bar)
                 self.assertIn(i18n.t(lang, 'location.apply'), bar)
+                self.assertEqual(geo[0]['list'], 'geo-suggest')
+                self.assertNotIn('aria-invalid', geo[0])
+                suggestions = [n['value'] for n in nodes.find('option') if n.get('value') and ' ' in n['value'] or n.get('value') in ('VIC', 'NSW')]
+                self.assertIn('Melbourne VIC', suggestions)
+                self.assertIn('VIC', suggestions)
         self.assertFalse(panel_views._is_active('mode', {'mode': 'any'}))
         self.assertTrue(panel_views._is_active('mode', {'mode': 'remote'}))
         keys = {k for k in i18n.STRINGS['zh'] if k.startswith('location.')}
@@ -148,8 +213,18 @@ class LocationViews(unittest.TestCase):
                         self.assertIn('offset=4', html)
                         self.assertIn('geo=VIC', html)
                         self.assertIn(i18n.t(lang, 'location.filter_hint'), html)
+                        self.assertIn(i18n.t(lang, 'location.filter_summary'), html)
+                        self.assertIn(i18n.t(lang, 'location.group_hint.unknown'), html)
                         # No collapsed sections: related/unknown remain directly reachable.
                         self.assertFalse(any('hidden' in n for n in groups))
+                with patch.object(panel_views, '_query', return_value=([row(uid='only-unknown', _geo_match='unknown')], 1)), \
+                     patch.object(panel_views, '_resolve_since', return_value=None), \
+                     patch.object(panel_views, '_last_run_note', return_value=''), \
+                     patch('jobs.run_state.generation', return_value='synthetic-generation'):
+                    html = panel_views.render_page(conn, config, 'all', 0, 4, filters={'mode': 'remote'})
+                # Empty groups are omitted; the unknown result itself stays visible.
+                self.assertEqual([x['data-geo-match'] for x in Nodes(html).find('section') if 'data-geo-match' in x], ['unknown'])
+                self.assertIn('data-uid="only-unknown"', html)
             finally:
                 conn.close()
 

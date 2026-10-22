@@ -415,9 +415,22 @@ def _qualification_source_key(q: dict) -> str:
     return "qualification.machine" if q["analysis"] else "qualification.unknown"
 
 
+def _location_name(row: dict, lang: str) -> str:
+    """Name of the record scope shown next to the actions."""
+    loc = row.get("_location") or {}
+    if not loc.get("location_id"):
+        return i18n.t(lang, "location.legacy_name")
+    return loc.get("raw") or i18n.t(lang, "location.unknown")
+
+
 def _location_html(row: dict, lang: str) -> str:
-    """Location identity and provenance; legacy labels never seed a location."""
-    T = lambda key, **kw: i18n.t(lang, key, **kw)
+    """Location identity and provenance; legacy labels never seed a location.
+
+    Reading path stays short: the selector, one summary line and the legacy
+    record state. Provenance and the correction form fold into one disclosure.
+    """
+    T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
+    known = i18n.STRINGS["zh"]
     locations = row.get("_locations") or []
     loc = row.get("_location") or {}
     selected = str(loc.get("location_id") or "")
@@ -429,46 +442,78 @@ def _location_html(row: dict, lang: str) -> str:
             name += " · " + T("location.inactive")
         options.append(f'<option value="{_e(ident)}"{" selected" if ident == selected else ""}>{_e(name)}</option>')
     out = [f'<section class="location-panel" aria-label="{_e(T("location.title"))}">',
-           f'<label class="location-choice" for="location-choice">{_e(T("location.title"))}'
-           f'<select id="location-choice" onchange="changeLocation(this)">{"".join(options)}</select></label>',
-           f'<p class="hint">{_e(T("location.scope" if selected else "location.legacy_scope"))}</p>']
-    if selected:
-        precision = loc.get("precision") or "unknown"
-        mode = loc.get("work_mode") or "unknown"
-        legacy = row.get("_legacy_label") or {}
-        reasons = " · ".join(T("location.reason." + part) if "location.reason." + part in i18n.STRINGS["zh"] else T("location.reason.not_in_reference")
-                             for part in str(loc.get("reason") or "").split(";") if part)
-        details = " · ".join(str(loc.get(k)) for k in ("locality", "city", "state", "postcode") if loc.get(k))
-        out += [f'<p class="hint">{_e(T("location.outside"))}</p>' if row.get("_geo_match") == "hidden" else "",
-                f'<p class="location-facts">{_e(T("location.precision"))}: '
-                f'{_e(T("location.precision." + precision) if "location.precision." + precision in i18n.STRINGS["zh"] else precision)}'
-                f' · {_e(T("location.mode"))}: {_e(T("location.mode." + mode))}</p>',
-                f'<p class="hint">{_e(details)}</p>' if details else "",
-                f'<p class="hint">{_e(T("location.source"))}: {_e(loc.get("source") or T("location.unknown"))}'
-                f' · {_e(reasons)}</p>',
-                f'<p class="location-raw"><b>{_e(T("location.original"))}</b> {_e(row.get("location"))}</p>',
-                f'<p class="location-raw"><b>{_e(T("location.corrected" if loc.get("corrected") else "location.derived"))}</b> {_e(loc.get("raw"))}</p>',
-                f'<details class="location-editor"><summary>{_e(T("location.edit"))}</summary>'
-                f'<p class="hint">{_e(T("location.edit_hint"))}</p>'
-                f'<label>{_e(T("location.raw"))}<input id="location-raw" value="{_e(loc.get("raw"))}" '
-                'autocomplete="off" oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
-                f'<label>{_e(T("location.mode"))}<select id="location-mode">'
-                + "".join(f'<option value="{m}"{" selected" if mode == m else ""}>{_e(T("location.mode." + m))}</option>'
-                          for m in ("unknown", "remote", "hybrid", "onsite"))
-                + '</select></label><div class="location-actions">'
-                f'<button type="button" class="btn" onclick="saveLocation(false)">{_e(T("location.save"))}</button>'
-                f'<button type="button" class="linkbtn" onclick="saveLocation(true)"{"" if loc.get("corrected") else " disabled"}>'
-                f'{_e(T("location.reset"))}</button></div>'
-                '<p id="location-status" class="hint" role="status" aria-live="polite"></p></details>',
-                f'<details class="location-legacy"><summary>{_e(T("location.legacy_title"))}</summary>'
-                f'<p>{_e(_state_text(legacy, lang))}</p>'
-                + "".join(f'<p>{_e(i18n.t(lang, "field." + key))}: '
-                          f'{_e(i18n.display_note(lang, value) if key == "note" else i18n.value_label(lang, key, value))}</p>'
-                          for key in ("eligibility", "interest", "note")
-                          if (value := legacy.get(key)) is not None)
-                + f'<p class="hint">{_e(T("location.legacy_scope"))}</p></details>']
-    out.append('</section>')
+           f'<div class="location-head"><label class="location-choice" for="location-choice">{_e(T("location.title"))}</label>'
+           f'<select id="location-choice" aria-describedby="location-scope-hint" onchange="changeLocation(this)">'
+           f'{"".join(options)}</select></div>']
+    if not selected:
+        out += [f'<p class="hint" id="location-scope-hint">{_e(T("location.legacy_scope"))}</p>', '</section>']
+        return "".join(out)
+    precision = loc.get("precision") or "unknown"
+    mode = loc.get("work_mode") or "unknown"
+    legacy = row.get("_legacy_label") or {}
+    reasons = " · ".join(T("location.reason." + part) if "location.reason." + part in known else T("location.reason.not_in_reference")
+                         for part in str(loc.get("reason") or "").split(";") if part)
+    details = " · ".join(str(loc.get(k)) for k in ("locality", "city", "state", "postcode") if loc.get(k))
+    precision_text = T("location.precision." + precision) if "location.precision." + precision in known else precision
+    facts = [precision_text, T("location.mode") + T("js.colon") + T("location.mode." + mode)]
+    corrected = (f'<span class="tag corr">{_e(T("location.summary_corrected"))}</span>'
+                 if loc.get("corrected") else "")
+    out += [f'<p class="location-facts">{_e(" · ".join(facts))}{corrected}</p>',
+            f'<p class="hint" id="location-scope-hint">{_e(T("location.scope"))}</p>',
+            f'<p class="location-outside" role="note">{_e(T("location.outside"))}</p>'
+            if row.get("_geo_match") == "hidden" else ""]
+    legacy_fields = "".join(
+        f'<p>{_e(i18n.t(lang, "field." + key))}: '
+        f'{_e(i18n.display_note(lang, value) if key == "note" else i18n.value_label(lang, key, value))}</p>'
+        for key in ("eligibility", "interest", "note") if (value := legacy.get(key)) is not None)
+    out.append(f'<details class="location-legacy"><summary>{_e(T("location.legacy_title"))} '
+               f'<span class="tag">{_e(_state_text(legacy, lang))}</span></summary>'
+               f'{legacy_fields}<p class="hint">{_e(T("location.legacy_scope"))}</p></details>')
+    out += [f'<details class="location-more"><summary>{_e(T("location.more"))}</summary>',
+            f'<p class="location-raw"><b>{_e(T("location.original"))}</b> {_e(row.get("location"))}</p>',
+            f'<p class="location-raw"><b>{_e(T("location.corrected" if loc.get("corrected") else "location.derived"))}</b> {_e(loc.get("raw"))}</p>',
+            f'<p class="hint">{_e(T("location.precision"))}: {_e(precision_text)}'
+            + (f' · {_e(details)}' if details else "") + '</p>',
+            f'<p class="hint">{_e(T("location.source"))}: {_e(loc.get("source") or T("location.unknown"))}'
+            + (f' · {_e(reasons)}' if reasons else "") + '</p>',
+            f'<div class="location-editor"><b class="location-edit-title">{_e(T("location.edit"))}</b>'
+            f'<p class="hint">{_e(T("location.edit_hint"))}</p>'
+            '<div class="location-fields">'
+            f'<label>{_e(T("location.raw"))}<input id="location-raw" value="{_e(loc.get("raw"))}" '
+            'autocomplete="off" spellcheck="false" oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
+            f'<label>{_e(T("location.mode"))}<select id="location-mode">'
+            + "".join(f'<option value="{m}"{" selected" if mode == m else ""}>{_e(T("location.mode." + m))}</option>'
+                      for m in ("unknown", "remote", "hybrid", "onsite"))
+            + '</select></label></div><div class="location-actions">'
+            f'<button type="button" class="btn" onclick="saveLocation(false)">{_e(T("location.save"))}</button>'
+            f'<button type="button" class="linkbtn" onclick="saveLocation(true)"{"" if loc.get("corrected") else " disabled"}>'
+            f'{_e(T("location.reset"))}</button></div>'
+            '<p id="location-status" class="hint" role="status" aria-live="polite"></p></div></details>',
+            '</section>']
     return "".join(out)
+
+
+def _geo_suggestions() -> str:
+    """Native suggestions for the supported coarse targets: states and capitals."""
+    from . import locations
+    meta = locations._reference()[0]
+    values = list(meta["states"]) + [f"{city} {state}" for city, state in meta["cities"].items()]
+    return '<datalist id="geo-suggest">' + "".join(f'<option value="{_e(v)}">' for v in values) + "</datalist>"
+
+
+def _geo_error(text: str) -> str | None:
+    """Translate the parser's rejection into plain guidance; None when valid."""
+    from . import locations
+    try:
+        locations.parse_target(text)
+    except ValueError as exc:
+        message = str(exc)
+        if "ambiguous" in message:
+            return "location.geo_error.ambiguous"
+        if "one Australian location" in message:
+            return "location.geo_error.multiple"
+        return "location.geo_error.unsupported"
+    return None
 
 
 def _detail_html(row: dict, lang: str = "zh") -> str:
@@ -572,11 +617,16 @@ def _detail_html(row: dict, lang: str = "zh") -> str:
         '<div class="sheet-grab" aria-hidden="true"></div>'
         f'<div class="label-sheet-head"><b>{_e(T("detail.decide"))}</b></div>')
     # 高频：三状态 + 星标同一行，星标更轻；说明只留一句常驻提示。
+    # The record scope sits beside the actions it governs; it jumps back to the selector.
+    scope_chip = (f'<button type="button" class="scope-chip" onclick="focusLocationChoice()" '
+                  f'title="{_e(T("location.change"))}" aria-label="{_e(T("location.change"))}: {_e(_location_name(row, lang))}">'
+                  f'{_e(T("location.record_at", name=_location_name(row, lang)))}</button>'
+                  if row.get("_locations") else "")
     buttons = "".join(_btn(uid, "action", v, label.get("action") == v, TONE.get(v, ""), lang)
                       for v in ("saved", "applied", "skipped"))
     out.append(
         '<div class="step-block">'
-        f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step2"))}'
+        f'<div class="step-title"><span class="step">{step}</span>{_e(T("detail.step2"))}{scope_chip}'
         f'<span class="spacer"></span><span class="decide-state" data-state-uid="{_e(uid)}" '
         f'role="status" aria-live="polite">{_e(_state_text(label, lang))}</span></div>'
         '<div class="status-row">'
@@ -741,13 +791,18 @@ def _tier_select(filters: dict, lang: str = "zh") -> str:
 def _control(key: str, filters: dict, skill_counts: dict, lang: str, skill_labels=None) -> str:
     T = lambda k, **kw: i18n.t(lang, k, **kw)   # noqa: E731
     if key == "geo":
-        return (f'<div class="geo-control"><label class="ctl{" on" if filters.get("geo") else ""}">'
+        error = _geo_error(filters["geo"]) if filters.get("geo") else None
+        invalid = ' aria-invalid="true" aria-describedby="geo-error"' if error else ""
+        return (f'<div class="geo-control{" invalid" if error else ""}"><label class="ctl{" on" if filters.get("geo") else ""}" '
+                f'title="{_e(T("location.region_title"))}">'
                 f'<span class="k">{_e(T("location.region"))}</span>'
-                f'<input data-fkey="geo" value="{_e(filters.get("geo", ""))}" '
-                f'placeholder="{_e(T("location.region_hint"))}" aria-label="{_e(T("location.region"))}" '
+                f'<input data-fkey="geo" value="{_e(filters.get("geo", ""))}" list="geo-suggest" '
+                f'placeholder="{_e(T("location.region_hint"))}" aria-label="{_e(T("location.region"))}"{invalid} '
+                'autocomplete="off" spellcheck="false" enterkeyhint="search" '
                 'oninput="geoTyping()" onkeydown="geoKeys(event)" '
                 'oncompositionstart="imeStart(this)" oncompositionend="imeEnd(this)"></label>'
-                f'<button type="button" class="btn" onclick="applyGeo()">{_e(T("location.apply"))}</button></div>')
+                f'<button type="button" class="btn geo-apply" onclick="applyGeo()" aria-label="{_e(T("location.apply"))}">'
+                f'{_e(T("location.apply_short"))}</button>{_geo_suggestions()}</div>')
     if key == "mode":
         return _select("mode", T("location.mode"), [("", T("filter.any"))] +
                        [(m, T("location.mode." + m)) for m in ("remote", "hybrid", "onsite")],
@@ -1040,7 +1095,11 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
     # 每次请求重读词表：词表文件很小，开销可忽略。换来的是「改了词表刷新即生效」，
     # 不用重启常驻面板（这也是把词表放数据里而不是代码里的意义）。
     skills_cfg = skills_mod.load_skills(config.get("skills_path"))
-    page, total = _query(conn, config, view, offset, limit, filters, since, skills_cfg)
+    # An unreadable region shows guidance in the list instead of a bare error page;
+    # the filter keeps its meaning (nothing is matched against an unknown target).
+    geo_error = _geo_error(filters["geo"]) if filters.get("geo") else None
+    page, total = (([], 0) if geo_error else
+                   _query(conn, config, view, offset, limit, filters, since, skills_cfg))
     # A new batch can shrink the filtered result set. Stay in this view and
     # use its last available page instead of showing an empty stale offset.
     if total and offset >= total:
@@ -1091,15 +1150,25 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                          for name, n, key in stat_items)
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
-    if page:
+    if geo_error:
+        cards = (f'<div class="empty geo-empty" id="geo-error" role="alert">'
+                 f'<b>{_e(T("location.geo_invalid", geo=filters["geo"]))}</b>'
+                 f'<span>{_e(T(geo_error))}</span>'
+                 f'<button type="button" class="btn" onclick="removeFilter(\'geo\')">'
+                 f'{_e(T("location.clear_geo"))}</button></div>')
+    elif page:
         if filters.get("geo") or filters.get("mode") not in (None, "", "any"):
             # Group only this returned page; keep parent sorting and pagination intact.
+            # Empty groups are omitted; every returned row stays in a visible group.
             cards = ''.join(
                 f'<section class="location-group" data-geo-match="{kind}">'
-                f'<h3>{_e(T("location.group." + kind))} <span>{len(members)}</span></h3>'
+                f'<h3>{_e(T("location.group." + kind))} <span class="n">{len(members)}</span>'
+                + (f'<small>{_e(T("location.group_hint." + kind))}</small>' if kind != "match" else "")
+                + '</h3>'
                 + ''.join(_card(r, since, lang) for r in members) + '</section>'
                 for kind in ("match", "related", "unknown")
-                for members in [[r for r in page if (r.get("_geo_match") or "unknown") == kind]])
+                for members in [[r for r in page if (r.get("_geo_match") or "unknown") == kind]]
+                if members)
         else:
             cards = "".join(_card(r, since, lang) for r in page)
     elif has_filters:
@@ -1143,8 +1212,10 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
         f'<span>{_e(T("list.count", n=MARK, total=total)).replace(MARK, f"<b id=count>{len(page)}</b>")}</span></div>',
         "</div>",
         f'<main><div class="layout"><div class="list" aria-label="{_e(T("list.label"))}">',
-        (f'<p class="location-filter-hint">{_e(T("location.filter_hint"))}</p>'
-         if filters.get("geo") or filters.get("mode") not in (None, "", "any") else ""),
+        (f'<details class="location-filter-hint"><summary>{_e(T("location.filter_summary"))} '
+         f'<span class="more">{_e(T("location.filter_more"))}</span></summary>'
+         f'<p>{_e(T("location.filter_hint"))}</p></details>'
+         if not geo_error and (filters.get("geo") or filters.get("mode") not in (None, "", "any")) else ""),
         cards,
         (f'<div class="pager">{"".join(pager)}</div>' if pager else ""),
         "</div>",

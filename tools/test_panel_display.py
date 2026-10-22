@@ -101,6 +101,17 @@ def test_card() -> None:
               f'data-prog-uid="seek:synthetic_x" title="{i18n.t(lang, "field.action")}' in html
               and f">{prog}</span>" in html and 'class="prog good"' in html
               and re.search(r'class="card-star"[^>]* hidden>', html) is not None)
+    for score in (7, -3, 12):
+        lone = panel._card(synthetic_row(total_score=score, reasons=json.dumps(REASONS[1:])), None, "zh")
+        badge = re.search(r'class="score"[^>]*>(.*?)</span>', lone)
+        check(f"无层级分数 {score}：徽章只含分数", badge is not None and badge.group(1) == f"<b>{score}</b>",
+              badge.group(1) if badge else lone)
+    # The later .score rule switches the badge to inline-flex, so text-align no longer
+    # centres a lone score; the flex rule itself must centre its content.
+    css = (ROOT / "jobs" / "panel_assets" / "panel.css").read_text(encoding="utf-8")
+    flex = [r for r in re.findall(r'(?m)^\.score\{([^}]*)\}', css) if "inline-flex" in r]
+    check("无层级时分数居中：inline-flex 徽章声明 justify-content:center",
+          bool(flex) and all("justify-content:center" in r for r in flex), str(flex))
     bare = panel._card(synthetic_row(_label={}, salary_annual_min=None, salary_annual_max=None), None, "zh")
     check("未标进度：进度标签隐藏", re.search(r'class="prog [^"]*"[^>]* hidden>', bare) is not None)
     check("解析不出折算值：原文本身就是那一枚薪资", bare.count('class="tag raw"') == 1

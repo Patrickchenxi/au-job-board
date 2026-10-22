@@ -839,7 +839,7 @@ body.portrait .detail.swap>*{animation:none}
 .drawer-run .update-btn{justify-content:center;width:100%;min-height:44px;font-size:var(--fs-lg)}
 .drawer-run .update-compact .update-feedback{max-width:none}
 /* 卡片：分数徽章并入层级「T1 · 9」；技能是中性文字；右侧处理状态 + 星标 */
-.score{display:inline-flex;align-items:baseline;gap:4px}
+.score{display:inline-flex;align-items:baseline;justify-content:center;gap:4px}   /* 无层级时单个分数也居中 */
 .score .tier{font-weight:600;color:var(--ink2)}
 .score .sep{color:var(--ink4);font-weight:400}
 .score b{color:var(--accent-ink)}
@@ -886,25 +886,61 @@ body.portrait .more-panel .skillpick>button.ctl .v{font-size:16px}   /* 与旁�
 }
 
 /* Location filters and scope use the panel's existing controls and surfaces. */
-.geo-control{display:flex;align-items:center;gap:6px;min-width:0;max-width:100%}
-.geo-control .ctl{min-width:0;flex:1}
-.geo-control input{width:190px;min-width:0;max-width:100%;border:0;background:transparent;color:var(--ink);font:inherit;min-height:34px}
-.geo-control .btn{flex-shrink:0}
+/* Region input and its Apply button read as one control. */
+.geo-control{display:inline-flex;align-items:stretch;min-width:0;max-width:100%}
+.geo-control .ctl{min-width:0;flex:1 1 auto;border-top-right-radius:0;border-bottom-right-radius:0;cursor:text}
+.geo-control .k{flex:0 0 auto;white-space:nowrap}
+.geo-control input{width:170px;min-width:0;max-width:100%;border:0;outline:none;background:transparent;color:var(--ink);
+ font:inherit;min-height:34px}
+.geo-control .geo-apply{flex-shrink:0;min-height:36px;padding:0 12px;margin-left:-1px;border-top-left-radius:0;
+ border-bottom-left-radius:0;color:var(--accent-ink)}
+.geo-control .ctl:focus-within{outline:2px solid var(--accent);outline-offset:-1px;position:relative;z-index:1}
+.geo-control.invalid .ctl{border-color:var(--bad-line);background:var(--bad-tint)}
+.geo-empty b{overflow-wrap:anywhere}
 .ctl:focus-within{outline:2px solid var(--accent);outline-offset:2px}
-.location-filter-hint{font-size:var(--fs-sm);color:var(--ink2);padding:0 4px;margin:0 0 14px;overflow-wrap:anywhere}
-.location-group>h3{font-size:var(--fs-sm);color:var(--ink2);border-bottom:1px solid var(--line);padding:10px 4px;margin:4px 0 10px}
-.location-group>h3 span{font:var(--fs-xs) var(--mono);margin-left:6px;color:var(--ink3)}
+/* One quiet line above the results; the long explanation is on demand. */
+.location-filter-hint{font-size:var(--fs-sm);color:var(--ink2);padding:0 4px;margin:0 0 6px;overflow-wrap:anywhere}
+.location-filter-hint summary{cursor:pointer;list-style:none;padding:2px 0}
+.location-filter-hint summary::-webkit-details-marker{display:none}
+.location-filter-hint summary .more{color:var(--accent-ink);white-space:nowrap}
+.location-filter-hint[open] summary .more{display:none}
+.location-filter-hint p{margin:4px 0 8px}
+.location-group>h3{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;font-size:var(--fs-sm);color:var(--ink2);
+ border-bottom:1px solid var(--line);padding:10px 4px 8px;margin:4px 0 10px}
+.location-group>h3 .n{font:var(--fs-xs) var(--mono);color:var(--ink3)}
+.location-group>h3 small{font-weight:400;font-size:var(--fs-xs);color:var(--ink3)}
 .location-group[data-geo-match=match]>h3{color:var(--accent-ink)}
-.location-panel{padding:12px 0;margin:4px 0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:var(--fs-sm);overflow-wrap:anywhere}
-.location-choice{display:flex;flex-direction:column;gap:6px;font-weight:600}
-.location-panel select,.location-panel input{display:block;width:100%;min-width:0;min-height:36px;border:1px solid var(--line2);border-radius:var(--r-ctl);background:var(--surface);color:var(--ink);font:inherit;padding:6px 8px}
+/* Detail: selector + one summary line; provenance and correction fold away. */
+.location-panel{padding:10px 0 8px;margin:4px 0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+ font-size:var(--fs-sm);overflow-wrap:anywhere}
+.location-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.location-choice{font-weight:600;flex:0 0 auto}
+.location-head select{flex:1 1 220px;min-width:0;max-width:100%}
+.location-panel select,.location-panel input{display:block;width:100%;min-width:0;min-height:36px;border:1px solid var(--line2);
+ border-radius:var(--r-ctl);background:var(--surface);color:var(--ink);font:inherit;padding:6px 8px}
+.location-head select{width:auto}
 .location-panel .hint{margin:6px 0;color:var(--ink2)}
-.location-panel p{margin:8px 0}
-.location-panel summary{cursor:pointer;color:var(--ink2);padding:6px 0}
-.location-editor label{display:block;margin:8px 0}
-.location-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
-.location-legacy{margin-top:8px}
+.location-panel p{margin:6px 0}
+.location-facts{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--ink)}
+.location-outside{padding:6px 10px;border-radius:var(--r-ctl);background:var(--cue-wash);color:var(--cue-ink2)}
+.location-panel details{margin-top:2px}
+.location-panel summary{cursor:pointer;color:var(--ink2);padding:5px 0;width:fit-content;max-width:100%}
+.location-panel summary .tag{margin-left:4px;vertical-align:1px}
+.location-panel details[open]>summary{color:var(--ink)}
+.location-legacy p,.location-more>p{margin:4px 0 4px 14px}
 .location-legacy p{white-space:pre-wrap}
+.location-editor{margin:10px 0 4px 14px;padding-top:10px;border-top:1px dashed var(--line2)}
+.location-edit-title{font-weight:600}
+.location-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:8px 12px;margin-top:6px}
+.location-fields label{display:flex;flex-direction:column;gap:4px;color:var(--ink2)}
+.location-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+/* Which record the actions write to; jumps back to the selector. */
+.scope-chip{display:inline-flex;align-items:center;max-width:100%;min-height:24px;padding:0 9px;border:1px solid var(--accent-line);
+ border-radius:999px;background:var(--accent-wash);color:var(--accent-ink);font:inherit;font-size:var(--fs-xs);font-weight:500;
+ cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-chip:hover{background:var(--accent-tint)}
+.scope-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 body.portrait .geo-control{width:100%}
 body.portrait .geo-control input{width:100%}
-body.portrait .location-panel select{max-width:100%}
+body.portrait .location-head select{flex-basis:100%}
+@media (max-width:520px){.location-fields{grid-template-columns:minmax(0,1fr)}}

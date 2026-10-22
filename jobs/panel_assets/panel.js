@@ -26,6 +26,15 @@ async function changeLocation(select){
     const next=document.getElementById('location-choice');if(next)next.focus({preventScroll:true});
   }
 }
+/* The scope chip beside the actions leads back to the selector; on a phone the
+   record drawer closes first so the selector is visible. */
+function focusLocationChoice(){
+  const select=document.getElementById('location-choice');if(!select)return;
+  const pane=document.getElementById('detail');
+  if(pane && pane.classList.contains('label-open'))toggleLabelSheet(false);
+  select.scrollIntoView({block:'center',behavior:REDUCED.matches?'auto':'smooth'});
+  select.focus({preventScroll:true});
+}
 async function saveLocation(clear){
   const scope=detailScope(), raw=document.getElementById('location-raw'), mode=document.getElementById('location-mode');
   if(!scope || !scope.dataset.locationId || !raw || !mode || imeBusy(raw) || imeJustComposed(raw))return;

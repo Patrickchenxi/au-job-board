@@ -31,6 +31,12 @@ class LocationHTTP(unittest.TestCase):
         self.assertEqual(status,200);self.assertIn('Synthetic legacy note',body)
     def test_missing_correction_payload_does_not_clear(self):
         self.assertEqual(self.request('POST','/api/location',{'uid':'synthetic:a','location_id':self.ids[1]})[0],400)
+    def test_invalid_region_is_editable_html_but_json_detail_stays_strict(self):
+        status,body=self.request('GET','/?view=all&geo=not-a-real-place')
+        self.assertEqual(status,200);self.assertIn('id="geo-error"',body);self.assertIn('not-a-real-place',body)
+        self.assertIn('aria-invalid="true"',body)
+        self.assertEqual(self.request('GET','/api/job?uid=synthetic%3Aa&geo=not-a-real-place')[0],400)
+        self.assertEqual(self.request('GET','/?view=all&geo=not-a-real-place&mode=office')[0],400)
     def test_invalid_scope_rejected_and_no_partial_write(self):
         self.assertEqual(self.request('POST','/api/label',{'uid':'synthetic:a','location_id':'missing','field':'action','value':'saved'})[0],400)
         c=db.connect(self.path);self.assertEqual(c.execute('SELECT count(*) FROM location_events').fetchone()[0],0);c.close()

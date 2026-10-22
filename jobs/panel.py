@@ -145,7 +145,16 @@ class Handler(BaseHTTPRequestHandler):
                 offset = max(0, int((qs.get("offset") or ["0"])[0]))
             except ValueError:
                 offset = 0
-            filters = parse_filters(qs)
+            try:
+                filters = parse_filters(qs)
+            except ValueError:
+                # Keep an invalid region editable in the HTML panel. The view
+                # renders guidance and no matches; JSON readers stay strict.
+                raw_geo = (qs.get("geo") or [""])[0].strip()[:120]
+                if not raw_geo:
+                    raise
+                filters = parse_filters({k: v for k, v in qs.items() if k != "geo"})
+                filters["geo"] = raw_geo
             page = render_page(conn, self.config, view, offset, limit, started, filters,
                                lang, theme, i18n.lang_pref(self.headers.get("Cookie")))
             self._send(page.encode("utf-8"), 200, "text/html; charset=utf-8", started)

@@ -55,7 +55,7 @@ function setup(){
   vm.createContext(sandbox);
   vm.runInContext(source+`\n;globalThis.api={openJob,setNote,noteAdopt,setLabel,changeLocation,saveLocation,allowDetailNavigation,
     refreshDot,scopeLabel,detailHash,readDetailHash,viewParams,geoTyping,geoKeys,applyGeo,filterDraftBegin,filterDraftDiscard,
-    filterDraftCount,navKeyIgnored,imeStart,imeEnd,resetControl,hasDetailDraft,
+    filterDraftCount,navKeyIgnored,imeStart,imeEnd,resetControl,hasDetailDraft,focusLocationChoice,
     current(uid,id){OPEN_UID=uid;OPEN_LOCATION=id;},pending(){return LABEL_WRITES.size;}};`,sandbox);
   return {api:sandbox.api,sandbox,document,ids,reg,pane,calls,mount,setRoute:f=>{route=f;}};
 }
@@ -143,5 +143,15 @@ await test('mobile geo draft applies/discards with original filter state and loc
   assert.equal(t.api.viewParams().get('geo'),'3000');t.api.filterDraftDiscard();assert.equal(geo.value,'VIC');
   const button=new El('button');button.locationPanel=new El();assert.equal(t.api.navKeyIgnored({target:button}),true);
   for(const tag of ['input','select'])assert.equal(t.api.navKeyIgnored({target:new El(tag)}),true);
+});
+await test('record-scope chip returns to the selector, closing the phone record drawer without losing a draft',async()=>{
+  const t=setup();t.mount('L1');const select=t.ids.get('location-choice'),sheet=new El();let scrolled=null;
+  select.scrollIntoView=o=>{scrolled=o;};sheet.contains=()=>false;t.ids.set('label-sheet',sheet);
+  t.ids.get('location-raw').value='Melbourne VIC 3000';
+  t.pane.classes.add('label-open');t.api.focusLocationChoice();
+  assert.equal(t.pane.classList.contains('label-open'),false);assert.equal(select.focused,true);
+  assert.equal(scrolled.block,'center');assert.equal(t.api.hasDetailDraft(),true);
+  assert.equal(t.calls.length,0);
+  t.ids.delete('location-choice');t.api.focusLocationChoice();assert.equal(t.calls.length,0);
 });
 console.log(`${passed} location behavior scenarios passed`);
