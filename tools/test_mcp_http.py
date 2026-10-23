@@ -1,6 +1,7 @@
 """Opt-in synthetic Streamable HTTP authentication, app lifecycle and capacity."""
 import asyncio
 from contextlib import closing
+import errno
 import http.client
 from http.server import ThreadingHTTPServer
 import json
@@ -40,16 +41,46 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.service = None
         self.addCleanup(self.stop)
 
-    def bind_panel(self):
+    def bind_panel(self, host='127.0.0.1'):
         for _ in range(30):
-            server = ThreadingHTTPServer(('127.0.0.1', 0), panel.Handler)
+            server = ThreadingHTTPServer((host, 0), panel.Handler)
+            if server.server_port == 65535:
+                server.server_close()
+                continue
             with socket.socket() as probe:
                 try:
-                    probe.bind(('127.0.0.1', server.server_port+1))
+                    probe.bind((host, server.server_port+1))
                     return server
-                except OSError:
+                except OSError as error:
                     server.server_close()
+                    if error.errno != errno.EADDRINUSE:
+                        raise
         self.fail('Could not reserve adjacent synthetic ports')
+
+    def container_panel(self):
+        self.panel.server_close()
+        self.panel = self.bind_panel('0.0.0.0')
+        self.addCleanup(self.panel.server_close)
+        self.config['panel'] = {'host': '0.0.0.0', 'port': self.panel.server_port}
+
+    def start_container(self):
+        # The probe cannot reserve the derived port through production startup.
+        # Reselect only when a listener really claimed that wildcard port.
+        for attempt in range(5):
+            try:
+                return self.start()
+            except OSError as error:
+                if error.errno != errno.EADDRINUSE or attempt == 4:
+                    raise
+                with socket.socket() as probe:
+                    try:
+                        probe.bind(('0.0.0.0', self.panel.server_port+1))
+                    except OSError as conflict:
+                        if conflict.errno != errno.EADDRINUSE:
+                            raise
+                    else:
+                        raise error
+                self.container_panel()
 
     def stop(self):
         if self.service:
@@ -108,15 +139,12 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.request(body=b'x'*(65536+1))[0], 413)
 
     async def test_container_listener_keeps_loopback_authority_and_auth(self):
-        self.panel.server_close()
-        self.panel = ThreadingHTTPServer(('0.0.0.0', self.panel.server_port), panel.Handler)
-        self.addCleanup(self.panel.server_close)
-        self.config['panel']['host'] = '0.0.0.0'
+        self.container_panel()
         with patch.dict(os.environ, {'JOBS_CONTAINER': '0'}):
             with self.assertRaises(ValueError):
                 self.start()
         with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}):
-            service = self.start()
+            service = self.start_container()
         self.assertEqual(service.url, f'http://127.0.0.1:{service.port}/mcp')
         for headers, status in [({'Authorization': ''}, 401),
                                 ({'Host': f'0.0.0.0:{service.port}'}, 403),
@@ -132,6 +160,51 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(detail.is_error)
                 self.assertTrue(detail.structured_content['item']['panel_url'].startswith(
                     f'http://127.0.0.1:{self.panel.server_port}/'))
+
+    async def test_container_fixture_recovers_from_port_handoff_collision(self):
+        self.container_panel()
+        blocked_port = self.panel.server_port+1
+        with socket.socket() as occupied:
+            # Occupy after the fixture's successful probe, before MCP binds.
+            occupied.bind(('0.0.0.0', blocked_port))
+            occupied.listen()
+            with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}):
+                with self.assertRaises(OSError) as caught:
+                    self.start()
+                self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+                service = self.start_container()
+            self.assertNotEqual(service.port, blocked_port)
+            self.assertEqual(self.request(headers={'Authorization': ''})[0], 401)
+
+    def test_container_fixture_does_not_retry_unrelated_startup_errors(self):
+        self.container_panel()
+        for error in (OSError(errno.EACCES, 'controlled permission error'),
+                      OSError(errno.EADDRINUSE, 'controlled internal port error'),
+                      ValueError('controlled configuration error')):
+            with self.subTest(error=error), patch.object(mcp_http, 'start', side_effect=error) as start:
+                with self.assertRaises(type(error)) as caught:
+                    self.start_container()
+                self.assertIs(caught.exception, error)
+                self.assertEqual(start.call_count, 1)
+
+    def test_container_fixture_bounds_port_collision_reselection(self):
+        self.container_panel()
+        start = self.start
+        occupied = []
+        def collide():
+            listener = socket.socket()
+            self.addCleanup(listener.close)
+            listener.bind(('0.0.0.0', self.panel.server_port+1))
+            listener.listen()
+            occupied.append(listener)
+            return start()
+        with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}), \
+                patch.object(self, 'start', side_effect=collide) as attempts:
+            with self.assertRaises(OSError) as caught:
+                self.start_container()
+        self.assertEqual(caught.exception.errno, errno.EADDRINUSE)
+        self.assertEqual(attempts.call_count, 5)
+        self.assertEqual(len(occupied), 5)
 
     async def test_tls_certificate_verified(self):
         root = self.fixture.root
