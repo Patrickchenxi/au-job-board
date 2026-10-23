@@ -5,6 +5,21 @@ services:
     init: true
     ports:
       - "127.0.0.1:8090:8090"
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - configuration:/app/config
+      - data:/app/data
+      - reports:/app/out
+    stop_grace_period: 20s
+    restart: unless-stopped
+  api:
+    profiles: [api]
+    build: .
+    image: au-job-board:local
+    init: true
+    command: ['agent-api', '--host', '0.0.0.0', '--port', '8092', '--token-file', '/app/data/agent.token', '--panel-url', 'http://127.0.0.1:8090/']
+    ports:
+      - "127.0.0.1:8092:8092"
     volumes:
       - configuration:/app/config
       - data:/app/data

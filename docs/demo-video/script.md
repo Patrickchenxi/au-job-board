@@ -1,71 +1,58 @@
 # Script and storyboard
 
-Archived planning notes for the 30-second demo. They were made in one pass, with no
-approval round. Timings are frames at 30 fps.
+Planning notes for the v1.3 demo (43.8 s). The direction was agreed from storyboard
+frames and refined over several review rounds. Times are seconds on the 60 fps cut.
 
 ## Approach
 
-- **Audience:** someone job-hunting across several boards, watching muted on a
-  feed or in a README. The captions carry the story, and the music is optional.
-- **Story:** three pains, then the four steps that answer them, each shown with one
-  real action: *Collect → Screen → Decide → Follow up*. One feature per pain, and only
-  features that exist and work on the mock data.
-- **Look:** the panel's own tokens (paper `#F5F4F0`, surface white, ink `#1D1C1A`,
-  accent `#2357A6`, the panel's system font), one rounded window, a calm camera and
-  no decorative effects. The intro and outro reuse the same palette, so the cut never
-  leaves the product's visual world.
-- **Pacing:** each action is followed by a still beat long enough to read the
-  result. The camera moves only after the UI has responded, and the pointer comes to
-  rest away from the text it points at.
+- **Idea:** one question, asked three ways. A person in the panel, a script on the
+  HTTP API and an agent over MCP ask the same thing and land on the same number. The
+  board is the shared foundation; people and agents get equal screen time, and the
+  person keeps the decisions.
+- **Audience:** someone browsing a README or a link, often muted. Captions carry the
+  story; music and sounds are optional.
+- **Look:** the panel's paper / ink tokens and one rounded-card language. Three colours
+  are fixed from the first shot and never reused for anything else: panel blue
+  `#2357A6`, HTTP API orange `#E07A48`, MCP teal `#1F7A6B`. They come back as the three
+  badges and, at the end, as the three dots of the logo.
+- **Motion:** arrivals use springs; camera moves and exits use eases. Only transform,
+  opacity, blur and clipping are animated. The three columns hit their key beats on
+  the same frame (Enter, tool call and React click at 9.4 s; the three counters at
+  13.4 s). Each action is followed by a still beat long enough to read.
+- **Honesty:** everything on screen that looks like product output is real output on
+  synthetic data (see [README](README.md)). Drawn elements (pointer, chat window,
+  agent notes, prompts) claim nothing beyond what was run.
 
-### Feature choice
-
-| Pain | Feature shown | Why this one |
-|---|---|---|
-| Listings scattered across boards | All view + detail line "2 duplicates (seek…; indeed…)" | One card for a job cross-posted on three boards is the clearest proof of consolidation |
-| Screening takes hours | Excluded view → rule banner + quoted original sentence | Shows that the tool flags deal-breakers *and* why, so the user can trust or overrule it |
-| Follow-ups slip | Label (Eligible / Want / Saved) + note suggestion "Prioritize" | Shows the two-second triage that feeds tracking |
-| (payoff) | Labelled view + "Priority only" → the job just saved appears, "To apply" goes 4 → 5 | Closes the loop: the action from the previous shot changes the queue |
-
-Left out on purpose: Settings / skill vocabulary, language and theme switching, and
-search. They are real, but they explain *how* rather than *why*.
+Left out on purpose: settings and skill vocabulary, eligibility corrections, notes,
+dark theme and phone layouts. They are real, but they do not serve this story.
 
 ## Storyboard
 
-| Frames | Time | Scene | On screen (real UI unless noted) | Caption |
-|---|---|---|---|---|
-| 0–119 | 0.0–4.0 s | Intro *(composited)* | Eyebrow "Job hunting, today"; three pain lines with line icons appear 0.67 s apart, then rise out | — (the lines are the text) |
-| 120–287 | 4.0–9.6 s | **Collect** · take `t1_list` | All view. Pointer glides to "Graduate Software Engineer" and clicks; the detail opens; the camera eases in (1.45x) on the header; the pointer rests right of "2 duplicates (seek@…; indeed@…)" | COLLECT — Jobs from several boards in one ranked list — duplicates merged. |
-| 288–461 | 9.6–15.4 s | **Screen** · `t2_excluded` | Clicks the Excluded tab, then "Junior Data Analyst"; the camera frames "Excluded by rule: citizenship.or_pr" and the quoted sentence; the pointer moves off-frame | SCREEN — Deal-breakers flagged, quoting the original posting. |
-| 462–677 | 15.4–22.6 s | **Decide** · `t3_label` | For you view. Opens "Mobile Developer (Graduate)"; the camera frames the label panel (1.32x); clicks Eligible → Want → Saved; clicks the note field, types "prio", picks "Prioritize", presses Enter; the camera pulls out to show the "Note saved" toast and the card's status dots | DECIDE — Label and note each job in a few clicks. |
-| 678–809 | 22.6–27.0 s | **Follow up** · `t4_queue` | Clicks Labelled, then "Priority only"; the queue shows the job just saved, and "To apply 5" in the stats line; the pointer settles on that card | FOLLOW UP — Priority jobs become your apply queue — nothing slips. |
-| 810–899 | 27.0–30.0 s | Outro *(composited)* | Last real frame shrinks away; "AU Job Board", "Collect. Screen. **Follow up.**", "Every lead in one calm, ranked list." | — |
-
-Transitions: the window rises in at 4.0 s; later takes start with a 6-frame
-lift from 35 % opacity; captions fade and slide in over frames 4–18 of each take and
-fade out over its last 8. Music fades in over 0.5 s and out over the last 1.5 s. A
-soft tick plays at each logged click.
-
-## Take scripts (absolute take time, seconds)
-
-The capture tool waits for each planned time (`at(t)`) and logs a warning if a step
-runs late. In the final capture, none did. Pointer moves have fixed durations (eased
-cubic, slight arc). Targets are re-measured from the DOM right before each move.
-
-- `t1_list` (5.6 s): start (1020,560) · 0.70 move 0.85 s → card · 1.75 click ·
-  2.35 focus box `.d-head + .d-tags` · move 0.9 s to rest beside the duplicates line.
-- `t2_excluded` (5.8 s): 0.40 move → Excluded tab · 1.25 click · 1.90 move → card ·
-  2.85 click · 3.30 focus `.rule + first .step-block` · move pointer out of frame.
-- `t3_label` (7.2 s): 0.35 move → card · 1.10 click · 1.55 focus `.decide` ·
-  2.25 Eligible · 2.95 Want · 3.70 Saved · 4.40 note field · 4.75 type "prio" (110 ms/key) ·
-  6.00 click "Prioritize" · 6.35 Enter · small drift away.
-- `t4_queue` (4.4 s): 0.30 move → Labelled tab · 1.05 click · 2.15 click "Priority only" ·
-  2.70 focus `.list` · move to rest on the new card.
+| Time | Scene | On screen | Caption |
+|---|---|---|---|
+| 0.0–3.3 | **The question** | Paper background. "THE QUESTION", then *How many React jobs are there near Melbourne 3000?* types in character by character (each rises and un-blurs); highlighter marks sweep under "React" and "Melbourne 3000". The line lifts away as the header takes its place. | — |
+| 3.0–11.6 | **Three ways to ask** | Three columns spring in. *Panel:* the pointer clicks Location (preset list), types `3000`, clicks Apply ("20 of 208"), opens Skills and ticks React. *HTTP API:* the curl command types with natural rhythm. *Agent:* the question bubble, thinking dots, then a `list_jobs` call with its arguments. At 9.4 s the React tick, the Enter key and "Running…" land together, with a ring and a progress bar on each column. Results follow: four cards, the JSON output, "Done · 1 page". | Three ways to ask. |
+| 11.6–17.5 | **Same answer** | Column contents dim. A result block rises in each; three odometers roll from 0 and stop on **64** on the same frame (13.4 s), with a soft accent. A line draws across all three; under each number, the same query in that column's own form. Slow camera push. | Same data. Same answer. |
+| 17.5–23.4 | **One answer** | Each card folds from the top down into its result block. The three blocks fly to the centre, tilt and stack, then merge into one card: **64**, "React jobs near Melbourne 3000", and the Panel / HTTP API / MCP badges. | Ask any way. One answer. |
+| 23.4–31.3 | **You decide, your agent helps** | The card splits into two panels. Left: the job detail (eligibility cue, Decide). Right: the agent's short list of matching roles. The pointer clicks **To apply**, then **Priority**. The job id is highlighted in the panel address and in the report; a line connects them. The pointer clicks "Open in panel ↗"; the camera moves to the panel and a toast reads "Opened from your agent's report". | Same records. You decide. Your agent helps. |
+| 31.3–36.8 | **Unlock more** | Agent chat: "Which tech stacks come up most across my board? Build me a report." `list_jobs` (5 pages), `get_job` counting up to ×412, "Writing tech-stack-report.html". A report window slides in: four figures, then ten bars growing in order; React and TypeScript highlight. | Unlock more insight with your own agent. |
+| 36.8–40.3 | **Your questions** | Three prompts type in, one per colour: *Brief me every morning on new roles that fit.* · *Which jobs did my rules exclude, and why?* · *Compare React salaries in Melbourne and Sydney.* Each bubble then shrinks into a solid dot and flies to the end card. | Your board. Your questions. |
+| 40.3–43.8 | **End card** | The three dots sit beside **AU Job Board** as the wordmark wipes in. "One board for you and your agent." The repository path appears as a plain pill. Fade to paper. | — |
 
 ## Caption rules
 
-One line, at most about ten words, 44 px semibold in ink, with a 25 px step chip in
-the accent colour. Captions sit in their own band under the window, so they never
-cover the UI. Wording claims only what the shot shows: several boards (not "all"),
-quoting the original posting (the panel labels it "Original excerpt"), and an apply
-queue (the panel's own words for "Priority only").
+One line, centred in a band below the content, 46 px semibold ink. One caption at a
+time; each fades and rises in, then fades out before the next. Captions never sit on
+top of UI. Wording claims only what the shot shows: "same data" rather than "same
+snapshot", because the API and MCP snapshots belong to different processes.
+
+## Sound
+
+- **Bed:** a slow pad with light plucks, changing chord at each scene turn (Fmaj9 →
+  Dm9 → Bbmaj7 on the lock → F/C on the merge → Gm9 for the hand-off → Bbmaj9 → Csus2
+  → Fmaj9 on the end card).
+- **UI:** quiet keys while typing, short clicks under each pointer click, ticks as the
+  counters and bars run, soft whooshes on the two big moves.
+- **Accents:** a felt-piano chord at three moments only: the lock on 64, the job-id
+  match and the end card. They are tuned to the bed's chord, slightly strummed and
+  given a short room tail so they bloom rather than ring.

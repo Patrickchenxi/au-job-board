@@ -144,10 +144,9 @@ banner (中文界面显示「演示 · 合成数据」), English and Chinese UI,
   demo-specific.
 - Notes: the panel stores note tags separated by the full-width `；`, and the
   default tags are stored as fixed Chinese values (the English interface only
-  displays English names for them). The "Priority" filter reads that stored
-  default tag by exact match. The demo's English notes are plain text and do
-  **not** trigger it; use `--lang zh` to generate notes that do. Picking the
-  default suggestion in the panel always stores the canonical tag.
+  displays English names for them). Priority is an independent star, not a note
+  tag: the priority queue requires `action=saved` and `priority=true` in either
+  language. Choosing Chinese label text does not create a priority star.
 - The server is IPv4 only (`127.0.0.1` / `localhost`).
 
 ## Tests
@@ -172,17 +171,21 @@ page. The banner's language switch was only checked in HTML output.
 
 ## Screenshot library (mock data, normal panel)
 
-A separate set of screenshots lives in [`docs/demo-screenshots/`](demo-screenshots/README.md).
+A separate set of 130 direct browser screenshots lives in
+[`docs/demo-screenshots/`](demo-screenshots/README.md), including location search,
+the four Settings sections, and mobile filter/label drawers.
 It is **not** Demo mode: a hand-written synthetic mock database is analysed with the
 normal `analyze` command and served by the ordinary `jobs.cli panel` entry, so no
 Demo banner appears. It is independent of the generator and tests described above.
 
-## Product demo video (mock data, normal panel)
+## Product demo video (synthetic data)
 
-A 30-second, 1920x1080 walkthrough recorded from the same kind of mock root and normal
-panel entry: [`docs/demo-video/product-demo-30s.mp4`](demo-video/product-demo-30s.mp4)
-(cover [`cover.png`](demo-video/cover.png)). How it was made, the storyboard, the
-source and the versions are in [`docs/demo-video/README.md`](demo-video/README.md).
-The Remotion media production project (`media/demo-video/`) and its capture tools
-were development-only and are **not** part of the public candidate; the finished
-video, cover and banners are. The video is not a product dependency.
+A 44-second, 1920x1080 walkthrough of v1.3:
+[watch on YouTube](https://youtu.be/AAfdZ548Gao) or download the
+[MP4](demo-video/au-job-board-v1.3-demo.mp4)
+(cover [`cover.png`](demo-video/cover.png)). It is a code-drawn animation; the values
+on screen come from the normal panel, HTTP API and MCP at `eb56c4f` running on a
+generated synthetic dataset. How it was made, the storyboard and the versions are in
+[`docs/demo-video/README.md`](demo-video/README.md). The composition and its tools are
+development-only and are **not** part of the public candidate; the finished video,
+cover and banners are. The video is not a product dependency.

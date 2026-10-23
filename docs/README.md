@@ -28,12 +28,12 @@ English.
 
 ## Showcase material
 
-All of it uses hand-written synthetic data.
+All of it uses synthetic data.
 
 | Item | What it is |
 |---|---|
-| [demo-screenshots/](demo-screenshots/README.md) | 102 screenshots of the panel (English and Chinese, light and dark, desktop, tablet and phone) |
-| [demo-video/product-demo-30s.mp4](demo-video/product-demo-30s.mp4) · [demo-video/script.md](demo-video/script.md) | A 30-second walkthrough, its cover and the two banners, and the script behind them |
+| [demo-screenshots/](demo-screenshots/README.md) | 130 direct browser screenshots of the panel, including location search and mobile drawers (English and Chinese, light and dark, desktop, tablet and phone) |
+| [YouTube demo](https://youtu.be/AAfdZ548Gao) · [MP4](demo-video/au-job-board-v1.3-demo.mp4) · [notes](demo-video/README.md) · [script](demo-video/script.md) | The 44-second v1.3 animation based on synthetic panel, HTTP API and MCP outputs, plus its cover and two banners |
 
 ## Verification and data policy
 

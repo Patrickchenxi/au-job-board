@@ -200,5 +200,5 @@ This project is released under the MIT License; see [LICENSE](../LICENSE)
 `python-jobspy`, `PyYAML` and `ruamel.yaml` keep their own licenses, and job listing text
 belongs to the platforms and advertisers that published it. The MIT license
 covers this project's own code and documentation, not third-party packages or
-listing data. The install does not depend on the video-production project under
-`media/demo-video/`.
+listing data. The install does not depend on the maintainer-only video-production
+tools described in [the video notes](demo-video/README.md).

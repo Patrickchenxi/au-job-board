@@ -4,6 +4,12 @@ AU Job Board can expose its read-only agent data to MCP clients. MCP is
 optional: the panel, CLI and [HTTP API](agent-api.md) need none of it, and its
 SDK is pinned separately in `requirements-mcp.txt`.
 
+For containers, use the [Docker API/MCP setup](docker.md#optional-http-api-and-mcp).
+The image already includes the SDK and maps MCP to `http://127.0.0.1:8091/mcp`;
+enable it in the persistent config with an owner-only token. The instructions
+below describe source installations. Both transports identify as
+`AU Job Board (read-only)`.
+
 Two transports provide the same four read-only tools:
 
 - **Streamable HTTP owned by the application** (recommended): starts and stops
@@ -48,7 +54,9 @@ endpoint is `http://127.0.0.1:8091/mcp`: its address inherits `panel.host` and i
 port is always the actual panel port plus one. CLI `panel --host/--port` overrides
 apply to both. Do not repeat host/port in `mcp`; unknown settings are rejected.
 The derived port must be free and the panel cannot use port 65535. Wildcard
-listeners are refused for MCP. All relative file paths above use project root.
+listeners are refused for source launches. Docker permits its internal wildcard
+bind with `JOBS_CONTAINER=1`, while accepting only the published loopback Host.
+All relative file paths above use project root.
 
 Both listeners are owned by the application process. Startup failure closes
 partially opened resources; stopping the application releases MCP as well. The

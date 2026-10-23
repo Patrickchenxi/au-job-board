@@ -51,6 +51,11 @@ def main():
               "were not replaced.", file=sys.stderr)
         return 1
     args = sys.argv[1:] or ["panel", "--host", "0.0.0.0", "--port", "8090"]
+    if args[0] == "agent-api":
+        os.execvp(sys.executable, [sys.executable, "-m", "jobs.agent_api", "--config",
+                                 str(config_path), "--token-file", "/app/data/agent.token",
+                                 *args[1:]])
+        return 0
     os.execvp(sys.executable, [sys.executable, "-m", "jobs.cli", "--config",
                              str(config_path), "--skills", str(skills_path), *args])
 

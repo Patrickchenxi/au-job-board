@@ -1,6 +1,7 @@
 """Optional authenticated Streamable HTTP sidecar owned by the panel listener."""
 from contextlib import closing
 import hmac
+import os
 from pathlib import Path
 import socket
 import threading
@@ -71,8 +72,13 @@ class MCPHTTPService:
 
         host, port = panel_server.server_address[:2]
         configured_host = str((config.get('panel') or {}).get('host') or host).strip().lower()
-        if host in ('0.0.0.0', '::') or not 0 < port < 65535:
+        container = host == '0.0.0.0' and os.environ.get('JOBS_CONTAINER') == '1'
+        if (host in ('0.0.0.0', '::') and not container) or not 0 < port < 65535:
             raise ValueError('MCP requires a specific panel address and an available next port')
+        # Docker publishes loopback ports on the host; wildcard is only the bind
+        # address inside its namespace, never an HTTP authority or panel link.
+        if container:
+            configured_host = '127.0.0.1'
         self.host, self.port = host, port + 1
         token = agent_api.read_token(options['token_file'])
         with closing(agent_api.read_connection(config_mod.db_path(config))):

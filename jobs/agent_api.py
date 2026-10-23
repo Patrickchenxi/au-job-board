@@ -13,6 +13,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import sqlite3
 import stat
@@ -516,11 +517,16 @@ class Handler(BaseHTTPRequestHandler):
     do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = do_CONNECT = _not_allowed
 
 
-def make_server(config, token, *, port=8091, panel_url='http://127.0.0.1:8090/', store=None):
+def make_server(config, token, *, host='127.0.0.1', port=8091, panel_url='http://127.0.0.1:8090/', store=None):
+    # Docker publishes on host loopback. The wildcard is only a bind address
+    # inside the container; it never becomes an accepted HTTP Host authority.
+    if host not in ('127.0.0.1', 'localhost') and not (
+            host == '0.0.0.0' and os.environ.get('JOBS_CONTAINER') == '1'):
+        raise ValueError('API host must be loopback; 0.0.0.0 requires JOBS_CONTAINER=1')
     if not isinstance(token, str) or not 32 <= len(token) <= 4096 or any(c.isspace() for c in token) or not token.isascii():
         raise ValueError('token must be 32 to 4096 non-whitespace ASCII characters')
     api = AgentAPI(config, panel_url=panel_url, store=store)
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     server.token = token
     server.api = api
@@ -540,6 +546,8 @@ def main(argv=None):
     parser.add_argument('--config', required=True)
     parser.add_argument('--rules')
     parser.add_argument('--token-file', required=True)
+    parser.add_argument('--host', default='127.0.0.1',
+                        help='IPv4 loopback by default; 0.0.0.0 requires JOBS_CONTAINER=1')
     parser.add_argument('--port', type=int, default=8091)
     parser.add_argument('--panel-url', default='http://127.0.0.1:8090/')
     args = parser.parse_args(argv)
@@ -550,10 +558,11 @@ def main(argv=None):
         token = read_token(args.token_file)
         # Fail before listening if the installation is missing/outdated.
         conn = read_connection(config_mod.db_path(config)); conn.close()
-        server = make_server(config, token, port=args.port, panel_url=args.panel_url)
+        server = make_server(config, token, host=args.host, port=args.port, panel_url=args.panel_url)
     except (OSError, ValueError, APIError, sqlite3.Error):
-        parser.exit(2, 'Cannot start read-only API: check config, owner-only token file and upgraded database.\n')
-    print(f'Read-only API listening on 127.0.0.1:{server.server_port}', flush=True)
+        parser.exit(2, 'Cannot start read-only API: check host (wildcard requires JOBS_CONTAINER=1), '
+                    'config, owner-only token file and upgraded database.\n')
+    print(f'Read-only API listening on {args.host}:{server.server_port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -2,6 +2,7 @@
 **
 !Dockerfile
 !requirements.txt
+!requirements-mcp.txt
 !LICENSE
 !config.example.yaml
 !rules.yaml

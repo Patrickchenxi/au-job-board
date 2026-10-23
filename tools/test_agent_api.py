@@ -8,7 +8,9 @@ import datetime as dt
 import hashlib
 import http.client
 import json
+import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -56,8 +58,9 @@ class AgentAPI(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown(); self.server.server_close(); self.thread.join(); self.temp.cleanup()
 
-    def request(self, path, *, method='GET', token=TOKEN, headers=None):
-        c = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=10)
+    def request(self, path, *, method='GET', token=TOKEN, headers=None, server=None):
+        server = self.server if server is None else server
+        c = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=10)
         h = {} if token is None else {'Authorization': 'Bearer '+token}
         h.update(headers or {})
         c.request(method, path, headers=h)
@@ -83,6 +86,113 @@ class AgentAPI(unittest.TestCase):
         _, _, headers = self.request('/api/v1/jobs')
         self.assertNotIn('Access-Control-Allow-Origin', headers)
         self.assertEqual(headers['Cache-Control'], 'no-store')
+
+    def test_bind_host_rejects_source_wildcard_and_nonloopback_addresses(self):
+        for container in (None, '', '0', 'true', '1'):
+            with patch.dict(os.environ):
+                os.environ.pop('JOBS_CONTAINER', None)
+                if container is not None:
+                    os.environ['JOBS_CONTAINER'] = container
+                hosts = ['', '::', '192.0.2.1', 'example.invalid']
+                if container != '1':
+                    hosts.append('0.0.0.0')
+                for host in hosts:
+                    with self.subTest(container=container, host=host):
+                        with patch.object(api, 'ThreadingHTTPServer') as listener:
+                            with self.assertRaises(ValueError):
+                                api.make_server(self.config, TOKEN, host=host, port=0)
+                            listener.assert_not_called()
+                for host in ('127.0.0.1', 'localhost'):
+                    with api.make_server(self.config, TOKEN, host=host, port=0) as server:
+                        self.assertEqual(server.server_address[0], '127.0.0.1')
+        self.first()
+
+    def test_container_wildcard_http_keeps_auth_host_origin_and_readonly_guards(self):
+        with patch.dict(os.environ, JOBS_CONTAINER='1'):
+            server = api.make_server(self.config, TOKEN, host='0.0.0.0', port=0)
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        self.assertEqual(server.server_address[0], '0.0.0.0')
+        before = self.path.read_bytes()
+
+        def request(path='/api/v1/jobs/synthetic%3Aa', **kwargs):
+            return self.request(path, server=server, **kwargs)
+
+        def followup():
+            status, data, headers = request()
+            self.assertEqual(status, 200, data)
+            self.assertEqual(data['item']['uid'], 'synthetic:a')
+            self.assertEqual(headers['Cache-Control'], 'no-store')
+            self.assertNotIn('Access-Control-Allow-Origin', headers)
+
+        with patch('jobs.db.connect', side_effect=AssertionError('writer forbidden')):
+            for token in (None, 'wrong'):
+                status, data, headers = request(token=token)
+                self.assertEqual((status, data), (401, {'error': 'unauthorized'}))
+                self.assertEqual(headers['WWW-Authenticate'], 'Bearer')
+                followup()
+            for headers in (
+                    {'Host': f'0.0.0.0:{server.server_port}'},
+                    {'Host': f'localhost:{server.server_port}'},
+                    {'Host': f'evil.invalid:{server.server_port}'},
+                    {'Host': '127.0.0.1:0'}, {'Host': '127.0.0.1'},
+                    {'Origin': f'http://127.0.0.1:{server.server_port}'},
+                    {'Origin': 'null'}, {'Origin': ''}):
+                with self.subTest(headers=headers):
+                    status, data, _ = request(headers=headers)
+                    self.assertEqual((status, data), (403, {'error': 'forbidden_origin_or_host'}))
+                    followup()
+            for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE', 'CONNECT', 'HEAD'):
+                with self.subTest(method=method):
+                    status, data, _ = request('/api/label', method=method)
+                    self.assertEqual(status, 405)
+                    self.assertEqual(data, None if method == 'HEAD' else {'error': 'method_not_allowed'})
+                    followup()
+            # The client can still list and read full details through the
+            # wildcard bind, while every database connection remains read-only.
+            exported = agent_client.read_jobs(f'http://127.0.0.1:{server.server_port}', TOKEN, {})
+            self.assertTrue(exported['complete'])
+            self.assertEqual(exported['total'], 2)
+            with closing(api.read_connection(self.path)) as conn:
+                self.assertEqual(conn.execute('PRAGMA query_only').fetchone()[0], 1)
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute('DELETE FROM jobs')
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_cli_host_container_opt_in_with_synthetic_config(self):
+        config_path = self.root/'config.yaml'
+        config_path.write_text(json.dumps(self.config))
+        token_path = self.root/'agent.token'
+        token_path.write_text(TOKEN)
+        token_path.chmod(0o600)
+        args = ['--config', str(config_path), '--token-file', str(token_path),
+                '--host', '0.0.0.0', '--port', '0']
+        env = {**os.environ, 'JOBS_CONTAINER': '0'}
+        rejected = subprocess.run([sys.executable, '-B', '-m', 'jobs.agent_api', *args],
+                                  cwd=Path(__file__).resolve().parents[1], env=env,
+                                  capture_output=True, text=True, timeout=10)
+        self.assertEqual(rejected.returncode, 2, rejected.stderr)
+        self.assertIn('wildcard requires JOBS_CONTAINER=1', rejected.stderr)
+        self.assertNotIn('listening', rejected.stdout)
+        # Use the same CLI argument path, then issue real HTTP while its
+        # listener is active. The socket is always closed by main().
+        original = api.ThreadingHTTPServer.serve_forever
+        def exercise(server):
+            self.assertEqual(server.server_address[0], '0.0.0.0')
+            thread = threading.Thread(target=original, args=(server,), daemon=True)
+            thread.start()
+            try:
+                status, data, _ = self.request('/api/v1/jobs/synthetic%3Aa', server=server)
+                self.assertEqual(status, 200, data)
+            finally:
+                server.shutdown()
+                thread.join()
+        with patch.dict(os.environ, JOBS_CONTAINER='1'), patch.object(
+                api.ThreadingHTTPServer, 'serve_forever', exercise):
+            self.assertEqual(api.main(args), 0)
 
     def test_complete_337_pagination_stable_detail_and_changes(self):
         with closing(db.connect(self.path)) as conn:

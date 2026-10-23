@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/demo-video/banner-zh.png" alt="集中岗位、快速筛选、清晰跟进。多个招聘平台，一个清晰列表。" width="800">
+  <img src="docs/demo-video/banner-zh.png" alt="集中岗位、快速筛选、随心发问。一块看板，你和你的 agent 共用。" width="800">
 </p>
 
 # AU Job Board
@@ -12,7 +12,7 @@
 
 它只是初筛辅助。是否投递始终由你决定，工具不会替你提交任何申请。
 
-> 本仓库中所有截图、横幅和视频展示的都是手写的合成数据，不来自真实用户或真实岗位，
+> 本仓库中所有截图、横幅和视频展示的都是虚构的合成数据，不来自真实用户或真实岗位，
 > 也不代表任何真实效果。
 
 ## 解决什么问题
@@ -29,9 +29,11 @@
 - **排序**：按方向、级别、经验要求和薪资信号打分，并用可编辑的词表给岗位打技术标签。
   分数只用于排序，不是对你的评判。
 - **阅读、标注与跟进**：本地面板提供「推荐 / 全部 / 新增 / 被排除 / 已标注」五个视图，
-  显示岗位原文和证据句，可记录可投性、意向和进度（待投、已投、跳过）以及自由备注。
-  「优先投递」筛选会列出备注里带默认标签「优先投递」的岗位，作为待投递队列。
+  显示岗位原文和证据句，可记录处理进度（想投、已投、跳过）以及自由备注。
+  独立星标与「想投」共同组成优先投递队列；可选的资格纠正会保留原分析证据。
 - **报告**：输出 CSV 与 Markdown 报告，其中包含用于核查硬过滤的排除清单。
+- **与 agent 共用记录**：可选的认证 HTTP API 和 MCP 提供同一批岗位、筛选与只读查询，
+  供你的 agent 取数或制作报告；这些接口不会抓取、改标注或提交申请。
 
 面板支持中文和英文界面、浅色和深色主题，适配桌面与手机宽度。
 
@@ -41,11 +43,13 @@
 |---|---|
 | ![推荐视图](docs/demo-screenshots/images/A-recommend-zh-light-desktop-1440x1000.png) | ![被排除岗位：命中规则与引用的原文](docs/demo-screenshots/images/C-detail-excluded-zh-dark-desktop-1440x1000.png) |
 | 推荐视图 | 被排除岗位：命中的规则和引用的原文句子 |
-| ![已标注岗位：状态与备注](docs/demo-screenshots/images/C-detail-labelled-zh-dark-desktop-1440x1000.png) | [![30 秒视频封面](docs/demo-video/cover.png)](https://youtu.be/j5ktlVfHU-w) |
-| 已标注岗位：状态与备注 | [在 YouTube 观看 30 秒演示](https://youtu.be/j5ktlVfHU-w) · [MP4 下载](docs/demo-video/product-demo-30s.mp4)（视频界面为英文） |
+| ![已标注岗位：状态与备注](docs/demo-screenshots/images/C-detail-labelled-zh-dark-desktop-1440x1000.png) | [![v1.3 演示视频封面](docs/demo-video/cover.png)](https://youtu.be/AAfdZ548Gao) |
+| 已标注岗位：状态、优先星标与备注 | [在 YouTube 观看 44 秒 v1.3 演示](https://youtu.be/AAfdZ548Gao)（视频界面为英文） |
 
-更多图片见[截图库](docs/demo-screenshots/README.md)（102 张合成数据截图，含中英文、
-浅深色、桌面 / 平板 / 手机）。视频的制作方式见[说明](docs/demo-video/README.md)。
+更多图片见[截图库](docs/demo-screenshots/README.md)（130 张合成数据截图，含中英文、
+浅深色、桌面 / 平板 / 手机），均为浏览器直接截图。视频是基于面板、HTTP API 和 MCP
+合成输出制作的代码绘制动画，制作方式见[说明](docs/demo-video/README.md)，也可下载
+[MP4](docs/demo-video/au-job-board-v1.3-demo.mp4)。
 截图库和视频说明为英文。
 
 ## 大致使用过程
@@ -120,8 +124,8 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 - **Profile 是规则开关，不是法律结论**：`citizen`、`permanent_resident`、`485`、`whv`、`student_visa`、
   `custom` 只决定运行哪些既有规则。混合和重叠的规则仍有已知局限。详见
   [规则 profile](docs/legacy-rule-profiles.md)（英文）。
-- **改 profile 不会自动更新历史结果**：设置页只显示最近一次成功分析所用的 profile，没有切换开关。
-  修改配置后需要你自己重新运行 `analyze`。
+- **改 profile 不会自动更新历史结果**：设置页会显示最近一次成功分析所用的配置，
+  并可编辑下次运行的 profile 与逐条规则开关。保存不会重算；运行 `analyze` 或下次完整更新后才会生效。
 - **来源是非官方的**：对 SEEK、Indeed、LinkedIn 的访问是尽力而为，平台变化时可能失效，
   并受各平台自身条款约束。详见[安全与来源](docs/safety-and-sources.md)（英文）。
 - **面板没有身份认证**：请只绑定在回环地址上。
@@ -130,7 +134,9 @@ AI Agent 可走同一套步骤，详见 [Agent 辅助安装](docs/agent-install.
 
 ## 项目状态
 
-AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-job-board` 获取源码，安装到你自己的虚拟环境。没有打包发行版。
+AU Job Board 未在 PyPI 发布 Python 包。macOS 推荐从 `https://github.com/SkywingJam/au-job-board`
+获取源码并安装到独立虚拟环境；另有可选的 GHCR 镜像与 Docker / Compose 本地构建，见
+[Docker 指南](docs/docker.md)（英文）。
 
 - **许可证与范围**：MIT（见[许可证](#许可证)）。公开内容是初始公开文件集的 296 个文件，建立在不含早期私人开发历史的干净历史上。
 - **已检查的内容**：在一台 macOS 15（arm64）机器上，用本地 fresh clone 加全新 Python 虚拟环境完成安装；
@@ -144,7 +150,7 @@ AU Job Board 只以源码形式提供：从 `https://github.com/SkywingJam/au-jo
 - 对 SEEK、Indeed、LinkedIn 的真实抓取，以及 macOS LaunchAgent 模板的实际安装（只做过离线验证）；
 - 所有资格规则和来源行为。
 
-`requirements.txt` 列出运行依赖（`python-jobspy` 与 `PyYAML`）。
+`requirements.txt` 列出运行依赖（`python-jobspy`、`PyYAML` 与 `ruamel.yaml`）。
 
 ## 文档
 

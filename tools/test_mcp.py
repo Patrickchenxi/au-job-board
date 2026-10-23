@@ -140,6 +140,7 @@ class MCPIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_legacy_initialization_and_tool_call(self):
         async with self.client(mode='legacy') as client:
+            self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
             self.assertEqual(len((await client.list_tools()).tools), 4)
             page = await self.call(client, 'list_jobs', {'query': {'limit': 1}})
             detail = await self.call(client, 'get_job', {

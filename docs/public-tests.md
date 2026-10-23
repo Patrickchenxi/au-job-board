@@ -96,7 +96,8 @@ test and the entry's summary line, not by a single printed line.
 
 Docker has a separate opt-in smoke test: `python tools/test_docker.py`. It
 requires an active Docker Engine and may download packages during the build.
-Runtime sources are mocked and containers have no network. See
+Runtime sources are mocked; pipeline containers have no network, while
+published API/MCP port checks use a temporary bridge without fetching. See
 [docker.md](docker.md) for its checks and actual tested architecture.
 
 ## What is not in the public entry
