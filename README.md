@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/demo-video/banner-en.png" alt="Collect. Screen. Follow up. Several job boards, one clear list." width="800">
+  <img src="docs/demo-video/banner-en.png" alt="Collect. Screen. Ask. One board for you and your agent." width="800">
 </p>
 
 # AU Job Board
@@ -16,7 +16,7 @@ It is a first-pass sorting aid. Applying is still your decision, and nothing in
 it submits an application for you.
 
 > All screenshots, the banner and the video in this repository show
-> hand-written synthetic data. They do not come from real users or real
+> fictional synthetic data. They do not come from real users or real
 > listings, and they say nothing about real-world results.
 
 ## The problem it addresses
@@ -41,12 +41,15 @@ and notes live in your head or in a spreadsheet.
   Scores order the list; they are not a verdict on you.
 - **Read, label and follow up.** The local panel lists jobs in five views
   (Recommended, All, New, Excluded, Labelled), shows the original posting text
-  and the evidence sentence, and lets you record Want to apply, Applied or
+  and the evidence sentence, and lets you record To apply, Applied or
   Skipped plus free-form notes. An independent priority star forms an apply
-  queue with Want to apply. Optional qualification corrections retain the
+  queue with To apply. Optional qualification corrections retain the
   original analysis evidence.
 - **Report.** Writes CSV and Markdown reports, including an excluded list for
   auditing the hard filters.
+- **Read with your agent.** An optional authenticated HTTP API and MCP expose
+  the same job records and filters for read-only queries and reports. They do
+  not fetch jobs, change labels or submit applications.
 
 The panel is available in English and Chinese, in light and dark themes, and on
 desktop and phone-width screens.
@@ -57,12 +60,14 @@ desktop and phone-width screens.
 |---|---|
 | ![Recommended view](docs/demo-screenshots/images/A-recommend-en-light-desktop-1440x1000.png) | ![An excluded job with the rule and the original sentence](docs/demo-screenshots/images/C-detail-excluded-en-light-desktop-1440x1000.png) |
 | Recommended view | An excluded job: the rule that matched and the quoted original sentence |
-| ![A labelled job with status and notes](docs/demo-screenshots/images/C-detail-labelled-en-light-desktop-1440x1000.png) | [![Cover of the 30-second video](docs/demo-video/cover.png)](https://youtu.be/j5ktlVfHU-w) |
-| A labelled job with status and notes | [Watch the 30-second walkthrough on YouTube](https://youtu.be/j5ktlVfHU-w) · [MP4 download](docs/demo-video/product-demo-30s.mp4) |
+| ![A labelled job with status and notes](docs/demo-screenshots/images/C-detail-labelled-en-light-desktop-1440x1000.png) | [![Cover of the v1.3 demo video](docs/demo-video/cover.png)](https://youtu.be/AAfdZ548Gao) |
+| A labelled job with status, priority and notes | [Watch the 44-second v1.3 demo on YouTube](https://youtu.be/AAfdZ548Gao) |
 
 More images are in the [screenshot library](docs/demo-screenshots/README.md)
-(102 synthetic screenshots; English and Chinese, light and dark, desktop, tablet
-and phone). How the video was made is in [its notes](docs/demo-video/README.md).
+(130 synthetic screenshots; English and Chinese, light and dark, desktop, tablet
+and phone). These are direct browser captures. The video is a code-drawn animation
+based on synthetic outputs from the panel, HTTP API and MCP; see
+[its notes](docs/demo-video/README.md) or download the [MP4](docs/demo-video/au-job-board-v1.3-demo.mp4).
 
 ## How you would use it
 
@@ -154,8 +159,9 @@ to the agent:
   existing rules run. Mixed and overlapping rules still have known limits. See
   [rule profiles](docs/legacy-rule-profiles.md).
 - **Changing a profile does not update history by itself.** The Settings page
-  shows the profile used by the last successful analysis and has no switch. After
-  editing the configuration you re-run `analyze` yourself.
+  shows the last successful analysis and lets you edit the profile and rule
+  switches for the next run. Saving does not recompute results; apply the change
+  with `analyze` or the next full update.
 - **Sources are unofficial.** SEEK, Indeed and LinkedIn access is best-effort, can
   break when a platform changes, and is subject to each platform's own terms. See
   [safety and sources](docs/safety-and-sources.md).
@@ -192,7 +198,8 @@ Not verified, and the documentation does not imply otherwise:
   LaunchAgent templates (they have only been validated offline);
 - every eligibility rule and source behaviour.
 
-`requirements.txt` lists the runtime dependencies (`python-jobspy` and `PyYAML`).
+`requirements.txt` lists the runtime dependencies (`python-jobspy`, `PyYAML` and
+`ruamel.yaml`).
 
 ## Documentation
 

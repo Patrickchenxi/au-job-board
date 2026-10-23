@@ -135,7 +135,7 @@ configuration is still pending. Do not fill it in with guessed values.
    root and install `requirements.txt` with
    `.venv/bin/python -m pip install -r requirements.txt`. Getting the source and
    this step may use the network; install nothing else (no system packages,
-   browsers or the video tooling under `media/demo-video/`).
+   browsers or the maintainer-only video-production tools).
 5. **Create configuration only if absent.** Copy `config.example.yaml` to
    `config.yaml` only when `config.yaml` does not already exist, and only once
    the user has confirmed the personal settings. Never overwrite an existing

@@ -1,124 +1,134 @@
-# 30-second product demo video
+# v1.3 product demo video
+
+[Watch the 44-second demo on YouTube](https://youtu.be/AAfdZ548Gao), or download
+the [MP4](au-job-board-v1.3-demo.mp4). This animation and the
+[direct browser screenshot library](../demo-screenshots/README.md) are separate
+showcases with different synthetic datasets.
 
 | File | What |
 |---|---|
-| [`product-demo-30s.mp4`](product-demo-30s.mp4) | Final cut: 1920x1080, 30 fps, 900 frames, 30.0 s, H.264 High / yuv420p (BT.709, limited range) + AAC 48 kHz stereo, CRF 18, ~7.3 MB |
-| [`cover.png`](cover.png) | Cover / poster frame, 1920x1080 |
-| [`banner-en.png`](banner-en.png) · [`banner-zh.png`](banner-zh.png) | Banners, 1600x800, English / Chinese (same design, only title and short copy differ) |
-| [`script.md`](script.md) | Creative approach, script, storyboard, timing and captions (archived; no approval round) |
+| [`au-job-board-v1.3-demo.mp4`](au-job-board-v1.3-demo.mp4) | Final cut: 1920x1080, 60 fps, 2628 frames, 43.8 s, H.264 High / yuv420p (BT.709) + AAC 48 kHz stereo, CRF 17, ~8.5 MB |
+| [`cover.png`](cover.png) | Cover / poster frame (the merged answer, 0:21.6), 1920x1080 |
+| [`banner-en.png`](banner-en.png) · [`banner-zh.png`](banner-zh.png) | Banners, 1600x800, English / Chinese (same design; title, short copy and the agent's sentence differ) |
+| [`script.md`](script.md) | Approach, storyboard, timing and captions |
 
 ## Public description (safe to reuse)
 
-> A 30-second walkthrough of a personal job-search board. Listings from several
-> job boards land in one ranked list with duplicates merged; hard deal-breakers
-> are flagged with the original sentence quoted as evidence; each job is labelled
-> and noted in a few clicks; and the priority filter turns the labelled jobs into an
-> apply queue. All data shown is synthetic.
+> One question, asked three ways: in the panel, over the HTTP API, and by an AI
+> agent through MCP. All three come back with the same answer from the same board.
+> You decide on a job while your agent reads the same records, and your own agent
+> can go further, such as building a tech-stack report or answering questions you
+> come up with. All companies, roles and numbers are synthetic.
 
-The video, captions, cover and this description contain no repository name,
-repository address or release information. The product title **AU Job Board**
-appears in the UI header, outro and cover (cleared for display). Job links are never
-opened, and a headless browser has no address bar or tab strip, so no URL appears.
+The captions, cover and this description name no release number. The end card shows
+the product name and the repository path (`github.com/SkywingJam/au-job-board`) as
+plain, non-clickable text.
+
+## What is real and what is drawn
+
+This cut is a **code-drawn animation**, not a screen recording. Every frame was
+rendered from one HTML composition. The panel, terminal, agent chat and report are
+redrawn to match the real UI, condensed to fit three columns. Layout follows the real
+app as closely as the frame allows; where the two conflict, the content stays exact and
+the layout gives way.
+
+The content on screen was taken from the real application at `eb56c4f`
+(release/v1.3.0.1), run on a generated synthetic dataset:
+
+- **Dataset.** 468 generated postings (412 after de-duplication) with fictional
+  companies and `example.invalid` links, analysed by the normal `analyze` with the
+  demo rules and the default skill vocabulary. Like the v1.3.0.1 screenshot mock, the
+  dataset records two synthetic fetch batches and a terminal successful pipeline run,
+  so the panel reads "Last fetched … ago". These are display fields, not a real fetch.
+- **Panel column.** The real flow and values: Location → `3000` → Apply
+  ("20 of 208 on this page") → Skills → React ("20 of 64 on this page"). The listed
+  jobs, tags, scores and skill counts match the real panel in English.
+- **HTTP API column.** A runnable request against the read-only API,
+  `curl -G …/api/v1/jobs -d geo=3000 -d skill=React | jq '{total, snapshot_id}'`, and
+  its real output (`"total": 64` and the returned snapshot id).
+- **Agent column.** The real MCP tool and arguments,
+  `list_jobs {"query": {"geo": "3000", "skill": "React"}}`, which returned
+  `total: 64` in one page. The chat window around it is drawn and represents no
+  particular client.
+- **Hand-off.** The detail is the real job `seek:SYN-0018` (eligibility cue, Decide
+  buttons, Priority). The link between the two sides is the job id in the real
+  `panel_url` returned by the API.
+- **Report.** An agent-style report built from all 412 records over `list_jobs`
+  (5 pages) and `get_job`. Every figure is counted from the same data: React 128
+  (31.1%), SQL 127, AWS 116; 35 rule-excluded, so 377 pass.
+- **Drawn, not product UI.** The pointer, captions, the agent chat window, the agent's
+  notes in the report, the three follow-up prompts and the end card.
+
+"Near 3000" uses the app's own location contract: the 3000 CBD postcode is an exact
+match and other recognised Victorian places are near. HTTP API and MCP snapshots
+belong to separate processes, so their ids differ. The video therefore shows the
+same *query* under each answer, not a shared snapshot.
 
 ## How it was made
 
-- **Real UI, normal entry.** A fresh synthetic mock root is built with the existing
-  `tools/prepare_screenshot_mock.py` (same hand-written inputs as the screenshot
-  library: `demo/demo.jobs.json` + `docs/demo-screenshots/mock-inputs/`) and served by
-  the ordinary `jobs.cli panel` on `127.0.0.1`. No Demo mode, no banner.
-- **Automated operation and recording.** `tools/capture_demo_video.py` drives the
-  panel with Playwright (Brave 154 headless, run at device scale 4/3, so a 1440x810
-  CSS viewport gives 1920x1080 frames) and records each take with the Chrome DevTools
-  screencast. Variable-rate frames are resampled to a constant 30 fps by timestamp.
-- **Pointer from the live DOM.** Each target's position is measured with
-  `bounding_box()` right before the move. The real mouse then travels a curved,
-  eased 60 Hz path that triggers the page's real hover states. Every sample, press and
-  keystroke is logged against the same clock as the frames. Headless Chrome draws no
-  pointer, so the video draws one from that log. Click ripples and a soft tick sit at
-  the logged press times.
-- **Calibration.** For every click the script measures how long the page pixels took
-  to change after the press (shown below). The stable 6-144 ms values, and a manual
-  frame check at click frames, confirm that frames and actions share one timeline.
-- **Framing.** The 1440x810 page sits in a 1600x900 rounded window. Zooms are
-  camera moves onto boxes measured from the DOM (detail header, exclusion evidence,
-  label panel). The pointer and ripples live inside the same transform, so their
-  coordinates stay correct under zoom and crop, and the camera is clamped to the page
-  edges. Captions sit in a band below the window and never cover the UI.
-- **Composited, not product UI:** the intro (three pain points), outro and cover
-  text, the step chips and captions, the drawn pointer, ripples and camera zoom.
-  Every frame inside the window is real panel footage. There are no static-screenshot
-  swaps.
-- **Audio.** Music and tick are synthesised by `media/demo-video/scripts/make_audio.py`
-  (numpy; pad + pluck arpeggio + bass, 100 BPM). No samples, no voice-over.
+- **Composition.** One 1920x1080 HTML page with a small deterministic timeline
+  (springs, eases, typing, odometer counters, path motion) written for this video,
+  because no animation library could be installed in the build sandbox. Every frame
+  is a pure function of time, so the page can be previewed with a scrubber and
+  rendered frame by frame.
+- **Render.** Playwright drives headless Chromium. Each frame is sampled twice
+  (120 Hz) and blended into 60 fps for light motion blur, then encoded with ffmpeg.
+  Moving elements are composited layers, which keeps text from shimmering while the
+  camera eases.
+- **Audio.** A soft music bed and UI sounds (keys, clicks, a felt-piano accent at the
+  three key moments) were synthesised with numpy and placed on the same timeline as
+  the animation. No samples, no voice-over. The mix is loudness-normalised to -18 LUFS.
+- **Fonts.** Inter and DejaVu Sans Mono (the panel's own stack falls back to these
+  in the Linux render environment).
 
-Measured click-to-first-visible-change (final capture): open merged job 11 ms ·
-Excluded tab 117 · open excluded job 19 · open job 17 · Eligible 100 · Want 98 ·
-Saved 99 · note field 31 · Prioritize 6 · Labelled tab 126 · Priority only 122.
-No scripted step ran late.
+The composition, dataset generator, capture and audio scripts are maintainer tools
+and are not distributed; the committed MP4, cover and banners are the result. The
+build sandbox lacked `ruamel.yaml` (used only by Settings editing), so a local stub
+was on `PYTHONPATH` while the app ran. Nothing in the video touches Settings.
 
 ## Banners
 
-One editable source, `media/demo-video/src/Banner.tsx`
-(stills `BannerEN` / `BannerZH`; the copy lives in its `COPY` table). That source
-is part of the development-only Remotion project and is not distributed in the
-public candidate. Layout: on the left, a
-three-line title (last line in the accent colour) and a two-line value line; on the right,
-a real panel screenshot in a 12 px-radius card that bleeds off the right and bottom edges.
-Uses the panel's paper / ink / accent tokens and its font stack (`-apple-system`,
-`PingFang SC`, …).
+Two stills, `banner-en.png` / `banner-zh.png`, 1600x800, refreshed for v1.3. Same
+design in both; only the title, short copy and the agent's sentence differ. Layout as
+before: on the left, a three-line title (last line in the accent colour) and a two-line
+value line; on the right, a real panel screenshot in a 12 px-radius card that bleeds off
+the right and bottom edges. A small floating agent card overlaps the screenshot. Uses the
+panel's paper / ink / accent tokens; the three dots above the title are the
+panel / HTTP API / MCP colours.
 
 | | Title | Short copy |
 |---|---|---|
-| EN | Collect. Screen. **Follow up.** | Several job boards, one clear list. |
-| ZH | 集中岗位 / 快速筛选 / **清晰跟进** | 多个招聘平台，一个清晰列表。 |
+| EN | Collect. Screen. **Ask.** | One board for you and your agent. |
+| ZH | 集中岗位 / 快速筛选 / **随心发问** | 一块看板，你和你的 agent 共用。 |
 
-- Screenshot: the committed library image
-  `docs/demo-screenshots/images/C-detail-labelled-en-light-desktop-1440x1000.png` (real UI,
-  normal panel, synthetic data), imported directly by the source and shown at 0.72x. Both
-  banners use the same image, so only the copy differs (the panel UI in it is English).
-- Phone check: downscaled to 390 and 360 px wide (the width of a full-bleed phone
-  image), the title stays bold and clear and the 48 px value line renders at ~12 px. The
-  screenshot reads as product texture at that size.
-- No repository name, address or release information. The UI header shows "AU Job Board",
-  as in the video.
+- Screenshot: the real panel at `eb56c4f` (normal `jobs.cli panel`, no Demo mode,
+  English, light theme, 1440x1000 at 2x, shown at 0.72x) on the same generated
+  synthetic dataset. The view is All with Location 3000 and Skills React; the open
+  detail is a synthetic job marked To apply and starred.
+- Agent card: drawn for the banner and not product UI. The call and the answer are the
+  real `list_jobs` request and its `total` (64) on the same dataset, read through the
+  app's MCP endpoint.
+- No repository name, address or release information. The UI header shows "AU Job Board".
 
-The two banners were rendered from that source with Remotion. The render
-commands are not part of the public candidate; the committed PNGs above are
-the result. The banner source and the Remotion project are development-only
-and are not distributed.
-
-## How it was produced (historical)
-
-The video was captured from a fresh synthetic mock root served by the ordinary
-panel, then rendered with Remotion from the development-only project under
-`media/demo-video/`. The mock builder, capture tools and Remotion project named
-above are maintainer tools: they are **not** part of the public candidate and no
-reproduction commands are shipped here. The finished video, cover and banners in
-this directory, together with the source and version notes above, are the record
-of how they were made.
-
-Raw frames, the mock DB, `takes.json` and audio stayed under a gitignored `out/`
-task directory during production. A re-capture would give the same cut but not
-byte-identical frames (screencast timing varies by a few ms; listing dates follow
-the capture day).
+The banners were rendered from a small HTML page with Playwright (headless Chromium,
+1600x800 at 1x, Inter / Noto Sans CJK SC).
 
 ## Versions
 
-- Source code shown: `97f0ab62db801a3e0a14172eec84e0ad968ab6d3` (product code unchanged
-  on this branch); mock data generated 2026-10-07.
-- Remotion 4.0.533 (`@remotion/cli`, `remotion`, `@remotion/media`), React 19.2.3, with the
-  official Remotion Agent Skills 4.0.533 (`npx skills add remotion-dev/skills`, kept in
-  `out/` for reference, not committed).
-- Playwright 1.63.0 (Python), Pillow 12.3.0, numpy 2.5.3, Brave 154.0.8037.98, Node 24.5.0.
+- Application shown: `eb56c4fef036daebd48e0723acf4f7468cc2e0f3` (release/v1.3.0.1);
+  synthetic dataset generated with an anchor date of 2026-10-23.
+- Playwright 1.63.0 (Node), headless Chromium (Playwright build 1243), Node 22.22.0,
+  Python 3.13, numpy 2.5.3, scipy 1.18.1, ffmpeg 6.1.1 (libx264 + AAC).
 
 ## Limits
 
-- The pointer is drawn from the logged real mouse path, because headless browsers draw
-  none. The path and the click times are real; the arrow's look is not the OS cursor.
-- Light theme, English UI and the desktop layout only. Timestamps such as
-  "Posted 2026-10-05T09:00:00" are the panel's own formatting of synthetic dates.
-- The note picked in the video is the default "Prioritize" suggestion. It is stored as
-  the canonical tag, which is what the "Priority only" filter reads (see Limits in
-  [`../demo.md`](../demo.md)). Typed English notes would not feed that filter.
-- Remotion is free for individuals and teams of up to three; larger organisations need
-  a company licence.
+- Not a screen recording. The panel column is a condensed redraw; the real panel
+  has more filters and a wider layout. The pointer is drawn.
+- Light theme, English UI, desktop layout only.
+- The agent chat window and the agent's notes are illustrative. The tool calls,
+  arguments and returned totals are real; the wording of an agent's answer depends
+  on the client and model used.
+- Relative times ("Last fetched 1 min ago") and listing dates follow the dataset's
+  anchor date and the capture moment.
+- The previous 30-second walkthrough (v1.0 UI, Remotion, real screen capture) has been
+  replaced by this cut. It remains in the repository history.
