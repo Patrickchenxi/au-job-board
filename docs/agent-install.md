@@ -12,6 +12,27 @@ persistent volumes. Do not install Docker Desktop or change an existing
 deployment merely because Docker is available. Report the architecture actually
 tested and keep network fetching and scheduling as separate user choices.
 
+### When the user chooses Docker
+
+Use [docker.md](docker.md) as the installation procedure instead of creating a
+host Python environment or installing source launchd templates. Confirm the
+Compose project directory and image/build choice, retain all three persistent
+volumes, and start the normal panel on host loopback. Check the home and Settings
+pages without fetching listings. Confirm personal settings before offering a
+fetch; a clean first start is allowed to have no jobs.
+
+Offer MCP after those checks using the optional connection section below.
+If the user separately wants raw HTTP access, follow
+[Docker API/MCP setup](docker.md#optional-http-api-and-mcp): create/reuse the
+owner-only token in the data volume, start the `api` profile and verify one
+authenticated list at `http://127.0.0.1:8092/api/v1/jobs`. An empty snapshot is
+valid. Use both Compose `-f` arguments when an image overlay is selected.
+
+Report the tested image/architecture, Compose project, panel/API/MCP URLs,
+enabled services, token path (without its contents), and start/stop/upgrade
+commands. Keep each optional interface off unless chosen; Docker availability
+alone does not authorize replacing an existing installation.
+
 ## Copyable instruction for the user
 
 > Install AU Job Board from source following docs/install.md and
@@ -190,32 +211,41 @@ are complete, and keep it off unless the user explicitly chooses it.
 Ask one question: whether the user wants **you, the installing agent**, to be
 configured as an MCP client of this installation. Explain briefly that MCP:
 
-- installs the extra `requirements-mcp.txt` dependencies (network use),
+- needs the extra `requirements-mcp.txt` dependencies for source installations
+  (already included in the Docker image),
 - enables `mcp` in their `config.yaml` and creates an owner-only token file,
 - listens with the panel on the same address and the panel port plus one,
 - is read-only, but plain HTTP beyond loopback sends the token and job data in
   clear text unless TLS is configured.
 
-If the user agrees:
+If the user agrees, prepare the chosen installation first:
 
-1. Install `requirements-mcp.txt` into the project `.venv`.
-2. Create the token file as shown in [mcp.md](mcp.md), and add only the `mcp`
-   section to the existing `config.yaml`, preserving every other value and
-   comment. Keep `panel.host` on loopback unless the user separately chose
-   another protected address.
-3. Restart the user's panel only if they already run it; otherwise tell them the
-   endpoint becomes available on the next `panel` start.
-4. Register the endpoint in **your own** client configuration using that
+- **Source:** install `requirements-mcp.txt` into the project `.venv`. Create the
+  token as shown in [mcp.md](mcp.md) and add the `mcp` section to the existing
+  config, preserving other values and comments. Keep `panel.host` on loopback
+  unless another protected address was explicitly chosen. Restart an existing
+  panel, or explain that MCP starts with the next panel launch.
+- **Docker:** follow [Docker API/MCP setup](docker.md#optional-http-api-and-mcp)
+  using the persistent `/app/config/config.yaml` and `/app/data/agent.token`.
+  Reuse an existing token, enable MCP and restart the panel. No host venv or
+  extra package installation is needed. The client URL is
+  `http://127.0.0.1:8091/mcp`; the internal wildcard bind is not a client address.
+  Enabling MCP does not require starting the separate HTTP API profile.
+
+Then connect this agent:
+
+1. Register the endpoint in **your own** client configuration using that
    client's documented method, preferring its secret or environment-variable
    support for the token. If you cannot configure yourself, give the user the
    URL and steps instead of guessing a file format. Do not modify other agents'
    or applications' configuration.
-5. Verify with one `list_jobs` call returning a snapshot, without printing JD
+2. Verify the server reports `AU Job Board (read-only)` and one `list_jobs` call
+   returns a snapshot, without printing JD
    bodies, notes or the token. On an empty database, an empty successful list
    is a valid result.
-6. Report the endpoint URL, the token file path (never its contents), and how to
+3. Report the endpoint URL, the token file path (never its contents), and how to
    undo it: remove your client registration, set `mcp.enabled: false`, delete
-   the token file and restart the panel.
+   the token file if no separate API still uses it, and restart the panel.
 
 Declining MCP does not make the installation incomplete. Enabling it does not
 grant permission to fetch, schedule, expose the panel or read data beyond the

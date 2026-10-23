@@ -10,6 +10,11 @@ An optional [read-only MCP](mcp.md) exposes these reads to
 stdio or Streamable HTTP MCP clients through a thin adapter, using the same
 read-only API and shared snapshot settings.
 
+Docker users can start the optional `api` Compose profile at
+`http://127.0.0.1:8092/api/v1/jobs`; follow the
+[container setup](docker.md#optional-http-api-and-mcp) for token creation,
+persistent paths and image selection. It is separate from MCP on port 8091.
+
 ## Start locally
 
 Use the normal application to upgrade an installation to schema 3 first, under
@@ -31,7 +36,9 @@ python -m jobs.agent_api --config config.yaml --rules rules.yaml \
   --port 8091 --panel-url http://127.0.0.1:8090/
 ```
 
-The API binds only `127.0.0.1`. Every mounted route requires
+Source launches bind only `127.0.0.1`. Docker explicitly uses `--host 0.0.0.0`
+with `JOBS_CONTAINER=1` inside its namespace and publishes only host loopback;
+Host validation still requires `127.0.0.1:<listener port>`. Every mounted route requires
 `Authorization: Bearer <token>`. It rejects foreign Host headers and browser
 Origin headers, sends no CORS permission, and mounts no write/config/update
 routes. Tokens, query strings and job contents are not logged. The token file

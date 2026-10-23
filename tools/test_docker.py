@@ -1,4 +1,6 @@
-"""Opt-in Docker smoke test with fictional data and no runtime network.
+"""Opt-in Docker smoke with fictional data and mocked sources.
+
+Pipeline tests have no network; published-port tests use a private bridge.
 
 Run from the repository: python3 tools/test_docker.py [--no-build]. Docker
 Engine is required. This is intentionally separate from offline source tests.
@@ -7,6 +9,7 @@ The product image never includes this test or its source-adapter mock.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 from pathlib import Path
@@ -42,6 +45,7 @@ def main():
     tag = "au-job-board:local"
     prefix = "au-jobs-smoke-" + uuid.uuid4().hex[:12]
     containers, volumes = [], []
+    network = prefix + '-published'
 
     def docker(*args, check=True):
         result = subprocess.run(["docker", *args], cwd=root, text=True,
@@ -78,10 +82,13 @@ def main():
             def once(*command, check=True):
                 return docker("run", "--rm", "--network", "none", *mounts, tag, *command, check=check)
 
-            def detached(suffix, *command, delay=None):
+            def detached(suffix, *command, delay=None, published=()):
                 name = prefix + "-" + suffix
                 containers.append(name)
-                args = ["run", "-d", "--network", "none", "--init", "--name", name, *mounts]
+                args = ["run", "-d", "--network", network if published else "none",
+                        "--init", "--name", name, *mounts]
+                for port in published:
+                    args += ['-p', f'127.0.0.1::{port}']
                 if delay is not None:
                     args += ["-e", "JOBS_TEST_SLEEP=" + str(delay)]
                 docker(*args, tag, *command)
@@ -172,10 +179,89 @@ def main():
             assert "Synthetic durable note" in note, note
             assert json.loads(get("/api/update-state"))["state"] == "success"
             print("PASS recreation keeps config, overlay, DB/manual note and task state", flush=True)
+
+            # Published ports require a normal bridge (Docker internal networks
+            # do not publish them). Sources remain mocked; no fetch is started.
+            inside(panel, "from pathlib import Path; import secrets; from ruamel.yaml import YAML; "
+                   "token=Path('/app/data/agent.token'); token.write_text(secrets.token_urlsafe(48)); token.chmod(0o600); "
+                   "yaml=YAML(); p=Path('/app/config/config.yaml'); c=yaml.load(p); "
+                   "c['mcp']={'enabled':True,'token_file':str(token)}; yaml.dump(c,p)")
+            token = inside(panel, "from pathlib import Path; print(Path('/app/data/agent.token').read_text())")
+            docker('stop', '--time', '10', panel)
+            docker('network', 'create', network)
+            panel = detached('published-panel', 'panel', '--host', '0.0.0.0', '--port', '8090',
+                             published=(8090, 8091))
+            api = detached('published-api', 'agent-api', '--host', '0.0.0.0', '--port', '8092',
+                           '--token-file', '/app/data/agent.token', published=(8092,))
+
+            def published_request(name, port, path, *, body=None, auth=True, headers=None, method=None):
+                mapping = docker('port', name, str(port)+'/tcp').stdout.strip()
+                external_port = int(mapping.rsplit(':', 1)[1])
+                connection = http.client.HTTPConnection('127.0.0.1', external_port, timeout=5)
+                request_headers = {'Host': f'127.0.0.1:{port}'}
+                if auth:
+                    request_headers['Authorization'] = 'Bearer '+token
+                if body is not None:
+                    request_headers.update({'Content-Type': 'application/json',
+                                            'Accept': 'application/json, text/event-stream'})
+                request_headers.update(headers or {})
+                try:
+                    connection.request(method or ('POST' if body is not None else 'GET'), path,
+                                       body=None if body is None else json.dumps(body).encode(), headers=request_headers)
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            def ready(name, port, path):
+                try:
+                    return published_request(name, port, path, auth=False)[0] == 401
+                except (OSError, http.client.HTTPException):
+                    return False
+
+            wait_for(lambda: ready(panel, 8091, '/mcp'), 'published MCP')
+            wait_for(lambda: ready(api, 8092, '/api/v1/jobs'), 'published API')
+            assert published_request(panel, 8090, '/?view=all', auth=False)[0] == 200
+            for name, port, path in [(panel, 8091, '/mcp'), (api, 8092, '/api/v1/jobs')]:
+                assert published_request(name, port, path, headers={'Host':'evil.invalid'})[0] == 403
+                assert published_request(name, port, path, headers={'Origin':'null'})[0] == 403
+            assert published_request(api, 8092, '/api/label', method='POST')[0] == 405
+            status, body = published_request(api, 8092, '/api/v1/jobs?limit=1')
+            assert status == 200
+            page = json.loads(body)
+            assert page['total'] == 1 and page['snapshot_id']
+            uid = page['items'][0]['uid']
+            from urllib.parse import quote
+            status, body = published_request(api, 8092, '/api/v1/jobs/'+quote(uid, safe='')+
+                                            '?snapshot_id='+page['snapshot_id'])
+            assert status == 200 and json.loads(body)['item']['description']
+
+            def rpc(method, params):
+                status, body = published_request(panel, 8091, '/mcp', body={
+                    'jsonrpc':'2.0','id':1,'method':method,'params':params})
+                assert status == 200, status
+                value = json.loads(body)
+                assert 'error' not in value, value
+                return value['result']
+
+            initialized = rpc('initialize', {'protocolVersion':'2025-03-26','capabilities':{},
+                                            'clientInfo':{'name':'synthetic-docker-smoke','version':'1'}})
+            assert initialized['serverInfo']['name'] == 'AU Job Board (read-only)'
+            assert {t['name'] for t in rpc('tools/list', {})['tools']} == {
+                'list_jobs','get_job','list_batches','get_batch'}
+            listed = rpc('tools/call', {'name':'list_jobs','arguments':{'query':{'limit':1}}})
+            assert not listed.get('isError')
+            page = listed['structuredContent']
+            detail = rpc('tools/call', {'name':'get_job','arguments':{
+                'uid':page['items'][0]['uid'],'snapshot_id':page['snapshot_id']}})
+            assert not detail.get('isError') and detail['structuredContent']['item']['description']
+            assert detail['structuredContent']['item']['panel_url'].startswith('http://127.0.0.1:8090/')
+            print('PASS host-published API/MCP, initialization name, frozen JD and rejection guards', flush=True)
             print("Docker synthetic smoke passed:", architecture, flush=True)
         finally:
             for name in containers:
                 docker("rm", "-f", name, check=False)
+            docker('network', 'rm', network, check=False)
             for volume in volumes:
                 docker("volume", "rm", volume, check=False)
 

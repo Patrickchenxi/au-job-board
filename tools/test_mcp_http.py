@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -73,6 +74,7 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         service = self.start()
         async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
             async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
+                self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
                 self.assertEqual({t.name for t in (await client.list_tools()).tools},
                     {'list_jobs','get_job','list_batches','get_batch'})
                 first = await client.call_tool('list_jobs', {'query': {'limit': 1}})
@@ -104,6 +106,32 @@ class HTTPMCP(unittest.IsolatedAsyncioTestCase):
         self.assertIn('www-authenticate', {k.lower():v for k,v in headers.items()})
         self.assertNotIn('access-control-allow-origin', {k.lower():v for k,v in headers.items()})
         self.assertEqual(self.request(body=b'x'*(65536+1))[0], 413)
+
+    async def test_container_listener_keeps_loopback_authority_and_auth(self):
+        self.panel.server_close()
+        self.panel = ThreadingHTTPServer(('0.0.0.0', self.panel.server_port), panel.Handler)
+        self.addCleanup(self.panel.server_close)
+        self.config['panel']['host'] = '0.0.0.0'
+        with patch.dict(os.environ, {'JOBS_CONTAINER': '0'}):
+            with self.assertRaises(ValueError):
+                self.start()
+        with patch.dict(os.environ, {'JOBS_CONTAINER': '1'}):
+            service = self.start()
+        self.assertEqual(service.url, f'http://127.0.0.1:{service.port}/mcp')
+        for headers, status in [({'Authorization': ''}, 401),
+                                ({'Host': f'0.0.0.0:{service.port}'}, 403),
+                                ({'Host': 'evil.invalid'}, 403),
+                                ({'Origin': 'null'}, 403)]:
+            self.assertEqual(self.request(headers=headers)[0], status)
+        async with httpx2.AsyncClient(headers={'Authorization': 'Bearer '+TOKEN}) as http:
+            async with Client(streamable_http_client(service.url, http_client=http), mode='legacy') as client:
+                self.assertEqual(client.server_info.name, 'AU Job Board (read-only)')
+                page = (await client.call_tool('list_jobs', {'query': {'limit': 1}})).structured_content
+                detail = await client.call_tool('get_job', {'uid': page['items'][0]['uid'],
+                                                         'snapshot_id': page['snapshot_id']})
+                self.assertFalse(detail.is_error)
+                self.assertTrue(detail.structured_content['item']['panel_url'].startswith(
+                    f'http://127.0.0.1:{self.panel.server_port}/'))
 
     async def test_tls_certificate_verified(self):
         root = self.fixture.root

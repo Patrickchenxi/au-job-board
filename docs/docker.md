@@ -15,7 +15,7 @@ container check. Docker Desktop on macOS runs Linux containers in a VM.
 
 The published image supports `linux/amd64` and `linux/arm64`. Docker selects the
 matching platform. Use a version tag for a specific release (for example
-`v1.2.2`), `sha-<full-main-commit>` for a specific main build, or `latest` for
+`v1.3.0.1`), `sha-<full-main-commit>` for a specific main build, or `latest` for
 the most recently published main build. A digest pins the exact image content.
 Publication requires the synthetic container smoke test on each native platform;
 it does not test real job sources or other operating systems.
@@ -23,7 +23,7 @@ it does not test real job sources or other operating systems.
 From a source checkout, use the image overlay with the existing Compose file:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.2.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build
 docker compose -f compose.yaml -f compose.image.yaml logs panel
@@ -54,7 +54,7 @@ repair. Confirm your own keywords, locations, sources and rule profile in
 Settings before starting an update. Saving settings applies to the next run;
 it does not fetch or recompute existing results.
 
-The panel has no authentication. Compose publishes only `127.0.0.1:8090`.
+The panel has no authentication. Compose publishes it only at `127.0.0.1:8090`.
 The container explicitly opts in to listening on `0.0.0.0` **inside its network
 namespace** with `JOBS_CONTAINER=1`. Source launches keep the wildcard-address
 guard. Do not change the host publish address to a wildcard, use host networking
@@ -62,6 +62,73 @@ or expose the container port publicly without your own protected access layer.
 Keep the host and container ports equal: the local write endpoints validate the
 request port against the listener. To use another port, change both the Compose
 port mapping and its panel command together.
+
+## Optional HTTP API and MCP
+
+Docker API/MCP support requires an image built from v1.3.0.1 or later and the
+matching Compose files. The image includes the MCP SDK; both interfaces remain
+off until explicitly enabled. Source installations still install the SDK only
+when needed. Starting the panel initializes a fresh database without fetching.
+For an existing installation, finish the normal backup/upgrade first; the API
+refuses missing or outdated databases and does not migrate them.
+
+| Interface | Host address | Enable |
+|---|---|---|
+| Panel | `http://127.0.0.1:8090/` | Normal `up -d` |
+| MCP | `http://127.0.0.1:8091/mcp` | Enable `mcp` in config and restart panel |
+| HTTP API | `http://127.0.0.1:8092/api/v1/jobs` | Start the `api` Compose profile |
+
+The API and MCP use `Authorization: Bearer <token>`. Create their shared token
+as the application user, without printing it or overwriting an existing token:
+
+```bash
+docker compose exec -T panel python -c 'import os,secrets; fd=os.open("/app/data/agent.token",os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.fdopen(fd,"w").write(secrets.token_urlsafe(48)+"\n")'
+```
+
+If it already exists, reuse it; rotation requires restarting both enabled
+services and updating clients. The token remains in the private data volume.
+
+To enable MCP, wait for updates to finish and avoid simultaneous settings edits,
+then preserve the existing YAML while adding its optional configuration:
+
+```bash
+docker compose exec -T panel python -c 'from pathlib import Path; from ruamel.yaml import YAML; p=Path("/app/config/config.yaml"); y=YAML(); c=y.load(p); c.setdefault("mcp",{}).update(enabled=True,token_file="/app/data/agent.token"); y.dump(c,p)'
+docker compose restart panel
+```
+
+Connect your MCP client to `http://127.0.0.1:8091/mcp` using its private secret
+configuration. Verify discovery of the four [read-only tools](mcp.md#tools-and-a-first-read)
+and one `list_jobs` call. An empty successful snapshot is valid on a new DB.
+The server identifies itself as `AU Job Board (read-only)`.
+
+The HTTP API is independent of MCP. After the panel has initialized/upgraded the
+database and the token exists, start it with:
+
+```bash
+docker compose --profile api up -d api
+docker compose --profile api logs api
+```
+
+For published images, use both `-f` arguments on **every** command above, for
+example `docker compose -f compose.yaml -f compose.image.yaml --profile api up -d --no-build api`.
+The overlay selects the same `AU_JOB_BOARD_IMAGE` for both services. Use
+`jobs.agent_client --api-url http://127.0.0.1:8092` on the host with a privately
+transferred owner-only token file, or another authenticated HTTP client. See
+[API scopes and snapshots](agent-api.md#endpoints-and-scopes).
+
+Both listeners bind `0.0.0.0` only inside the container with `JOBS_CONTAINER=1`;
+the host mappings stay on loopback. Clients must use **127.0.0.1**, with matching
+host/container ports: MCP accepts Host `127.0.0.1:8091`, API
+`127.0.0.1:8092`. Browser Origin headers and foreign Host headers remain rejected.
+The MCP's internal ephemeral API stays private; port 8092 is the separate API
+service. Each service owns its own snapshots, so keep each frozen query on one
+interface. To access from another machine, tunnel the required loopback ports
+over SSH; forward 8090 too if using the returned local panel links.
+
+Disable MCP with `mcp.enabled: false` and restart the panel. Stop the API with
+`docker compose --profile api stop api`. Retain the shared token while either
+interface still needs it; remove it only after both are disabled and client
+registrations are removed.
 
 ## Run commands and stop
 
@@ -133,9 +200,11 @@ For a published-image installation, after updates have finished, select the
 new version and recreate the panel without building:
 
 ```bash
-export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.2.2
+export AU_JOB_BOARD_IMAGE=ghcr.io/skywingjam/au-job-board:v1.3.0.1
 docker compose -f compose.yaml -f compose.image.yaml pull
 docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --force-recreate
+# If the API was enabled, recreate it from the same image too:
+docker compose -f compose.yaml -f compose.image.yaml --profile api up -d --no-build --force-recreate api
 ```
 
 For a local build, update the source checkout and rebuild:
@@ -143,6 +212,8 @@ For a local build, update the source checkout and rebuild:
 ```bash
 docker compose build
 docker compose up -d --force-recreate
+# If the API was enabled, recreate it from the rebuilt image too:
+docker compose --profile api up -d --force-recreate api
 ```
 
 Recreating containers keeps the named volumes. `docker compose down` also keeps
@@ -150,12 +221,13 @@ them; **`docker compose down -v` deletes them**, including your manual notes.
 Do not use it as an upgrade step. Keep the same Compose project name/directory,
 or explicitly retain its volume names, to reuse existing data.
 
-Before backing up, stop the panel and **all** one-off/scheduled worker
+Before backing up, stop the panel, optional API and **all** one-off/scheduled worker
 containers that share the volumes. Then copy all three directories from the
 stopped panel container before removing it:
 
 ```bash
 docker compose stop
+docker compose --profile api stop api  # if enabled
 mkdir -p out/docker-backup
 docker compose cp panel:/app/config out/docker-backup/config
 docker compose cp panel:/app/data out/docker-backup/data
@@ -171,9 +243,11 @@ or migration instruction for another machine.
 ## Offline synthetic verification
 
 For contributors, `tools/test_docker.py` builds the local image and exercises
-synthetic jobs with the network disabled at container runtime. It uses its own
+synthetic jobs with networking disabled during pipeline tests. It uses its own
 temporary volumes/containers, checks the panel, persistence and shared lock,
-then removes only its generated resources. This is separate from a real fetch
+then tests host-published API/MCP ports on a temporary Docker bridge with sources mocked,
+including initialization identity, frozen JD reads and auth/Host/Origin rejection.
+It removes only its generated resources. This is separate from a real fetch
 and from the public source tests. Read its output for the tested architecture
 and any failed check; it never reads your normal Compose volumes.
 
@@ -189,13 +263,13 @@ Manual runs also require the `main` ref; other refs skip the Docker jobs.
 
 With an empty `release_tag`, the workflow builds on native amd64 and arm64
 Ubuntu runners, runs `tools/test_docker.py --no-build` with isolated synthetic
-volumes and no runtime network, then publishes the tested platform images.
+volumes and mocked sources, then publishes the tested platform images.
 Only after both pass does it publish the combined `sha-<full-commit>` and
 `latest` tags. Platform staging tags end in `-amd64` / `-arm64`.
 
 To publish a version, first wait for that main build and the public source CI
 to pass, create the matching Git tag/Release, then manually run `Docker image`
-on `main` with `release_tag` set to the existing `vX.Y.Z` tag. The tag must
+on `main` with `release_tag` set to the existing `vX.Y.Z` or `vX.Y.Z.N` tag. The tag must
 point to that exact main commit. This adds a version tag to the existing tested
 multi-platform image without rebuilding or moving `latest`. Repeating the
 operation accepts the same image but rejects replacing a different version image.
