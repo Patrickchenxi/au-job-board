@@ -16,7 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from test_panel_update import TemporaryTest
-from jobs import cli, db, panel_update, run_state, sources
+from jobs import cli, db, panel_update, portability, run_state, sources
 
 
 class SharedFacts(TemporaryTest):
@@ -176,13 +176,15 @@ with patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])
      patch.object(socket, 'create_connection', side_effect=AssertionError('network forbidden')):
     raise SystemExit(cli.cmd_run(args))
 """
+                # Same hand-off as the panel: an fd via pass_fds on POSIX, an inheritable handle on Windows.
+                lock_arg, spawn = portability.inheritable_lock_arg(handle)
+                spawn.pop('start_new_session', None)
                 for name, value in {'CONFIG': str(self.path), 'RULES': str(self.path.parent / 'rules.yaml'),
-                                    'SKILLS': str(self.path.parent / 'skills.yaml'), 'FD': handle.fileno(),
+                                    'SKILLS': str(self.path.parent / 'skills.yaml'), 'FD': int(lock_arg),
                                     'TASK': task, 'CODE': code}.items():
                     script = script.replace(name, repr(value))
                 child = subprocess.Popen([sys.executable, '-c', script], cwd=ROOT,
-                                         pass_fds=(handle.fileno(),), stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.PIPE)
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **spawn)
                 try:
                     _, stderr = child.communicate(timeout=10)
                     self.assertEqual(child.returncode, code, stderr.decode())

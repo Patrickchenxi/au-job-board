@@ -5,7 +5,6 @@ also preserves the cross-process lock, latest attempt and result generation.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,7 @@ import uuid
 
 from .config import db_path
 from . import db
+from .portability import lock_exclusive
 
 
 def runtime_path(config):
@@ -29,7 +29,7 @@ def acquire_lock(config):
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     handle = target.open('a+')
     try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_exclusive(handle, blocking=False)
     except BlockingIOError:
         handle.close()
         return None

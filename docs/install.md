@@ -177,6 +177,40 @@ Open <http://127.0.0.1:8090>. Stop the server with Ctrl-C. The panel has **no
 built-in authentication**; keep it on the loopback address unless you add your
 own protected access layer.
 
+## Windows notes (not covered by CI)
+
+Native Windows remains outside the tested environment above, and CI runs only on
+macOS. The code paths that previously failed on Windows have portable fallbacks
+in `jobs/portability.py`:
+
+- file locks use `msvcrt.locking` instead of `fcntl.flock`;
+- the run timeout uses a timer thread where `SIGALRM` does not exist;
+- the panel's update button passes the run lock to its worker as an inheritable
+  handle (Windows has no `pass_fds`) and stops it with `Process.kill`;
+- `os.fchmod` is skipped where it does not exist (POSIX permission bits do not
+  apply on Windows).
+
+`.gitattributes` keeps `jobs/data/` byte-for-byte on checkout. Git for Windows
+converts line endings by default (`core.autocrlf=true`), which changed the
+bundled postcode file and made its checksum fail ("Australian location reference
+is invalid"). A clone made before this rule existed needs those two files checked
+out again.
+
+With Python 3.12 on Windows the steps above become, in PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m jobs.cli --config config.yaml panel --host 127.0.0.1 --port 8090
+```
+
+A manual check on Windows 11 with Python 3.12.10 fetched, analyzed, ran the
+panel and its update button, and edited the skill vocabulary. In that check the
+full public suite had 28 entries pass and 10 fail. The failures are in tests that
+assume POSIX behaviour (file permission bits, creating symlinks, deleting files
+that are still open, SIGTERM delivery, and Windows paths inside double-quoted
+YAML), not in the fallbacks above.
+
 ## 8. Optional macOS automation
 
 The LaunchAgent templates in `launchd/` can schedule a run or keep the panel

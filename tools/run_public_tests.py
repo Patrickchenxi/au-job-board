@@ -62,6 +62,8 @@ PYTHON_TESTS = (
      "salary numeric-token and shared-unit ranges", None),
     ("tools/test_run_state.py",
      "unified task facts, generations and recovery", None),
+    ("tools/test_portability.py",
+     "POSIX/Windows lock, fchmod and lock hand-off shims", None),
     ("tools/test_config_edit.py",
      "settings YAML roundtrip, validation, conflicts and shared lock", None),
     ("tools/test_public_configuration.py",

@@ -11,7 +11,6 @@ import copy
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import threading
@@ -20,6 +19,7 @@ import uuid
 import yaml
 
 from .config import ROOT, db_path, read_config_root, resolve_filtering
+from .portability import inheritable_lock_arg, kill_process_tree
 from .db import utcnow
 from . import run_state, db as database
 
@@ -275,10 +275,11 @@ class UpdateManager:
                            "--rules", str(self.rules_path), "--skills", str(self.skills_path),
                            "run", "--timeout", str(TIMEOUT_SECONDS), "--result-file", str(self.result_path),
                            "--result-started-at", state["started_at"], "--task-id", state["task_id"],
-                           "--trigger", "manual", "--run-lock-fd", str(handle.fileno())]
-                process = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                           start_new_session=True, pass_fds=(handle.fileno(),))
+                           "--trigger", "manual", "--run-lock-fd"]
+                # POSIX passes the lock fd; Windows has no pass_fds and passes an inheritable handle.
+                lock_arg, spawn = inheritable_lock_arg(handle)
+                process = subprocess.Popen(command + [lock_arg], cwd=ROOT, stdin=subprocess.DEVNULL,
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **spawn)
                 self._process = process
                 # The child uses the same started timestamp; stale results were
                 # removed while holding the exclusive lock.
@@ -304,10 +305,7 @@ class UpdateManager:
 
     @staticmethod
     def _stop(process):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        kill_process_tree(process)
         process.wait()
 
     def _watch(self, process, handle, snapshot, initial):

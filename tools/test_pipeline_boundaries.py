@@ -86,6 +86,31 @@ socket.create_connection = blocked
         if handle:
             handle.close()
 
+    def test_timeout_without_sigalrm_records_timeout(self):
+        # The Windows path (no SIGALRM): a timer thread interrupts the main thread and the
+        # run is still recorded as a timeout. Forced here on every platform via has_alarm.
+        result = self.child("""
+import argparse, time
+from jobs import cli, sources
+args = argparse.Namespace(config=sys.argv[2], rules=sys.argv[3], skills=sys.argv[4], timeout=1)
+calls = 0
+def detail(_source_id):
+    global calls
+    calls += 1
+    if calls == 1:
+        return 'Synthetic pending description'
+    time.sleep(10)
+with patch.object(cli, 'has_alarm', return_value=False), \\
+     patch.object(sources, 'iter_sources', return_value=[('seek', lambda *_: [])]), \\
+     patch.object(cli, '_resolve', return_value=detail):
+    code = cli.cmd_run(args)
+assert code == 3, code
+""", self.path, self.rules, self.skills)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_terminal("timeout")
+        self.assertEqual(run_state.latest(self.cfg)["error"], "run_timeout")
+
+    @unittest.skipUnless(hasattr(signal, "SIGALRM"), "SIGALRM is POSIX-only")
     def test_detail_alarm_after_uncommitted_write_records_timeout(self):
         result = self.child("""
 import argparse, signal

@@ -60,12 +60,13 @@ nothing in the suite fetches listings.
 | `tools/test_panel_copy.mjs` | Complete JD copy, clipboard fallbacks, safe text and restored focus/selection | all |
 | `tools/test_label_migration.py` | Atomic legacy upgrade, independent priority, correction provenance, concurrent partial edits and frozen action state | all |
 | `tools/test_patch_boundaries.py` | Concurrent partial labels, explicit group clears and legacy events, config candidate limit, unknown-employer grouping, detail retries and score/CSV values | all |
-| `tools/test_pipeline_boundaries.py` | Real interrupted writes, timeout finalization and competing standalone analysis | all |
+| `tools/test_pipeline_boundaries.py` | Real interrupted writes, timeout finalization (SIGALRM and the timer fallback used where SIGALRM is missing) and competing standalone analysis | all |
 | `tools/test_render_security.py` | Markdown URL attribute injection and ordinary rendering controls | all |
 | `tools/test_skill_edit_concurrency.py` | Seed restoration, atomic file publication and competing overlay editors across processes | all |
 | `tools/test_salary.py` | Decimal percentages/money, shared range units and numeric controls | all |
 | `tools/test_config_edit.py` | YAML roundtrip/CLI semantics, allowlist, conflicts, shared lock, applied and legacy-file snapshots | all |
 | `tools/test_run_state.py` | Unified run/fetch facts, generations and orphan-worker recovery | all |
+| `tools/test_portability.py` | Exclusive file locks, `fchmod` fallback and passing the run lock to a child process on POSIX and Windows | all |
 | `tools/test_public_configuration.py` | Public example configuration, source selection, loopback binding, read-only profile command | all |
 | `tools/test_citizenship_rules.py` | Citizenship rules against the synthetic fixture | all |
 | `tools/test_eeo_rules.py` | Citizenship EEO / welcome guard | all |

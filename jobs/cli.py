@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import _thread
 import argparse
 from contextlib import closing
 import copy
@@ -39,6 +40,7 @@ from .filters import build_job_text, evaluate
 from .scoring import score_job
 from . import skills as skills_mod
 from . import run_state
+from .portability import has_alarm, open_inherited_lock
 
 # 供 cmd_skills 复用；模块级 import 避免每个分支再 import 一次
 
@@ -833,7 +835,7 @@ def _write_run_result(args, state, stage=None, error=None, *, persist=True):
 def _execute_pipeline(args, *, fetch_only=False):
     initial = load_config(getattr(args, "config", None))
     inherited = getattr(args, "run_lock_fd", None)
-    lock = os.fdopen(os.dup(inherited), "a+") if inherited is not None else _acquire_run_lock(initial)
+    lock = open_inherited_lock(inherited) if inherited is not None else _acquire_run_lock(initial)
     previous_snapshot = getattr(args, "_config_snapshot", None)
     args._run_started = getattr(args, "result_started_at", None) or database.utcnow()
     args._run_counts = {"seen": 0, "inserted": 0, "updated": 0, "details_fetched": 0}
@@ -853,6 +855,10 @@ def _execute_pipeline(args, *, fetch_only=False):
     state, error = "error", "run_failed"
     previous_alarm = None
     previous_term = None
+    # Without SIGALRM (Windows), a timer thread interrupts the main thread instead;
+    # the resulting KeyboardInterrupt is reported as a timeout, not an interruption.
+    alarm_timer = None
+    timed_out = threading.Event()
     try:
         fresh_config = load_config(getattr(args, "config", None))
         if db_path(initial).resolve() != db_path(fresh_config).resolve():
@@ -860,9 +866,16 @@ def _execute_pipeline(args, *, fetch_only=False):
         args._config_snapshot = fresh_config
         if threading.current_thread() is threading.main_thread():
             previous_term = signal.signal(signal.SIGTERM, lambda signum, _frame: (_ for _ in ()).throw(SystemExit(128 + signum)))
-        if limit:
+        if limit and has_alarm():
             previous_alarm = signal.signal(signal.SIGALRM, _on_alarm)
             signal.setitimer(signal.ITIMER_REAL, limit)
+        elif limit and threading.current_thread() is threading.main_thread():
+            def _expire():
+                timed_out.set()
+                _thread.interrupt_main()
+            alarm_timer = threading.Timer(limit, _expire)
+            alarm_timer.daemon = True
+            alarm_timer.start()
         steps = (("fetch", _cmd_fetch),) if fetch_only else (("fetch", cmd_fetch), ("details", cmd_details), ("analyze", cmd_analyze), ("report", cmd_report))
         for stage, step in steps:
             _write_run_result(args, "running", stage)
@@ -881,10 +894,15 @@ def _execute_pipeline(args, *, fetch_only=False):
         state, error = "timeout", "run_timeout"
         return 3
     except (KeyboardInterrupt, SystemExit):
+        if timed_out.is_set():
+            state, error = "timeout", "run_timeout"
+            return 3
         state, error = "interrupted", "run_interrupted"
         raise
     finally:
-        if limit:
+        if alarm_timer is not None:
+            alarm_timer.cancel()
+        elif limit and has_alarm():
             signal.setitimer(signal.ITIMER_REAL, 0)
             if previous_alarm is not None:
                 signal.signal(signal.SIGALRM, previous_alarm)
