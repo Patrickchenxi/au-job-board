@@ -96,7 +96,7 @@ _FREEMAIL = {"gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.
 # Job boards, applicant-tracking systems and common platforms: not the employer's own domain.
 _PLATFORMS = re.compile(r"(?:^|\.)(seek|linkedin|indeed|jora|workforceaustralia|greenhouse|lever|workday|myworkday|"
                         r"smartrecruiters|pageuppeople|pageup|successfactors|taleo|icims|jobadder|employmenthero|"
-                        r"applynow|bamboohr|recruitee|ashbyhq|teamtailor|livehire|google|microsoft|youtube|"
+                        r"applynow|bamboohr|recruitee|recruitee-mailbox|ashbyhq|teamtailor|livehire|google|microsoft|youtube|"
                         r"facebook|instagram|twitter|x|apple|gov|example)\.", re.I)
 _ANONYMOUS = re.compile(r"^\s*$|private advertiser|confidential|undisclosed|anonymous", re.I)
 _JUNIOR = re.compile(r"\b(junior|entry[- ]level|no experience (needed|required|necessary))\b", re.I)
@@ -163,7 +163,8 @@ def contact_domains(text: str) -> list[str]:
     """Email and web domains in the ad (for the DNS check)."""
     domains = set(email_domains(text))
     domains |= {m.group(1).lower().rstrip(".") for m in _URL.finditer(text or "")}
-    return sorted(d for d in domains if "." in d)
+    # a real top-level domain has 2+ letters ("L.E.K." in prose is not a domain)
+    return sorted(d for d in domains if re.search(r"\.[a-z]{2,}$", d))
 
 
 _SUFFIXES = ("vic.edu.au", "nsw.edu.au", "qld.edu.au", "wa.edu.au", "sa.edu.au", "com.au", "net.au", "org.au",
@@ -178,6 +179,28 @@ def _brand_label(domain: str) -> str:
             rest = labels[:-len(suffix.split("."))]
             return rest[-1] if rest else ""
     return labels[-2] if len(labels) >= 2 else labels[0]
+
+
+def registrable(domain: str) -> str:
+    """"au.example.com" -> "example.com", "admin.ex.vic.edu.au" -> "ex.vic.edu.au"."""
+    labels = domain.lower().split(".")
+    for suffix in _SUFFIXES:
+        if domain.lower().endswith("." + suffix):
+            size = len(suffix.split(".")) + 1
+            return ".".join(labels[-size:])
+    return ".".join(labels[-2:])
+
+
+def _exists(domain: str, resolver) -> bool:
+    """Mail-only subdomains often have no address record, so the parent and its www count too."""
+    parent = registrable(domain)
+    for candidate in dict.fromkeys((domain, parent, "www." + parent)):
+        try:
+            if resolver(candidate):
+                return True
+        except (OSError, UnicodeError):
+            continue
+    return False
 
 
 def domain_matches_company(domain: str, company: str) -> bool:
@@ -228,11 +251,7 @@ def refresh(conn, config: dict, resolver=None) -> int:
     socket.setdefaulttimeout(5)
     try:
         for domain in sorted(wanted)[:MAX_LOOKUPS_PER_FETCH]:
-            try:
-                resolves = resolver(domain)
-            except (OSError, UnicodeError):
-                resolves = False
-            cache[domain] = {"resolves": resolves, "checked_at": now.isoformat(timespec="seconds")}
+            cache[domain] = {"resolves": _exists(domain, resolver), "checked_at": now.isoformat(timespec="seconds")}
             done += 1
     finally:
         socket.setdefaulttimeout(previous)
@@ -276,8 +295,10 @@ def assess(job: dict, *, domains: dict, duplicates: int, employer: dict) -> dict
         else:
             reasons.append(("auth.r_domain_mismatch", {"domain": domain}, 10))
     for domain in contact_domains(text):
+        # Only address records can be checked with the standard library, so a mail-only
+        # domain can look missing: a modest weight, not a verdict.
         if domain not in _FREEMAIL and domains.get(domain, {}).get("resolves") is False:
-            reasons.append(("auth.r_domain_missing", {"domain": domain}, 20))
+            reasons.append(("auth.r_domain_missing", {"domain": domain}, 10))
 
     if _ANONYMOUS.search(company):
         reasons.append(("auth.r_anonymous", {}, 10))

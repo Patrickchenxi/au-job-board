@@ -41,7 +41,7 @@ The risk starts at 5%, then each signal adds or removes points:
 | Pressure to act fast | +5 |
 | Email at a free provider (Gmail, Outlook, Yahoo…) | +15 |
 | Email domain does not match the employer's name | +10 |
-| A quoted email or web domain does not exist (DNS lookup) | +20 |
+| A quoted email or web domain, its parent and its `www.` all fail a DNS lookup | +10 |
 | Employer name hidden ("Private Advertiser", "Confidential") | +10 |
 | Pay of $150k+ for a role described as junior or entry level | +15 |
 | The same ad text under 4+ different employer names | +15 |
@@ -66,6 +66,9 @@ ads often point to press, partners or a parent company.
   that a few clicks.
 - Name and domain matching is heuristic. A legitimate employer can use an
   unrelated domain, and a scam can use a convincing one.
+- The DNS check uses the standard library, which sees address records only. A
+  domain used only for email (no website) can look missing, so this sign carries
+  a modest weight. A typo in an ad has the same effect.
 - No platform verification flag is available from the sources, so "posted on a
   big job board" counts for nothing. Scamwatch warns that scammers post there too.
 
