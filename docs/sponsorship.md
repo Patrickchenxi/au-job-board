@@ -12,15 +12,16 @@ user.
 ## What it shows
 
 After `analyze`, cards that have results gain up to four tags, and the job detail
-gains one block with three sections:
+gains one compact block with three rows. Each row shows only its conclusion;
+hovering (or focusing) it opens the evidence behind it:
 
 1. **Can this employer definitely sponsor?** "Confirmed" only when the employer
    is on the Home Affairs accredited sponsor list (exact name match) or the ad
    says it sponsors. A confirmed ABF sanction overrides this.
 2. **Sponsorship likelihood**: a 0–100% meter. It starts at 20%, because almost
    any lawfully operating Australian business can apply to become a standard
-   business sponsor. Each signal then adds or removes points, and the detail
-   lists every one:
+   business sponsor. Each signal then adds or removes points, and the row's
+   popup lists every one:
 
    | Signal | Points |
    |---|---|

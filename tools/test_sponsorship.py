@@ -198,6 +198,8 @@ class AddOn(unittest.TestCase):
         # 20 base + 35 accredited + 10 ASX (synthetic list) + 15 likely occupation
         self.assertIn("aria-valuenow=\"80\"", detail)
         self.assertIn("(+35)", detail)
+        # the evidence sits in hover popups, one per row
+        self.assertEqual(detail.count('role="tooltip"'), 3)
 
     def test_refresh_downloads_only_stale_files_during_fetch(self):
         cfg, _path = self.config(enabled=True)

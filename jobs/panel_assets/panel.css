@@ -273,14 +273,22 @@ body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
 .aumeter-text{font-weight:700;white-space:nowrap}
 .aumeter-bar{display:block;height:6px;border:1px solid #111;background:#fff;overflow:hidden}
 .aumeter-bar i{display:block;height:100%;background:#FFCD00}
-.aumeter.large{display:flex;align-items:flex-start;gap:10px;margin:6px 0 4px;padding:8px 12px 8px 8px;
-  border-width:2px;font-size:13px;max-width:360px}
-.aumeter.large .aumark{width:36px;height:36px}
-.aumeter.large .aumeter-body{flex:1;gap:4px;min-width:0}
-.aumeter.large .aumeter-bar{height:12px;border-width:1.5px}
-.aumeter-scale{display:flex;justify-content:space-between;font-size:10px;color:#444}
-.aumeter-caption{font-size:11px;color:#333}
 .aumeter.m-no .aumeter-text{color:#B42318}
+/* Compact detail block: one line per row, the evidence opens on hover or focus.
+   The popup is positioned against the row, so it never runs past the detail pane. */
+.sponsor-check.compact{padding:6px 12px}
+.sponsor-check.compact .fit-sec{position:relative;padding:5px 0}
+.sponsor-check .fit-head b{font-weight:600}
+.sponsor-check .pop-wrap{display:inline-flex;align-items:center;gap:4px;cursor:help;border-radius:6px;outline:none}
+.sponsor-check .pop-wrap:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.sponsor-check .pop-i{font-size:12px;color:var(--faint);line-height:1}
+.sponsor-check .pop{display:none;position:absolute;z-index:30;left:0;right:0;top:calc(100% + 2px);
+  max-height:320px;overflow:auto;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;
+  background:var(--surface);color:var(--ink2);font-size:12px;line-height:1.45;font-weight:400;
+  box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:auto}
+.sponsor-check .pop ul{margin:0;padding-left:16px}
+.sponsor-check .pop-foot{display:block;margin-top:6px;padding-top:6px;border-top:1px solid var(--line2);color:var(--faint)}
+.sponsor-check .pop-wrap:hover .pop,.sponsor-check .pop-wrap:focus-within .pop{display:block}
 /* 雇主的薪资原话：虚线框 + 斜体，形态上就和上面那种区分开 */
 .tag.raw{background:transparent;color:var(--ink2);font-style:italic;border:1px dashed var(--faint)}
 /* 小圆点：只剩顶栏「数据过期」提示在用 */

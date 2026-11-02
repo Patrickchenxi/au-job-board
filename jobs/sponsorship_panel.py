@@ -50,20 +50,15 @@ def _certain(s: dict) -> bool:
     return (s.get("acc") == "exact" or s.get("ad") == "offers") and s.get("sanction_level") != "confirmed"
 
 
-def meter(fit: dict, lang: str, *, large: bool = False, title: str | None = None) -> str:
+def meter(fit: dict, lang: str, *, title: str | None = None) -> str:
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
     p = int(fit.get("likelihood") or 0)
     tip = f' title="{_e(title)}"' if title else ""
     bar = (f'<span class="aumeter-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{p}" '
            f'aria-label="{_e(T("fit.meter"))}"><i style="width:{p}%"></i></span>')
-    if not large:
-        return (f'<span class="aumeter m-{fit["rating"]}"{tip}>{_MARK}'
-                f'<span class="aumeter-body"><span class="aumeter-text">{_e(T("fit.meter_short", p=p))}</span>'
-                f'{bar}</span></span>')
-    return (f'<div class="aumeter large m-{fit["rating"]}"{tip}>{_MARK}'
-            f'<div class="aumeter-body"><div class="aumeter-text">{_e(T("fit.meter_long", p=p))}</div>{bar}'
-            f'<div class="aumeter-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>'
-            f'<div class="aumeter-caption">{_e(T("fit." + fit["rating"]))}</div></div></div>')
+    return (f'<span class="aumeter m-{fit["rating"]}"{tip}>{_MARK}'
+            f'<span class="aumeter-body"><span class="aumeter-text">{_e(T("fit.meter_short", p=p))}</span>'
+            f'{bar}</span></span>')
 
 
 def card_tags(row: dict, lang: str) -> str:
@@ -102,10 +97,19 @@ def detail_block(row: dict, lang: str) -> str:
     s = row[ROW_KEY]
     T = lambda key, **kw: i18n.t(lang, key, **kw)   # noqa: E731
 
-    def section(n: int, title: str, head: str, lines: list[str], body: str = "") -> str:
+    def section(n: int, title: str, head: str, lines: list[str], foot: str = "") -> str:
+        # Each row shows only its conclusion; the evidence opens on hover or focus
+        # (tabindex lets keyboard and touch users open it too).
         items = "".join(f"<li>{_e(line)}</li>" for line in lines)
-        return (f'<div class="fit-sec"><div class="fit-head"><span class="step">{n}</span><b>{_e(title)}</b>{head}</div>'
-                + body + (f"<ul>{items}</ul>" if items else "") + "</div>")
+        if not (items or foot):
+            return (f'<div class="fit-sec"><div class="fit-head"><span class="step">{n}</span>'
+                    f'<b>{_e(title)}</b>{head}</div></div>')
+        pop = (f'<span class="pop" role="tooltip" id="sponsor-pop-{n}">'
+               + (f"<ul>{items}</ul>" if items else "")
+               + (f'<span class="pop-foot">{_e(foot)}</span>' if foot else "") + "</span>")
+        return (f'<div class="fit-sec"><div class="fit-head"><span class="step">{n}</span><b>{_e(title)}</b>'
+                f'<span class="pop-wrap" tabindex="0" aria-describedby="sponsor-pop-{n}">{head}'
+                f'<span class="pop-i" aria-hidden="true">ⓘ</span>{pop}</span></div></div>')
 
     # 1. can the employer definitely sponsor
     certain = _certain(s)
@@ -131,9 +135,10 @@ def detail_block(row: dict, lang: str) -> str:
         for key, params, points in fit.get("reasons") or []:
             text = T(key, **params)
             reasons.append(f"{text} ({points:+d})" if points else text)
-        out += section(2, T("fit.sec_likelihood"), "", reasons, body=meter(fit, lang, large=True))
+        out += section(2, T("fit.sec_likelihood"), meter(fit, lang), reasons,
+                       foot=f'{T("fit." + fit["rating"])} · {T("fit.note")} {T("sponsor.note")}')
     else:
-        out += section(2, T("fit.sec_likelihood"), "", [T("fit.not_rated")])
+        out += section(2, T("fit.sec_likelihood"), _tag("adjust", T("fit.not_rated")), [])
 
     # 3. what the ad says
     if s.get("ad") in ("pr_only", "no", "offers"):
@@ -141,7 +146,6 @@ def detail_block(row: dict, lang: str) -> str:
         lines = [T(f"sponsor.line_{s['ad']}") + f"“{s.get('ad_text') or ''}”"]
         out += section(3, T("fit.sec_ad"), _tag(kind, T(f"fit.ad_{s['ad']}")), lines)
     else:
-        out += section(3, T("fit.sec_ad"), "", [T("fit.ad_none")])
+        out += section(3, T("fit.sec_ad"), _tag("adjust", T("fit.ad_silent")), [T("fit.ad_none")])
 
-    return (f'<div class="sponsor-check">{out}'
-            f'<div class="hint">{_e(T("fit.note"))} {_e(T("sponsor.note"))}</div></div>')
+    return f'<div class="sponsor-check compact">{out}</div>'
