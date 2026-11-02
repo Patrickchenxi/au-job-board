@@ -145,7 +145,31 @@ def _cmd_fetch(args) -> int:
                     print("[fetch] 批次收尾失败，保留未完成状态。", file=sys.stderr)
             raise
         print(f"[fetch] 完成 -> {database.counts(conn)}")
+        _refresh_sponsorship(config)
         return 0
+
+
+def _run_sponsorship(conn, config) -> None:
+    """Optional add-on: offline employer check after a successful analyze. Writes only its side file."""
+    from . import sponsorship
+    if not sponsorship.enabled(config):
+        return
+    try:
+        sponsorship.run(conn, config)
+    except Exception as exc:            # noqa: BLE001 - analysis results are already committed
+        print(f"[sponsorship] check skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def _refresh_sponsorship(config) -> None:
+    """Optional add-on: refresh public sponsorship reference data (fetch is the network stage)."""
+    from . import sponsorship
+    if not sponsorship.enabled(config):
+        return
+    try:
+        if (updated := sponsorship.refresh(config)):
+            print(f"[sponsorship] refreshed {', '.join(updated)}")
+    except Exception as exc:            # noqa: BLE001 - never fail a fetch over reference data
+        print(f"[sponsorship] refresh skipped ({type(exc).__name__})", file=sys.stderr)
 
 
 def cmd_details(args) -> int:
@@ -409,8 +433,11 @@ def _cmd_analyze(args) -> int:
     started = database.utcnow()
     conn = database.connect(db_path(config))
     try:
-        return _analyze_legacy(args, config, rules, selected_rules, resolution,
+        code = _analyze_legacy(args, config, rules, selected_rules, resolution,
                                conn, started)
+        if code == 0:
+            _run_sponsorship(conn, config)
+        return code
     except RunTimeout:
         # 全流程超时必须向上传播（见 jobs.RunTimeout 的说明），不能被回滚层吞掉。
         conn.rollback()

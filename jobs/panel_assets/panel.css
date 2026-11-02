@@ -254,6 +254,33 @@ body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
 .tag.age{background:var(--bad);color:var(--on-fill);font-weight:600}
 /* 折算出来的薪资数字：实底，让人一眼看出「这是我们算的」 */
 .tag.salary{background:var(--good-tint);color:var(--good-ink);font-weight:600}
+/* Optional sponsorship add-on (jobs/sponsorship_panel.py); unused unless sponsorship.enabled */
+.tag.sponsor{background:var(--good-tint);color:var(--good-ink)}
+.tag.sponsor.maybe{background:transparent;border:1px dashed var(--good-ink)}
+.tag.sponsor.certain{font-weight:600}
+.sponsor-check{margin:10px 0;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--surface2)}
+.sponsor-check ul{margin:6px 0 4px;padding-left:18px}
+.sponsor-check li{margin:2px 0;color:var(--ink2);overflow-wrap:anywhere}
+.sponsor-check .fit-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sponsor-check .fit-sec{padding:6px 0;border-bottom:1px solid var(--line2)}
+.sponsor-check .fit-sec:last-of-type{border-bottom:0}
+/* Likelihood meter in a printed-label style: white box, dark border, green/gold mark and gold bar.
+   It stays a white label in dark mode on purpose. */
+.aumeter{display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 3px;border:1.5px solid #111;
+  border-radius:4px;background:#fff;color:#111;font-size:11px;line-height:1.1;vertical-align:middle}
+.aumeter .aumark{width:16px;height:16px;flex:none}
+.aumeter-body{display:inline-flex;flex-direction:column;gap:2px;min-width:58px}
+.aumeter-text{font-weight:700;white-space:nowrap}
+.aumeter-bar{display:block;height:6px;border:1px solid #111;background:#fff;overflow:hidden}
+.aumeter-bar i{display:block;height:100%;background:#FFCD00}
+.aumeter.large{display:flex;align-items:flex-start;gap:10px;margin:6px 0 4px;padding:8px 12px 8px 8px;
+  border-width:2px;font-size:13px;max-width:360px}
+.aumeter.large .aumark{width:36px;height:36px}
+.aumeter.large .aumeter-body{flex:1;gap:4px;min-width:0}
+.aumeter.large .aumeter-bar{height:12px;border-width:1.5px}
+.aumeter-scale{display:flex;justify-content:space-between;font-size:10px;color:#444}
+.aumeter-caption{font-size:11px;color:#333}
+.aumeter.m-no .aumeter-text{color:#B42318}
 /* 雇主的薪资原话：虚线框 + 斜体，形态上就和上面那种区分开 */
 .tag.raw{background:transparent;color:var(--ink2);font-style:italic;border:1px dashed var(--faint)}
 /* 小圆点：只剩顶栏「数据过期」提示在用 */

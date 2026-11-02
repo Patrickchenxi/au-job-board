@@ -28,6 +28,7 @@ from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
 from . import report as report_mod
+from . import sponsorship_panel
 
 # 数据口径与 HTML 渲染已拆到两个模块；这里保留原有名字，调用方与测试不用改。
 from .panel_data import (  # noqa: F401
@@ -118,6 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                 if row is None:
                     self._send(f"uid={uid} not found".encode(), 404, "text/plain; charset=utf-8", started)
                     return
+                sponsorship_panel.attach([row], self.config)   # optional add-on; no-op unless enabled
                 payload = json.dumps({"html": _detail_html(row, lang, i18n.resolve_keys(self.headers.get("Cookie")))},
                                      ensure_ascii=False)
                 self._send(payload.encode("utf-8"), 200,

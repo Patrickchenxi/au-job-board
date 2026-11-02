@@ -60,6 +60,7 @@ nothing in the suite fetches listings.
 | `tools/test_location_search.py` | Representative selection, CBD / metropolitan / fallback block ordering and pagination | all |
 | `tools/test_panel_location_views.py` | One location box, dividers and simplified group detail | all |
 | `tools/test_ineligible_last.py` | Ineligible-last zones over effective qualification (machine rule categories, human overrides, unknown): panel/API/MCP parameter, whole-result paging, location blocks, frozen snapshots, control placement | all |
+| `tools/test_sponsorship.py` | Optional sponsorship add-on: off by default (no files, no network, no panel output), conservative name matching, ad wording, likelihood points, unchanged scores/decisions when enabled, fetch-only refresh | all |
 | `tools/test_panel_locations.mjs` | Group save identity, location search drafts and navigation guards | all |
 | `tools/test_panel_shortcuts.mjs` | Keyboard profiles, cookie persistence, native text selection and input/overlay guards | all |
 | `tools/test_panel_copy.mjs` | Complete JD copy, clipboard fallbacks, safe text and restored focus/selection | all |

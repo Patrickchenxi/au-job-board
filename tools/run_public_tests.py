@@ -55,6 +55,8 @@ PYTHON_TESTS = (
     ("tools/test_panel_location_views.py", "location UI rendering and provenance", None),
     ("tools/test_ineligible_last.py",
      "ineligible-last qualification zones across panel, API snapshots and pages", None),
+    ("tools/test_sponsorship.py",
+     "optional sponsorship add-on: off by default, matching, likelihood, panel", None),
     ("tools/test_label_migration.py",
      "label migration, priority, correction provenance and frozen action state", None),
     ("tools/test_patch_boundaries.py",

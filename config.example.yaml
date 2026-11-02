@@ -125,3 +125,12 @@ legacy_rule_profile:
 # The value below is only an example of the syntax.
 eligibility:
   profile: citizen
+
+# Optional employer sponsorship signals (off unless enabled). After analyze, the
+# panel can show whether an employer is on the accredited sponsor list and a rough
+# sponsorship likelihood. It only adds tags; scores and decisions are unchanged.
+# Reference data is downloaded during fetch. See docs/sponsorship.md.
+# sponsorship:
+#   enabled: false
+#   data_dir: data/sponsors
+#   refresh_days: 30
