@@ -254,6 +254,24 @@ body.selecting.sel-busy .card-check{cursor:progress;opacity:.6}
 .tag.age{background:var(--bad);color:var(--on-fill);font-weight:600}
 /* 折算出来的薪资数字：实底，让人一眼看出「这是我们算的」 */
 .tag.salary{background:var(--good-tint);color:var(--good-ink);font-weight:600}
+/* Optional scam-risk add-on (jobs/authenticity_panel.py); unused unless authenticity.enabled */
+.tag.ar-badge.ar-high{background:var(--bad-tint);color:var(--bad-ink);font-weight:600}
+.tag.ar-badge.ar-medium{background:var(--cue-tint);color:var(--cue-ink)}
+.tag.ar-badge.ar-low{background:var(--good-tint);color:var(--good-ink)}
+.ar-block{position:relative;margin:10px 0;padding:6px 12px;border:1px solid var(--line2);border-radius:8px;background:var(--surface2)}
+.ar-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ar-row b{font-weight:600}
+.ar-wrap{display:inline-flex;align-items:center;gap:4px;cursor:help;border-radius:6px;outline:none}
+.ar-wrap:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.ar-i{font-size:12px;color:var(--faint)}
+.ar-pop{display:none;position:absolute;z-index:30;left:0;right:0;top:100%;max-height:340px;overflow:auto;
+  padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--surface);color:var(--ink2);
+  font-size:12px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:auto}
+.ar-pop ul{margin:0;padding-left:16px}
+.ar-pop li{margin:2px 0;overflow-wrap:anywhere}
+.ar-links,.ar-foot{display:block;margin-top:6px;padding-top:6px;border-top:1px solid var(--line2)}
+.ar-foot{color:var(--faint)}
+.ar-wrap:hover .ar-pop,.ar-wrap:focus-within .ar-pop{display:block}
 /* 雇主的薪资原话：虚线框 + 斜体，形态上就和上面那种区分开 */
 .tag.raw{background:transparent;color:var(--ink2);font-style:italic;border:1px dashed var(--faint)}
 /* 小圆点：只剩顶栏「数据过期」提示在用 */

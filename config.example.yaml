@@ -125,3 +125,13 @@ legacy_rule_profile:
 # The value below is only an example of the syntax.
 eligibility:
   profile: citizen
+
+# Optional job-ad scam-risk check (off unless enabled). After analyze, the panel
+# shows a scam-risk badge on suspicious ads, based on public Scamwatch / ACCC
+# warning signs. It only adds tags; scores and decisions are unchanged. Quoted
+# domains are DNS-checked during fetch. See docs/authenticity.md.
+# authenticity:
+#   enabled: false
+#   check_domains: true
+#   data_dir: data/authenticity
+#   refresh_days: 30

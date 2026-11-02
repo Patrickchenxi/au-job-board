@@ -28,6 +28,7 @@ from . import db as database
 from . import i18n
 from . import labels as labels_mod
 from . import skills as skills_mod
+from . import authenticity_panel
 from .panel_data import (
     FILTER_KEYS, FRESH_KEY, INELIGIBLE_LAST_KEY, NONE_TOKEN, PRIORITY_KEY,
     QUERY_KEY, SINCE_KEY, SKILL_KEY, SKILL_PICK_TOP, SORT_KEYS, TIER_KEY, TIER_LABELS,
@@ -313,6 +314,7 @@ def _card(row: dict, since: str | None = None, lang: str = "zh") -> str:
         tags += _tag_html("warn", i18n.cue_label(lang, row["eligibility_cue"]))
     tags += _correction_tag(row, label, lang)
     tags += _salary_chip(pairs, row, lang)
+    tags += authenticity_panel.card_tags(row, lang)  # optional add-on; empty unless enabled and risky
     skills = [text for kind, text in pairs if kind == "skill"]
     skills_html = ""
     if skills:
@@ -544,6 +546,7 @@ def _detail_html(row: dict, lang: str = "zh", keys: str = i18n.DEFAULT_KEYS) -> 
         '<div class="note-menu" id="skill-menu"></div>'
         f'<div class="hint">{_e(T("detail.skill_hint"))}</div>'
         '</div>',
+        authenticity_panel.detail_block(row, lang),  # optional add-on; empty unless enabled
     ]
 
     if row.get("is_excluded"):
@@ -1158,6 +1161,7 @@ def render_page(conn, config: dict, view: str, offset: int, limit: int,
                          for name, n, key in stat_items)
     run_note = _last_run_note(conn, lang, config)
     has_filters = any(k != SINCE_KEY for k in filters)
+    authenticity_panel.attach(page, config)     # optional add-on; no-op unless enabled
     if geo_error:
         cards = (f'<div class="empty geo-empty" id="geo-error" role="alert">'
                  f'<b>{_e(T("location.geo_invalid", geo=filters["geo"]))}</b>'

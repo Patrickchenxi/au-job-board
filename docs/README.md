@@ -20,6 +20,7 @@ English.
 | [public-configuration.md](public-configuration.md) | The configuration file, paths, sources and which files stay private |
 | [legacy-rule-profiles.md](legacy-rule-profiles.md) | The six rule profiles, per-rule switches and how to apply a change |
 | [eligibility-profiles.md](eligibility-profiles.md) | The separate, read-only `eligibility` section and command |
+| [authenticity.md](authenticity.md) | Optional job-ad scam risk (off by default): warning signs, points, the domain check and its limits |
 | [safety-and-sources.md](safety-and-sources.md) | Panel exposure, how listings are collected, platform terms and redistribution |
 | [demo.md](demo.md) | The offline synthetic demo |
 | [launchd-examples.md](launchd-examples.md) | macOS LaunchAgent templates for the panel and a scheduled run |
